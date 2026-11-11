@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from datetime import UTC, date, datetime
 
 DEFAULT_DB = "data/wildlife-radar.duckdb"
@@ -16,6 +17,23 @@ def _region(args: argparse.Namespace):
     from wildlife_radar.regions import load_region
 
     return load_region(args.region)
+
+
+def _statuses_path(args: argparse.Namespace, region):
+    """Curated statuses: ``--statuses``, the region pack's file, or one next to a region file."""
+    from pathlib import Path
+
+    from wildlife_radar.regions import region_dir
+
+    if getattr(args, "statuses", None):
+        path = Path(args.statuses)
+        if not path.exists():
+            raise SystemExit(f"error: {path} not found")
+        return path
+    candidates = [region_dir(region.id) / "statuses.yaml"]
+    if Path(args.region).suffix:
+        candidates.append(Path(args.region).parent / "statuses.yaml")
+    return next((p for p in candidates if p.exists()), None)
 
 
 def _registry(args: argparse.Namespace):
@@ -164,12 +182,19 @@ def cmd_build_tiers(args: argparse.Namespace) -> int:
         RegionStatusFile,
         build_tier_table,
     )
-    from wildlife_radar.regions import region_dir
     from wildlife_radar.storage import ObservationStore
 
     region = _region(args)
+    statuses = _statuses_path(args, region)
+    if statuses is None:
+        print(
+            "warning: no curated statuses file found (regions/<id>/statuses.yaml, a "
+            "statuses.yaml next to the region file, or --statuses). Taxa listed only there "
+            "(e.g. state-listed populations) will not be raised.",
+            file=sys.stderr,
+        )
     with ObservationStore(args.db) as store:
-        providers = [RegionStatusFile(region_dir(region.id) / "statuses.yaml")]
+        providers = [RegionStatusFile(statuses)] if statuses else []
         if not args.offline:
             from wildlife_radar.connectors.inaturalist_taxa import InatTaxonStatusProvider
 
@@ -187,7 +212,16 @@ def cmd_build_tiers(args: argparse.Namespace) -> int:
     counts: dict[str, int] = {}
     for d in decisions.values():
         counts[d.tier.name] = counts.get(d.tier.name, 0) + 1
-    print(json.dumps({"taxa": len(decisions), "tiers": counts}, indent=2))
+    print(
+        json.dumps(
+            {
+                "taxa": len(decisions),
+                "tiers": counts,
+                "curated_statuses": str(statuses) if statuses else None,
+            },
+            indent=2,
+        )
+    )
     if args.offline:
         print("note: offline mode — taxa without a completed status lookup fail closed (COARSE)")
     return 0
@@ -342,6 +376,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("build-tiers", help="look up statuses and assign sensitivity tiers")
     common(p)
     p.add_argument("--offline", action="store_true", help="skip network status lookups")
+    p.add_argument("--statuses", help="curated statuses YAML (default: the region pack's)")
     p.set_defaults(func=cmd_build_tiers)
 
     p = sub.add_parser("query", help="query the baseline (policy-enforced)")

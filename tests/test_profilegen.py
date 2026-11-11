@@ -620,3 +620,65 @@ def test_bulk_crosswalk_asks_wikidata_first_and_feeds_tiers(synthetic_store):
     build_tier_table(store.conn, region_id="socal", scopes=["global"], providers=[recorder])
     assert recorder.seen["raritas-orientalis"] == "900"
     assert recorder.seen["commonus-ubiquitus"] is None
+
+
+def test_same_epithet_tolerates_gender_agreement():
+    from wildlife_radar.profilegen.identity import same_epithet
+
+    assert same_epithet("paxillifer", "paxillifera")
+    assert same_epithet("cinereus", "cinerea")
+    assert same_epithet("nivosus", "nivosus")
+    assert not same_epithet("nivosus", "alexandrinus")
+    assert not same_epithet("alba", "albus") or len("alba") >= 5  # short epithets are exact
+
+
+def test_inat_search_and_wikidata_synonyms():
+    def services(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "sparql" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "results": {
+                        "bindings": [
+                            {
+                                "key": {"value": "Novus genus"},
+                                "item": {"value": "http://www.wikidata.org/entity/Q5"},
+                                "synonymNames": {"value": "Vetus genus"},
+                            }
+                        ]
+                    }
+                },
+            )
+        if request.url.path.endswith("/taxa"):
+            assert request.url.params["q"] == "Novus genus"
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "id": 7,
+                            "name": "Alius genus",
+                            "rank": "species",
+                            "matched_term": "Novus genus",
+                        },
+                        {
+                            "id": 8,
+                            "name": "Alius genus minor",
+                            "rank": "subspecies",
+                            "matched_term": "Novus genus minor",
+                        },
+                    ]
+                },
+            )
+        return httpx.Response(
+            200, json={"results": [{"id": 7, "name": "Alius genus", "rank": "species"}]}
+        )
+
+    resolver = IdentityResolver(
+        client=make_client(transport=httpx.MockTransport(services)), limiter=RateLimiter(0)
+    )
+    (ident,) = resolver.resolve_many(["Novus genus"], gbif="fallback")
+    assert "Vetus genus" in ident.synonyms  # original combination / synonym from Wikidata
+    assert ident.ids["inaturalist"] == "7" and ident.verified["inaturalist"]
+    assert "vetus-genus" in ident.alias_ids and "alius-genus" in ident.alias_ids
