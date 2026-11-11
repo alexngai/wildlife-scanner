@@ -582,19 +582,24 @@ Policy is part of the framework, not a feature. All outputs (API, exports, tiles
 
 **Frontend (later):** TypeScript; MapLibre GL + deck.gl H3 layers.
 
+The layout as built in Phase 0 is a single package with subpackages. It can be split into separate distributions later if needed.
+
 ```
 wildlife-radar/
-  packages/
-    core/          # entities, schemas, H3/time utils, as-of semantics
-    connectors/    # one module per source (global/, regions/socal/)
-    signals/       # signal definitions + derivation DAG
-    profiles/      # profile schema, inheritance, generation pipeline, templates/
-    models/        # prior, terms, nowcast, detect, observation processes, fitting
-    policy/        # tiers, windows, egress filter, license ledger
-    evaluation/    # backtests, baselines, scorecards
-    api/           # FastAPI service
-  profiles/        # versioned profile documents (generated + curated)
-  regions/socal/   # region pack: places, regulations, policy overrides
+  src/wildlife_radar/
+    core/          # entities & schemas, H3/time utils, licenses, methods (as-of semantics)
+    connectors/    # one module per source: inaturalist, gbif, noaa_coops, astronomy
+    signals/       # signal registry (DAG), as-of store, derived-signal helpers
+    profiles/      # profile schema + inheritance loader (generation pipeline: Phase 2)
+    models/        # additive log-odds structure (priors/terms/nowcast fitting: Phase 1+)
+    policy/        # tiers, fail-closed assignment, windows/overrides, egress filter
+    evaluation/    # scoring rules, calibration, baselines, forward-in-time splits
+    regions.py     # region-pack loader
+    cli.py         # operator CLI
+    (api/)         # FastAPI service — Phase 1
+  profiles/        # versioned profile documents (templates/ + species/)
+  regions/socal/   # region pack: places, tide stations, status scopes
+  tests/
   docs/
 ```
 
@@ -604,7 +609,7 @@ wildlife-radar/
 
 | Phase | Deliverable | Validates |
 |---|---|---|
-| **0 — Skeleton** | Core schemas; H3 and as-of utilities; 3–4 connectors (GBIF snapshot, iNaturalist, NOAA tides, astronomy); policy filter stub; evaluation harness stub | The contracts |
+| **0 — Skeleton** ✅ | Core schemas; H3 and as-of utilities; connectors (GBIF search + snapshot-row parser, iNaturalist, NOAA tides, astronomy); policy tiers, assignment and egress filter; evaluation harness basics; draft profiles for the five validation species; `socal` region pack | The contracts |
 | **1 — Baseline for everything (SoCal)** | Level-0 priors for all SoCal species with enough GBIF/iNat data; sparse store; place-first "most likely / special here" and species-first maps via API | "Any species" + both query modes |
 | **2 — Profiles** | Generation pipeline (Wikidata → traits → LLM extraction with citations); guild templates; auto policy tiering; review workflow | Metadata-driven profiles |
 | **3 — Conditions and live** | Signal DAG with ocean, weather and astronomy; Level 1–2 for the five validation species; hypothesis scorecard | Fusion + honest testing |
