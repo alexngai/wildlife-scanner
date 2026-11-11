@@ -117,7 +117,12 @@ def cmd_build_tiers(args: argparse.Namespace) -> int:
             from wildlife_radar.connectors.inaturalist_taxa import InatTaxonStatusProvider
 
             providers.append(
-                CachedStatusProvider(store.conn, InatTaxonStatusProvider(region.inat_place_scopes))
+                CachedStatusProvider(
+                    store.conn,
+                    InatTaxonStatusProvider(
+                        region.inat_place_scopes, innermost_place=region.inat_innermost_place
+                    ),
+                )
             )
         decisions = build_tier_table(
             store.conn, region_id=region.id, scopes=region.scopes, providers=providers

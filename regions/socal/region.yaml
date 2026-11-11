@@ -13,11 +13,13 @@ scopes:
   - ca-southern-central-coast
   - socal
 
-# iNaturalist place ids → status scopes. Statuses scoped to other places are ignored
-# (verify ids against the iNaturalist places API before relying on them).
+# iNaturalist places that contain the region (United States = 1, California = 14; verified
+# against the live API). Statuses for places inside California also apply, conservatively;
+# statuses for other places (e.g. other states) are ignored.
 inat_place_scopes:
   "1": us
   "14": us-ca
+inat_innermost_place: "14"
 
 tide_stations:
   - {station_id: "9410230", name: "La Jolla (Scripps Pier)", lat: 32.867, lon: -117.257}

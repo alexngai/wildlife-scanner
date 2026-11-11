@@ -93,11 +93,18 @@ class BaselineConfig:
     """Records that aren't evidence of encounterable wild presence (zoos and gardens, fossils,
     museum specimens) — and whose collecting trips aren't comparable effort units."""
 
+    exclude_licenses: tuple[str, ...] = ("ALL-RIGHTS-RESERVED", "UNKNOWN")
+    """Records whose license doesn't allow publishing derived products (licensing.md §3)."""
+
     def basis_filter(self) -> str:
-        if not self.exclude_basis:
-            return "TRUE"
-        quoted = ", ".join("'" + b.replace("'", "''") + "'" for b in self.exclude_basis)
-        return f"(basis_of_record IS NULL OR basis_of_record NOT IN ({quoted}))"
+        clauses = []
+        if self.exclude_basis:
+            quoted = ", ".join("'" + b.replace("'", "''") + "'" for b in self.exclude_basis)
+            clauses.append(f"(basis_of_record IS NULL OR basis_of_record NOT IN ({quoted}))")
+        if self.exclude_licenses:
+            quoted = ", ".join("'" + b.replace("'", "''") + "'" for b in self.exclude_licenses)
+            clauses.append(f"license_id NOT IN ({quoted})")
+        return " AND ".join(clauses) or "TRUE"
 
     model_version: str = "baseline-v0"
 

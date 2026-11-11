@@ -181,3 +181,15 @@ def test_specimens_and_captives_are_excluded():
         ).fetchall()
     }
     assert "canis-lupus" in taxa
+
+
+def test_restricted_licenses_are_excluded():
+    from wildlife_radar.core.licenses import ALL_RIGHTS_RESERVED
+
+    world = SyntheticWorld(seed=4, observers=10, visits_per_observer=20)
+    obs = [o.model_copy(update={"license": ALL_RIGHTS_RESERVED}) for o in world.generate()]
+    store = ObservationStore()
+    store.add(obs)
+    assert build_baseline(store.conn, region_id="arr", bbox=world.bbox).taxa == 0
+    relaxed = BaselineConfig(exclude_licenses=())
+    assert build_baseline(store.conn, region_id="arr2", bbox=world.bbox, config=relaxed).taxa > 0
