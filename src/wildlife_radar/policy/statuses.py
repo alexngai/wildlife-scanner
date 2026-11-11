@@ -24,6 +24,7 @@ import duckdb
 import yaml
 from pydantic import BaseModel, ConfigDict
 
+from wildlife_radar.core.taxa import species_id_from_name
 from wildlife_radar.core.time import utcnow
 from wildlife_radar.policy.assign import (
     ConservationStatus,
@@ -61,6 +62,8 @@ class TaxonInfo(BaseModel):
     taxon_id: str
     scientific_name: str
     inat_taxon_id: str | None = None
+    aliases: tuple[str, ...] = ()
+    """Other internal ids of the same concept (renamed taxa), from the identity crosswalk."""
 
 
 class StatusLookup(BaseModel):
@@ -123,7 +126,12 @@ class RegionStatusFile:
     def lookup_many(self, taxa: Iterable[TaxonInfo]) -> dict[str, StatusLookup | None]:
         return {
             t.taxon_id: StatusLookup(
-                statuses=tuple(self._by_taxon.get(t.taxon_id, ())), source=self.name
+                statuses=tuple(
+                    s
+                    for key in dict.fromkeys((t.taxon_id, *t.aliases))
+                    for s in self._by_taxon.get(key, ())
+                ),
+                source=self.name,
             )
             for t in taxa
         }
@@ -180,6 +188,25 @@ def observed_geoprivacy(conn: duckdb.DuckDBPyConnection) -> dict[str, str | None
     return {taxon_id: most_severe_geoprivacy(values) for taxon_id, values in rows}
 
 
+def identity_crosswalk(
+    conn: duckdb.DuckDBPyConnection,
+) -> dict[str, tuple[str | None, tuple[str, ...]]]:
+    """``query name → (verified iNaturalist id, alias ids)`` from cached identities."""
+    if not conn.execute(
+        "SELECT count(*) FROM information_schema.tables WHERE table_name = 'taxon_identity'"
+    ).fetchone()[0]:
+        return {}
+    out: dict[str, tuple[str | None, tuple[str, ...]]] = {}
+    for name, raw in conn.execute("SELECT query_name, record FROM taxon_identity").fetchall():
+        rec = json.loads(raw)
+        inat = rec.get("ids", {}).get("inaturalist")
+        verified = rec.get("verified", {}).get("inaturalist")
+        names = [rec.get("accepted_name"), rec.get("query_name"), *rec.get("synonyms", [])]
+        aliases = [rec.get("taxon_id"), *(species_id_from_name(n, "species") for n in names if n)]
+        out[name] = (inat if verified else None, tuple(dict.fromkeys(a for a in aliases if a)))
+    return out
+
+
 def build_tier_table(
     conn: duckdb.DuckDBPyConnection,
     *,
@@ -191,25 +218,15 @@ def build_tier_table(
     """Automatic tier for every taxon with a baseline in ``region_id``; persisted to ``tiers``."""
     conn.execute(TIERS_SCHEMA)
     now = now or utcnow()
-    # Verified iNaturalist ids from the identity crosswalk (profilegen) beat name searches.
-    crosswalk: dict[str, str] = {}
-    if conn.execute(
-        "SELECT count(*) FROM information_schema.tables WHERE table_name = 'taxon_identity'"
-    ).fetchone()[0]:
-        crosswalk = dict(
-            conn.execute(
-                """
-                SELECT query_name, record->>'$.ids.inaturalist' FROM taxon_identity
-                WHERE (record->>'$.verified.inaturalist')::BOOLEAN
-                  AND record->>'$.ids.inaturalist' IS NOT NULL
-                """
-            ).fetchall()
-        )
+    # The identity crosswalk (profilegen) supplies verified iNaturalist ids, which beat name
+    # searches, and aliases, so curated statuses keyed by another name of the concept apply.
+    crosswalk = identity_crosswalk(conn)
     taxa = [
         TaxonInfo(
             taxon_id=t,
             scientific_name=name or t,
-            inat_taxon_id=inat or crosswalk.get(name or ""),
+            inat_taxon_id=inat or crosswalk.get(name or "", (None, ()))[0],
+            aliases=crosswalk.get(name or "", (None, ()))[1],
         )
         for t, name, inat in conn.execute(
             "SELECT DISTINCT taxon_id, scientific_name, inat_taxon_id FROM prior_taxa "

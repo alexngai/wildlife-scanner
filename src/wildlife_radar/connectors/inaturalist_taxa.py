@@ -111,10 +111,15 @@ class InatTaxonStatusProvider:
             {"q": taxon.scientific_name, "rank": "species", "is_active": "true", "per_page": 10},
             self.limiter,
         )
-        for result in payload.get("results") or []:
-            if (result.get("name") or "").lower() == taxon.scientific_name.lower():
-                return str(result["id"])
-        return None
+        name = taxon.scientific_name.lower()
+        # Exact name, or a synonym iNaturalist files under its current name (matched_term).
+        hits = {
+            str(r["id"])
+            for r in payload.get("results") or []
+            if r.get("rank", "species") == "species"  # the query already asks for species
+            and name in ((r.get("name") or "").lower(), (r.get("matched_term") or "").lower())
+        }
+        return hits.pop() if len(hits) == 1 else None
 
     def lookup_many(self, taxa: Iterable[TaxonInfo]) -> dict[str, StatusLookup | None]:
         out: dict[str, StatusLookup | None] = {}

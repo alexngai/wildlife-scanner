@@ -208,3 +208,47 @@ def test_tier_service_applies_profile_windows():
     assert svc.get("atractoscion-nobilis", date(2026, 8, 1)) is PolicyTier.OPEN
     assert svc.get("unknown-taxon", date(2026, 8, 1)) is PolicyTier.COARSE
     assert svc.get(None, date(2026, 8, 1)) is PolicyTier.COARSE
+
+
+def test_curated_statuses_match_crosswalk_aliases(tmp_path):
+    # A curated entry keyed by an older name still applies after a rename (via the crosswalk).
+    import json as _json
+
+    from wildlife_radar.baseline import build_baseline
+    from wildlife_radar.policy.statuses import RegionStatusFile, build_tier_table
+    from wildlife_radar.storage import ObservationStore
+    from wildlife_radar.synthetic import SyntheticWorld
+
+    world = SyntheticWorld()
+    store = ObservationStore()
+    store.add(world.generate())
+    build_baseline(store.conn, region_id="socal", bbox=world.bbox)
+    store.conn.execute(
+        "CREATE TABLE taxon_identity (query_name VARCHAR PRIMARY KEY, taxon_id VARCHAR, "
+        "record JSON, fetched_at TIMESTAMP)"
+    )
+    record = {
+        "query_name": "Raritas orientalis",
+        "taxon_id": "raritas-orientalis",
+        "accepted_name": "Raritas orientalis",
+        "synonyms": ["Rarus antiquus"],
+        "ids": {},
+        "verified": {},
+    }
+    store.conn.execute(
+        "INSERT INTO taxon_identity VALUES ('Raritas orientalis', 'raritas-orientalis', ?, NULL)",
+        [_json.dumps(record)],
+    )
+    path = tmp_path / "statuses.yaml"
+    path.write_text(
+        "statuses:\n  - {taxon_id: rarus-antiquus, authority: ESA, code: E, scope: us}\n",
+        encoding="utf-8",
+    )
+    decisions = build_tier_table(
+        store.conn,
+        region_id="socal",
+        scopes=["global", "us"],
+        providers=[RegionStatusFile(path), StaticStatusProvider()],
+    )
+    assert decisions["raritas-orientalis"].tier >= PolicyTier.GENERALIZED
+    assert decisions["commonus-ubiquitus"].tier == PolicyTier.OPEN

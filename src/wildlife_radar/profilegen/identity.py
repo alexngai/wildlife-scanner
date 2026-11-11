@@ -19,6 +19,7 @@ polite to the services.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable, Sequence
 from datetime import datetime
 from typing import Literal
@@ -67,6 +68,20 @@ CREATE TABLE IF NOT EXISTS taxon_identity (
 """
 
 SPARQL_BATCH = 100
+
+
+_ENDINGS = re.compile(r"(erum|era|er|us|um|is|a|e|i)$")
+
+
+def same_epithet(a: str, b: str) -> bool:
+    """Epithets equal up to Latin gender agreement (``paxillifer``/``paxillifera``,
+    ``cinereus``/``cinerea``), which changes when a species moves genus."""
+    a, b = a.lower(), b.lower()
+    if a == b:
+        return True
+    if min(len(a), len(b)) < 5:
+        return False
+    return _ENDINGS.sub("", a) == _ENDINGS.sub("", b)
 
 
 class TaxonIdentity(BaseModel):
@@ -196,6 +211,7 @@ class IdentityResolver:
         return f"""
 SELECT ?key ?item ?name {selects}
   (GROUP_CONCAT(DISTINCT ?status; separator="|") AS ?statuses)
+  (GROUP_CONCAT(DISTINCT ?synName; separator="|") AS ?synonymNames)
   (SAMPLE(?article) AS ?wiki) (SAMPLE(?common) AS ?commonName)
 WHERE {{
   VALUES ?key {{ {literals} }}
@@ -203,6 +219,8 @@ WHERE {{
   OPTIONAL {{ ?item wdt:P225 ?name }}
   {optionals}
   OPTIONAL {{ ?item wdt:P141 ?status }}
+  OPTIONAL {{ {{ ?item wdt:P1403|wdt:P1420 ?syn }} UNION {{ ?syn wdt:P1420|wdt:P12765 ?item }}
+             ?syn wdt:P225 ?synName }}
   OPTIONAL {{ ?item wdt:P1843 ?common FILTER(lang(?common) = "en") }}
   OPTIONAL {{ ?article schema:about ?item ; schema:isPartOf <https://en.wikipedia.org/> }}
 }}
@@ -255,6 +273,10 @@ GROUP BY ?key ?item ?name
             ident.wikipedia_title = path.rsplit("/wiki/", 1)[-1].replace("_", " ")
         if row.get("commonName"):
             ident.common_name = row["commonName"]
+        # Original combination (P1403) and taxon synonyms (P1420, and their reverse links).
+        for synonym in (row.get("synonymNames") or "").split("|"):
+            if synonym and synonym not in ident.names:
+                ident.synonyms.append(synonym)
 
     # -- iNaturalist ----------------------------------------------------------------------
     def _inat_records(self, ids: list[str]) -> dict[str, dict]:
@@ -299,11 +321,16 @@ GROUP BY ?key ?item ?name
                 ident.notes.append(f"iNaturalist id {inat_id} not found")
                 continue
             name = record.get("name") or ""
-            epithets = {n.split()[-1] for n in ident.names if " " in n}
+            epithets = [n.split()[-1] for n in ident.names if " " in n]
             if name in ident.names:
                 ident.verified["inaturalist"] = True
-            elif record.get("rank") == "species" and name.split()[-1] in epithets:
-                # Same epithet in another genus: a genus move. Keep the name as a synonym.
+            elif (
+                record.get("rank") == "species"
+                and " " in name
+                and any(same_epithet(name.split()[-1], e) for e in epithets)
+            ):
+                # Same epithet (up to gender agreement), possibly in another genus: a genus
+                # move or a spelling variant. Keep the name as a synonym.
                 ident.verified["inaturalist"] = True
                 ident.synonyms.append(name)
                 ident.notes.append(f"iNaturalist uses the name {name!r}")
@@ -314,6 +341,41 @@ GROUP BY ?key ?item ?name
             if record.get("preferred_common_name"):
                 # iNaturalist's preferred name beats Wikidata's arbitrary P1843 sample.
                 ident.common_name = record["preferred_common_name"]
+
+    def search_inat(self, idents: Iterable[TaxonIdentity]) -> None:
+        """Find iNaturalist ids by name for identities without one.
+
+        Accepts an active species whose name, or the synonym it matched (``matched_term``),
+        equals one of the identity's names; verification then runs as for crosswalk ids.
+        """
+        for ident in idents:
+            if "inaturalist" in ident.ids:
+                continue
+            for name in ident.names[:3]:
+                try:
+                    payload = get_json(
+                        self.client,
+                        INAT_TAXA_URL,
+                        {"q": name, "rank": "species", "is_active": "true", "per_page": 10},
+                        self.limiter,
+                    )
+                except ConnectorError:
+                    break
+                hits = [
+                    r
+                    for r in payload.get("results") or []
+                    if r.get("rank") == "species"
+                    and name.lower()
+                    in ((r.get("name") or "").lower(), (r.get("matched_term") or "").lower())
+                ]
+                if len({r["id"] for r in hits}) == 1:
+                    ident.ids["inaturalist"] = str(hits[0]["id"])
+                    if hits[0].get("name") != name:
+                        ident.notes.append(
+                            f"iNaturalist lists {name!r} under {hits[0].get('name')!r}"
+                        )
+                        ident.synonyms.append(hits[0]["name"])
+                    break
 
     # -- Orchestration --------------------------------------------------------------------
     def resolve_many(
@@ -359,6 +421,7 @@ GROUP BY ?key ?item ?name
             if "gbif" in ident.ids:
                 ident.verified.setdefault("gbif", True)
         if self.verify_inat:
+            self.search_inat(resolved)
             self.verify_inat_ids(resolved)
         return idents
 
