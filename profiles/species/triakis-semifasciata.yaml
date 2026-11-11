@@ -1,0 +1,29 @@
+id: triakis-semifasciata
+kind: species
+scientific_name: Triakis semifasciata
+common_name: Leopard shark
+extends: [guild/marine-nearshore-fish]
+status: draft
+notes: Design-validation archetype for "dense data, strongly seasonal" (La Jolla aggregation).
+
+methods:
+  headline: snorkel
+  also: [scuba_dive, freedive]
+
+prior:
+  seasonal: elicited
+  peak: Jul–Oct
+
+signals:
+  sst:
+    signal: ocean.sst_c
+    direction: "+"
+    strength: strong
+    hypothesis: true
+
+provenance:
+  prior.seasonal:
+    source: docs/research/03-white-seabass-case-study.md
+    method: elicited
+    confidence: 0.3
+    evidence: Warm-season aggregation of mostly pregnant females at La Jolla Shores (UNVERIFIED).

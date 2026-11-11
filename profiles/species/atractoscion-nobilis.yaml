@@ -1,0 +1,86 @@
+id: atractoscion-nobilis
+kind: species
+scientific_name: Atractoscion nobilis
+common_name: White seabass
+extends: [guild/kelp-forest-pelagic-predator]
+status: draft
+
+traits:
+  activity_pattern: crepuscular
+  depth_m: [0, 50]
+
+methods: [scuba_dive, freedive]
+
+prior:
+  seasonal: elicited
+  peak: mid-May
+  citation: Aalbers 2008 (net-pen spawning study), via docs/research/03-white-seabass-case-study.md
+
+signals:
+  sst:
+    signal: ocean.sst_c
+    shape: optimum
+    range_c: [14, 18]
+    strength: moderate
+  hours_after_sunset:
+    signal: astro.hours_since_sunset
+    role: availability
+    shape: peak
+    at: 1
+    strength: strong
+  squid_light_index:
+    signal: species.market_squid_light_index
+    direction: "+"
+    strength: weak
+    hypothesis: true
+  lunar_illumination:
+    signal: astro.moon_illumination
+    direction: "-"
+    strength: weak
+    hypothesis: true
+
+sources:
+  cpfv_counts:
+    obs: catch_rate
+    status: partnership_pending
+    effort: angler_trips
+    footprint: landing_trip_zone
+  pier_acoustic:
+    obs: acoustic
+    status: partnership_pending
+  dive_logs:
+    obs: detection_nondetection
+    status: planned
+    method: scuba_dive
+
+policy:
+  windows:
+    - from: "03-15"
+      to: "06-15"
+      tier: 1
+      regions: [socal]
+      reason: >
+        Spawning season; the state cuts the bag limit to 1 south of Point Conception. Forecasts
+        here amount to maps of transient spawning aggregations.
+
+provenance:
+  prior.seasonal:
+    source: docs/research/03-white-seabass-case-study.md
+    method: elicited
+    confidence: 0.7
+    evidence: Spawning March–July, peak May, mostly within 2 h after sunset (Aalbers 2008).
+  signals.sst:
+    source: docs/research/03-white-seabass-case-study.md
+    method: elicited
+    confidence: 0.5
+    evidence: Tagged fish mean 15.2 °C; spawning observed ~15–18 °C.
+  signals.lunar_illumination:
+    source: docs/research/03-white-seabass-case-study.md
+    method: elicited
+    confidence: 0.3
+    evidence: Spawning occurred at all lunar phases; at most a small post-new-moon increase.
+  signals.squid_light_index:
+    source: docs/research/03-white-seabass-case-study.md
+    method: elicited
+    confidence: 0.3
+    evidence: Diet support plus fishing lore; never tested quantitatively.

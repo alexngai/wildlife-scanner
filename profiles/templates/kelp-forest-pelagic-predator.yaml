@@ -1,0 +1,16 @@
+id: guild/kelp-forest-pelagic-predator
+kind: template
+extends: [guild/marine-nearshore-fish]
+guilds: [kelp-forest-pelagic-predator]
+notes: Mobile, schooling predators that use kelp-bed edges (white seabass, yellowtail, barracuda).
+
+nowcast:
+  enabled: true
+  half_life_days: [2, 7]
+  spatial_km: 15
+
+signals:
+  kelp_canopy:
+    signal: habitat.kelp_canopy_area
+    direction: "+"
+    strength: moderate
