@@ -1,11 +1,14 @@
 """On-demand Level-0 estimates from the sparse statistics written by ``build_baseline``.
 
-Hierarchical Beta-Binomial shrinkage with ``A`` pseudo-visits per level::
+Hierarchical Beta-Binomial shrinkage with ``A`` pseudo-trials per level::
 
     p_region  = (k_region  + A · annual_rate) / (n_region  + A)
     p_context = (k_context + A · p_region)    / (n_context + A)
     p_parent  = (k_parent  + A · p_context)   / (n_parent  + A)
     p_cell    = (k_cell    + A · p_parent)    / (n_cell    + A)
+
+``n`` is the effort group's outings (outing-based classes) or the species' own survey trials
+(survey classes): effort rows carry a ``taxon_id`` only in the latter case.
 
 An estimate at a level stops the cascade there, so a coarse policy tier is answered with a
 genuinely coarse estimate (not an average of fine ones).
@@ -33,6 +36,7 @@ LEVEL_COLUMN = {"cell": "cell", "parent": "parent_cell", "context": "context_cel
 @dataclass(frozen=True)
 class Estimate:
     taxon_id: str
+    group_id: str
     cell: str
     week: int
     p: float
@@ -54,6 +58,7 @@ def estimate_query(
     shrinkage: float,
     *,
     taxon_ids: Sequence[str] | None = None,
+    groups: Sequence[str] | None = None,
     cells: Sequence[str] | None = None,
     cells_subquery: str | None = None,
     weeks: Sequence[int] | None = None,
@@ -63,12 +68,10 @@ def estimate_query(
     A = float(shrinkage)
     params: list = [region_id]
     where = ["t.region_id = ?"]
-    if taxon_ids is not None:
-        where.append(_in("t.taxon_id", taxon_ids))
-        params.extend(taxon_ids)
-    if cells is not None:
-        where.append(_in(f"cl.{col}", cells))
-        params.extend(cells)
+    for column, values in (("t.taxon_id", taxon_ids), ("t.group_id", groups), (f"cl.{col}", cells)):
+        if values is not None:
+            where.append(_in(column, values))
+            params.extend(values)
     if cells_subquery is not None:
         where.append(f"cl.{col} IN ({cells_subquery})")
 
@@ -84,13 +87,16 @@ def estimate_query(
     """
 
     def join(alias: str, lvl: int, cell_expr: str | None) -> str:
-        cell_cond_e = f"AND e{alias}.cell = {cell_expr}" if cell_expr else ""
-        cell_cond_h = f"AND h{alias}.cell = {cell_expr}" if cell_expr else ""
+        e, h = f"e{alias}", f"h{alias}"
+        cell_e = f"AND {e}.cell = {cell_expr}" if cell_expr else ""
+        cell_h = f"AND {h}.cell = {cell_expr}" if cell_expr else ""
         return f"""
-            LEFT JOIN prior_effort e{alias} ON e{alias}.region_id = ? AND e{alias}.level = {lvl}
-                AND e{alias}.group_id = f.group_id AND e{alias}.week = f.week {cell_cond_e}
-            LEFT JOIN prior_hits h{alias} ON h{alias}.region_id = ? AND h{alias}.level = {lvl}
-                AND h{alias}.taxon_id = f.taxon_id AND h{alias}.week = f.week {cell_cond_h}
+            LEFT JOIN prior_effort {e} ON {e}.region_id = ? AND {e}.level = {lvl}
+                AND {e}.group_id = f.group_id AND {e}.week = f.week {cell_e}
+                AND ({e}.taxon_id IS NULL OR {e}.taxon_id = f.taxon_id)
+            LEFT JOIN prior_hits {h} ON {h}.region_id = ? AND {h}.level = {lvl}
+                AND {h}.taxon_id = f.taxon_id AND {h}.group_id = f.group_id
+                AND {h}.week = f.week {cell_h}
         """
 
     joins = [join("r", LEVEL_REGION, None), join("2", LEVEL_CONTEXT, "f.c2")]
@@ -111,8 +117,7 @@ def estimate_query(
         f"b AS (SELECT *, (k2 + {A} * p_reg) / (n2 + {A}) AS p2 FROM a)",
     ]
     if level == "context":
-        final, n_eff, ref = "b", "n2", "p_reg"
-        p_expr = "p2"
+        final, n_eff, ref, p_expr = "b", "n2", "p_reg", "p2"
     elif level == "parent":
         stages.append(f"c AS (SELECT *, (k1 + {A} * p2) / (n1 + {A}) AS p1 FROM b)")
         final, n_eff, ref, p_expr = "c", "n1", "p2", "p1"
@@ -121,12 +126,10 @@ def estimate_query(
         stages.append(f"e AS (SELECT *, (k0 + {A} * p1) / (n0 + {A}) AS p0 FROM c)")
         final, n_eff, ref, p_expr = "e", "n0", "p2", "p0"
 
-    week_filter = ""
+    week_filter, week_params = "", []
     if weeks is not None:
         week_filter = f"WHERE {_in('week', weeks)}"
         week_params = list(weeks)
-    else:
-        week_params = []
 
     sql = f"""
         WITH frame AS (
@@ -138,10 +141,10 @@ def estimate_query(
         ),
         {", ".join(stages)},
         out AS (
-            SELECT taxon_id, x AS cell, week, {p_expr} AS p,
+            SELECT taxon_id, group_id, x AS cell, week, {p_expr} AS p,
                 p2 AS p_context, p_reg AS p_region,
                 {p_expr} / nullif({ref}, 0) AS lift,
-                {p_expr} / nullif(avg({p_expr}) OVER (PARTITION BY taxon_id, x), 0)
+                {p_expr} / nullif(avg({p_expr}) OVER (PARTITION BY taxon_id, group_id, x), 0)
                     AS seasonal_index,
                 {n_eff} AS n_eff, nr AS n_region
             FROM {final}

@@ -1,0 +1,28 @@
+# Dataset registry for the socal region pack: how each dataset observes.
+#
+# Overrides automatic effort-class assignment (eBird → checklist; GBIF SAMPLING_EVENT or
+# datasets recording absences → survey; machine observations → sensor; otherwise casual).
+# `exclude: true` removes programs whose records aren't wildlife encounters.
+# Effort classes: checklist, casual, sensor, dive_survey, intertidal_survey, survey.
+
+datasets:
+  154d6192-bea0-4bcb-ab58-1c573081591d:
+    name: Monitoring and Evaluation of Kelp Forest Ecosystems in the MLPA MPA Network
+    effort_class: dive_survey
+  4ef2bed0-d40f-49c9-bb64-c46a301a5a72:
+    name: Reef Check California — rocky reef fishes, invertebrates and algae
+    effort_class: dive_survey
+  58ffefab-20aa-4cec-b0c0-dd7330ed7280:
+    name: MARINe/PISCO Coastal Biodiversity Surveys — point contact
+    effort_class: intertidal_survey
+  ca83b8e3-d395-4895-8d1f-483865f95de7:
+    name: MARINe/PISCO Coastal Biodiversity Surveys — quadrats
+    effort_class: intertidal_survey
+  350f00a7-db1f-4133-bc07-71de716339da:
+    name: Rockfish Recruitment and Ecosystem Assessment Survey (catch data)
+    exclude: true
+    reason: Trawl catch, not an encounter by divers or observers.
+  1b72b75a-fd98-42de-9d9d-c87c47631c0d:
+    name: California Harmful Algal Bloom Monitoring and Alert Program
+    exclude: true
+    reason: Plankton monitoring, not wildlife encounters.

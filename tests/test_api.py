@@ -106,8 +106,9 @@ def test_place_lists_respect_policy(client):
     r = client.get(
         "/nearby", params={**LA_JOLLA, "date": "2026-05-15", "life_list": "commonus-ubiquitus"}
     ).json()
-    assert [g["group"] for g in r["groups"]] == ["birds"]
+    assert [g["group"] for g in r["groups"]] == ["birds:casual"]
     birds = r["groups"][0]
+    assert birds["taxon_group"] == "birds" and birds["method"] == "observer_visit"
     ranked = {
         i["taxon_id"] for k in ("most_likely", "special_here", "peaking_now") for i in birds[k]
     }
