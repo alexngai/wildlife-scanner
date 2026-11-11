@@ -191,10 +191,29 @@ def build_tier_table(
     """Automatic tier for every taxon with a baseline in ``region_id``; persisted to ``tiers``."""
     conn.execute(TIERS_SCHEMA)
     now = now or utcnow()
+    # Verified iNaturalist ids from the identity crosswalk (profilegen) beat name searches.
+    crosswalk: dict[str, str] = {}
+    if conn.execute(
+        "SELECT count(*) FROM information_schema.tables WHERE table_name = 'taxon_identity'"
+    ).fetchone()[0]:
+        crosswalk = dict(
+            conn.execute(
+                """
+                SELECT query_name, record->>'$.ids.inaturalist' FROM taxon_identity
+                WHERE (record->>'$.verified.inaturalist')::BOOLEAN
+                  AND record->>'$.ids.inaturalist' IS NOT NULL
+                """
+            ).fetchall()
+        )
     taxa = [
-        TaxonInfo(taxon_id=t, scientific_name=name or t, inat_taxon_id=inat)
+        TaxonInfo(
+            taxon_id=t,
+            scientific_name=name or t,
+            inat_taxon_id=inat or crosswalk.get(name or ""),
+        )
         for t, name, inat in conn.execute(
-            "SELECT taxon_id, scientific_name, inat_taxon_id FROM prior_taxa WHERE region_id = ?",
+            "SELECT DISTINCT taxon_id, scientific_name, inat_taxon_id FROM prior_taxa "
+            "WHERE region_id = ?",
             [region_id],
         ).fetchall()
     ]

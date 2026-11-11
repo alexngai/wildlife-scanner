@@ -25,6 +25,8 @@ This note records what that changes. It is based on the research in [`../researc
 | IUCN Red List API / spatial data | Non-commercial; commercial via IBAT | Blocked | ⚠ Likely usable, but **check the limits on redistributing raw data and range polygons** and the registration requirements |
 | BirdLife range maps | Non-commercial, by request | Blocked | ⚠ Request per purpose; raw maps can't be redistributed |
 | CITES Species+ | Commercial use needs written permission | Permission needed | ✅ Likely |
+| TetrapodTraits (Zenodo 11303604) | CC BY 4.0 | ✅ | ✅ Imported into generated profiles with attribution; values carry `CC-BY-4.0` in their provenance |
+| Wikidata | CC0 | ✅ | ✅ Identity crosswalk (ids, sitelinks, referenced IUCN categories as tier hints only) |
 | **eBird Observation Dataset via GBIF** | **CC BY 4.0** (verified on 2026-11-01 snapshot records, dataset `4fa7b334-…`) | ✅ | ✅ Presence-only eBird data **without** the eBird API/EBD terms. It has no effort or non-detections, updates roughly annually, and sensitive species are withheld. Our Level-0 baseline only needs presence records. |
 
 ## 2. What being non-commercial does *not* fix
@@ -38,7 +40,7 @@ This note records what that changes. It is based on the research in [`../researc
 | Fishing-report sites (e.g., sportfishingreport.com) | Terms prohibit automated access and redistribution, whatever the purpose | Partnership only; never scrape |
 | CNDDB (CDFW) | Subscription license; no republication | Use only as a sensitivity input, if at all |
 | BIEN | CC BY-NC-ND (no derivatives) | Avoid |
-| Wikipedia text | CC BY-SA: displayed excerpts are share-alike | Unchanged: store facts with citations; display text in a BY-SA component |
+| Wikipedia text | CC BY-SA: displayed excerpts are share-alike | Unchanged: store facts with citations; display text in a BY-SA component. Implemented in `profilegen`: extracted values carry `CC-BY-SA-4.0` taint and cite revision + character range. Quoted evidence stays in the git-ignored `data/profiles/extractions/` audit files |
 | Movebank, Wildlife Insights NC projects, partner data | Per-study / per-agreement terms | Unchanged |
 | Ethical limits (e.g., CDFW's daily collared-wolf tracker) | Not a license issue | Unchanged: never redistribute |
 

@@ -565,3 +565,58 @@ def test_generator_end_to_end(tmp_path, synthetic_store):
     assert audit["checks"][0]["accepted"] is True
     assert yaml.safe_load(reports[0].path.read_text())["id"] == "felis-exemplaris"
     assert store.conn.execute("SELECT count(*) FROM taxon_identity").fetchone()[0] >= 1
+
+
+def test_bulk_crosswalk_asks_wikidata_first_and_feeds_tiers(synthetic_store):
+    from wildlife_radar.policy.statuses import StatusLookup, build_tier_table
+    from wildlife_radar.profilegen.identity import save_identities
+
+    calls = {"gbif": 0}
+
+    def services(request: httpx.Request) -> httpx.Response:
+        if "species/match" in str(request.url):
+            calls["gbif"] += 1
+            return httpx.Response(200, json={"matchType": "NONE"})
+        if "sparql" in str(request.url):
+            return httpx.Response(
+                200,
+                json={
+                    "results": {
+                        "bindings": [
+                            {
+                                "key": {"value": "Raritas orientalis"},
+                                "item": {"value": "http://www.wikidata.org/entity/Q9"},
+                                "inaturalists": {"value": "900"},
+                            }
+                        ]
+                    }
+                },
+            )
+        return httpx.Response(
+            200, json={"results": [{"id": 900, "name": "Raritas orientalis", "rank": "species"}]}
+        )
+
+    resolver = IdentityResolver(
+        client=make_client(transport=httpx.MockTransport(services)), limiter=RateLimiter(0)
+    )
+    idents = resolver.resolve_many(["Raritas orientalis", "Unknown thing"], gbif="fallback")
+    assert calls["gbif"] == 1  # only the name Wikidata didn't know
+    assert idents[0].ids["inaturalist"] == "900" and idents[0].verified["inaturalist"]
+    _, store = synthetic_store
+    save_identities(store.conn, idents)
+
+    class Recorder:
+        name = "recorder"
+        authoritative = True
+
+        def __init__(self):
+            self.seen = {}
+
+        def lookup_many(self, taxa):
+            self.seen = {t.taxon_id: t.inat_taxon_id for t in taxa}
+            return {t.taxon_id: StatusLookup(source="recorder") for t in taxa}
+
+    recorder = Recorder()
+    build_tier_table(store.conn, region_id="socal", scopes=["global"], providers=[recorder])
+    assert recorder.seen["raritas-orientalis"] == "900"
+    assert recorder.seen["commonus-ubiquitus"] is None

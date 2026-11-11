@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable, Sequence
 from datetime import datetime
+from typing import Literal
 
 import duckdb
 import httpx
@@ -61,7 +62,7 @@ IUCN_CATEGORY_ITEMS = {
 
 IDENTITY_SCHEMA = """
 CREATE TABLE IF NOT EXISTS taxon_identity (
-    taxon_id VARCHAR PRIMARY KEY, query_name VARCHAR, record JSON, fetched_at TIMESTAMP
+    query_name VARCHAR PRIMARY KEY, taxon_id VARCHAR, record JSON, fetched_at TIMESTAMP
 )
 """
 
@@ -315,12 +316,36 @@ GROUP BY ?key ?item ?name
                 ident.common_name = record["preferred_common_name"]
 
     # -- Orchestration --------------------------------------------------------------------
-    def resolve_many(self, names: Sequence[str]) -> list[TaxonIdentity]:
-        idents = [self.gbif_match(n) for n in names]
+    def resolve_many(
+        self, names: Sequence[str], *, gbif: Literal["always", "fallback"] = "always"
+    ) -> list[TaxonIdentity]:
+        """Resolve names. ``gbif="fallback"`` (bulk crosswalks) asks Wikidata first and calls
+        the per-name GBIF matcher only for names Wikidata doesn't know."""
+        if gbif == "fallback":
+            try:
+                by_query = self.wikidata_rows(sorted(set(names)), "name")
+            except ConnectorError:
+                by_query = {}
+            idents = []
+            for name in names:
+                if by_query.get(name):
+                    ident = TaxonIdentity(
+                        query_name=name,
+                        accepted_name=name,
+                        rank="species",
+                        taxon_id=species_id_from_name(name, "species"),
+                    )
+                    self.apply_wikidata(ident, by_query[name])
+                else:
+                    ident = self.gbif_match(name)
+                idents.append(ident)
+        else:
+            idents = [self.gbif_match(n) for n in names]
         resolved = [i for i in idents if i.resolved]
         try:
-            by_name = self.wikidata_rows(sorted({i.accepted_name for i in resolved}), "name")
-            for ident in resolved:
+            todo = [i for i in resolved if i.wikidata is None]
+            by_name = self.wikidata_rows(sorted({i.accepted_name for i in todo}), "name")
+            for ident in todo:
                 self.apply_wikidata(ident, by_name.get(ident.accepted_name, []))
             missing = [i for i in resolved if i.wikidata is None and "gbif" in i.ids]
             if missing:
@@ -342,14 +367,18 @@ GROUP BY ?key ?item ?name
 
 
 def save_identities(conn: duckdb.DuckDBPyConnection, idents: Iterable[TaxonIdentity]) -> int:
+    """Cache identities keyed by query name (several names may resolve to one concept)."""
     conn.execute(IDENTITY_SCHEMA)
     rows = [
-        (i.taxon_id, i.query_name, i.model_dump_json(by_alias=True), naive_utc(utcnow()))
+        (i.query_name, i.taxon_id, i.model_dump_json(by_alias=True), naive_utc(utcnow()))
         for i in idents
-        if i.taxon_id
     ]
     if rows:
-        conn.executemany("INSERT OR REPLACE INTO taxon_identity VALUES (?, ?, ?, ?)", rows)
+        conn.executemany(
+            "INSERT OR REPLACE INTO taxon_identity (query_name, taxon_id, record, fetched_at) "
+            "VALUES (?, ?, ?, ?)",
+            rows,
+        )
     return len(rows)
 
 
@@ -371,9 +400,21 @@ def load_identities(
     }
 
 
+def verified_inat_ids(conn: duckdb.DuckDBPyConnection) -> dict[str, str]:
+    """``query name → verified iNaturalist id`` from cached identities."""
+    conn.execute(IDENTITY_SCHEMA)
+    rows = conn.execute(
+        """
+        SELECT query_name, record->>'$.ids.inaturalist' FROM taxon_identity
+        WHERE (record->>'$.verified.inaturalist')::BOOLEAN
+        """
+    ).fetchall()
+    return {name: inat for name, inat in rows if inat}
+
+
 def identity_age(conn: duckdb.DuckDBPyConnection, taxon_id: str) -> datetime | None:
     conn.execute(IDENTITY_SCHEMA)
     row = conn.execute(
-        "SELECT fetched_at FROM taxon_identity WHERE taxon_id = ?", [taxon_id]
+        "SELECT max(fetched_at) FROM taxon_identity WHERE taxon_id = ?", [taxon_id]
     ).fetchone()
     return row[0] if row else None
