@@ -100,7 +100,25 @@ crosswalk           {wikidata, gbif, inat, ebird, itis, worms, ncbi, iucn, fishb
 guilds              ["kelp-forest-pelagic-predator", "large-terrestrial-carnivore", …]
 taxonomy_version    + synonym/split/lump history (so old observations map forward)
 ```
-Wikidata is the planned hub for crosswalks because it is CC0 and carries most external IDs. Splits and lumps need explicit handling: an observation recorded under the "old" concept must map to the right current taxon or taxa.
+**Identity sources:**
+- **Crosswalk hub:** Wikidata (CC0; carries iNat, GBIF, eBird, IUCN, ITIS, NCBI, WoRMS, FishBase and Avibase IDs). It is built from weekly dumps rather than live queries. Every ID is **verified both ways** against the source, because Wikidata has stale and wrong IDs.
+- **Canonical backbone:** Catalogue of Life XR (CC BY), pinned to an *annual* release, with monthly diffs tracked. GBIF.org switched its default taxonomy to COL XR in June 2026.
+- **Group-specific authorities:**
+  - birds: AviList / eBird-Clements
+  - marine: WoRMS
+  - US agency alignment: ITIS
+
+**We model taxon concepts, not names.** A name maps to a usage in a specific checklist version, which maps to a concept. Concepts are related by equal / includes / included-in / overlaps.
+
+Change events (eBird annual tables, iNat swaps/splits/merges, COL diffs) are ingested and applied:
+
+| Change | Handling |
+|---|---|
+| Swap (rename only) | Move the pointer |
+| Lump | Union of ranges; recompute traits |
+| Split | Each child inherits the parent's profile, marked *needs review*. Historical observations are reassigned by range. Children inherit the parent's sensitivity tier **or higher**, because splits often create narrow-range endemics. |
+
+Every profile field is stamped with the taxonomy version it was asserted under.
 
 ### Place and Cell
 - **Cell:** an H3 hexagon. Fields are stored at a small set of resolutions (e.g., res 5 ≈ 250 km², res 7 ≈ 5 km², res 9 ≈ 0.1 km²).
@@ -192,18 +210,70 @@ A species profile overrides only what differs. A **regional override** allows di
 | Body size, detectability class | Detection-model priors per method |
 
 ### 4.3 Generation pipeline
-1. **Resolve identity.** Wikidata plus the taxonomic backbones give the crosswalk and synonyms.
-2. **Pull structured traits** from trait databases, ranges from range sources, and status from status sources (exact sources and licenses: see `../research/07-*` when complete).
-3. **Extract unstructured knowledge** from Wikipedia and literature with an LLM: behavior, seasonality, habitat, diet, candidate signals. Every extracted field must carry:
-   - a citation (source + passage),
-   - a confidence,
-   - an extraction-model version.
-4. **Reconcile.** Precedence is curated databases > expert/community review > literature extraction > Wikipedia extraction. Conflicts are recorded, not silently resolved.
-5. **Validate:**
-   - schema checks;
-   - sanity checks against occurrence data (e.g., an extracted breeding season vs. the observed seasonal peak);
-   - flag disagreements for review.
-6. **Publish as a draft profile** with maturity Level 0/1 (§5.3).
+Sources, licenses and the evidence on LLM extraction accuracy: [`../research/07-species-metadata-profiles.md`](../research/07-species-metadata-profiles.md).
+
+1. **Resolve identity** (§3 Taxon): fuzzy name match (Global Names Verifier) → COL XR concept → Wikidata crosswalk → per-ID verification.
+2. **Status and sensitivity first.** Pull status sources and compute the policy tier (§8) **before anything else is published**:
+   - USFWS ECOS
+   - state lists (CDFW Special Animals)
+   - NatureServe
+   - CITES
+   - iNat place-scoped statuses
+   - the eBird sensitive list
+
+   **An LLM never sets or lowers status or tier.** Zero-shot LLM threat classification has been measured at only ~10 points above random.
+3. **Route to curated trait databases by taxon group:**
+
+   | Group | Databases |
+   |---|---|
+   | Birds | AVONET, TetrapodTraits, EltonTraits |
+   | Mammals | COMBINE, PanTHERIA, TetrapodTraits |
+   | Herps | TetrapodTraits, AmphiBIO, ReptTraits |
+   | Marine | WoRMS (FishBase/SeaLifeBase only if licensed) |
+   | Butterflies | LepTraits |
+   | Plants | TRY |
+4. **Compute priors from occurrence data:**
+   - seasonal phenology
+   - diel pattern (flagging observer bias)
+   - commercial-safe ranges (H3 occupancy from CC0/CC BY records; iNat Open Range Maps, which are CC BY)
+   - marine depth/temperature envelopes from OBIS records + environmental layers (a commercial-safe substitute for the NC-licensed FishBase/AquaMaps)
+5. **Fill gaps with LLM extraction** from Wikipedia, then Plazi/BHL/open-access papers. Every extracted field must carry:
+   - a **verbatim evidence span** plus source revision ID, machine-checked to exist and to name the taxon or a synonym
+   - a confidence built from cross-model agreement, agreement with trait DBs, source quality and self-report
+   - the extraction model + prompt hash
+
+   Further rules:
+   - Extract only from retrieved text, never from model memory.
+   - Use controlled vocabularies with a "not stated" option.
+   - Bound numeric values by genus/family ranges.
+   - Measure accuracy per field on the overlap with trait DBs and calibrate acceptance thresholds from it.
+6. **Taxonomic imputation** (e.g., genus mode) for remaining gaps, flagged as imputed.
+7. **Reconcile.** Precedence (highest first):
+   1. human-verified override
+   2. the authoritative source for that scope (e.g., ECOS for ESA, CDFW for California)
+   3. measured values in curated DBs
+   4. imputed values in curated DBs
+   5. referenced Wikidata statements
+   6. LLM extraction with evidence
+   7. taxonomic imputation
+   8. unsourced LLM knowledge, as a reviewer hint only
+
+   Conflict rules:
+   - Local scope beats global for local display.
+   - Newer assessments beat older.
+   - Categorical conflicts are kept and flagged.
+   - Numeric values that differ by more than 2× are flagged.
+8. **Validate:**
+   - schema checks
+   - sanity checks against occurrence data (e.g., an extracted breeding season vs. the observed seasonal peak)
+   - review routing ranked by **uncertainty × impact**
+9. **Publish as a versioned draft profile** at maturity Level 0/1 (§5.4).
+
+**Per-field provenance record:** value, vocabulary/unit, source + version, retrieval date, **license**, method (import / extracted / imputed / computed / human), evidence URL + span, confidence, taxonomy version, review state.
+
+**License taint tracking.** Every value carries its source license, including LLM extractions, which inherit the licenses of the texts they read. A "commercial build" excludes anything derived from NC or permission-only sources. Examples of such sources: IUCN, BirdLife, FishBase, AquaMaps, Map of Life, eBird S&T, Semantic Scholar.
+
+Wikipedia facts may be stored as structured fields with a revision-ID citation, never the sentences. Displayed Wikipedia text is CC BY-SA and lives in a separately licensed component.
 
 **Principle: generated metadata enters as weak priors and hypotheses, never as ground truth.** A profile's assumptions about how a species behaves only shape predictions until observed data overrides them. Every candidate signal is a hypothesis that the evaluation harness measures (§9).
 
@@ -219,7 +289,11 @@ Contributions are typed, versioned and reviewed, like pull requests:
 Supporting mechanisms:
 - a trust/reputation system
 - reviewer roles (including invited experts)
-- contributor license terms (CC BY 4.0 or CC0) so the commercial question stays open
+- contributor license terms (CC0 or CC BY 4.0) so the commercial question stays open
+- **field-level locks:** sensitivity and status fields are editable only by privileged reviewers
+- upstream re-syncs **never overwrite verified fields**; they raise conflicts instead
+- text pasted from NC or BY-SA sources is rejected
+- non-sensitive verified facts are contributed back to Wikidata
 - moderation of sensitive locations at submission time (§8)
 
 ### 4.5 Example profile (abridged)
@@ -412,20 +486,21 @@ Policy is part of the framework, not a feature. All outputs (API, exports, tiles
 
 - **Tiers.** Each tier sets minimum spatial resolution, minimum delay before recent evidence is shown, whether nowcast and alerts are allowed, and whether the species appears in place-first lists.
 
-  | Tier | Meaning | Example |
+  | Tier | Output rule | Automatic triggers (any one; the tier is the max over triggers, scoped to place) |
   |---|---|---|
-  | 0 | Open | Default ≥1 km resolution; 24 h delay on public sightings |
-  | 1 | Coarse | Zone × week; ≥7-day delay; no nowcast boost |
-  | 2 | Landscape | Range/region only; no hotspots; awareness mode only |
-  | 3 | Withheld | No spatial output |
+  | 0 Open | ≥1 km; 24 h delay on public sightings | No triggers, taxon resolved, all lookups fresh |
+  | 1 Generalized | ≥5 km or zone × week; ≥7-day delay; no nowcast boost | IUCN NT/VU without disturbance threats; NatureServe G3/S3; state Species of Special Concern; seasonal windows (e.g., spawning-season white seabass) |
+  | 2 Coarse / awareness | ≥20–100 km; month-level; no real-time; excluded from "special to here"; carnivores in awareness mode | iNat geoprivacy *obscured*; eBird sensitive list; ESA/CESA threatened or endangered; IUCN EN/CR; CITES App. II; G1–G2 / S1–S2; CNDDB sensitive flag. **Also the default whenever anything is unknown or stale.** |
+  | 3 Withheld | Region-level presence only; vetted partners only | iNat geoprivacy *private*; CITES App. I; status ≥ VU with hunting, collection or persecution threats; known poaching targets; nest, roost, den, hibernaculum, lek or spawning-aggregation context |
 
-- **Automatic tiering, failing closed.** Tiers are derived from:
-  - conservation status (IUCN, national and state lists);
-  - persecution and poaching risk;
-  - iNaturalist taxon geoprivacy and the eBird sensitive-species list;
-  - sensitive life stages: nests, roosts, dens, spawning aggregations.
-
-  Unknown → conservative. Humans can override with a recorded reason and review date.
+- **Fail-closed rules:**
+  1. Missing data, unresolved taxonomy, a failed status lookup, or a stale source → tier 2, not tier 0.
+  2. Tier **raises** happen automatically and immediately. **Lowering** a tier requires two reviewers, a written rationale and an expiry/review date.
+  3. A species takes the highest tier of any subspecies or distinct population segment present in the place.
+  4. Seasonal context can raise the tier (breeding and spawning windows).
+  5. Tiers are enforced on *everything* derived: hotspots, "best time" hints and place-first rankings. Fixed grids block differencing attacks.
+  6. LLMs never set or lower tiers.
+  7. The inputs behind every tier decision are logged.
 - **Seasonal and regional windows:**
   - (taxon, region, date range) → tier, for example spawning-season white seabass;
   - (taxon, region) overrides, for example managed viewing areas.
@@ -542,3 +617,7 @@ Partnership outreach runs in parallel from Phase 0 (see the research synthesis �
 4. **Global scale target for Level 0:** all taxa, or start with vertebrates?
 5. **Identity and accounts:** needed for contributions and life lists. Build or buy?
 6. **How much carnivore viewing mode is acceptable,** and in which regions? Should this be decided with agency input?
+7. **IUCN categories via Wikidata (P141).** They are CC0 on Wikidata but derived from IUCN, whose data is non-commercial (commercial use goes through IBAT). Get legal review before relying on them at scale in a commercial build.
+8. **Marine traits.** FishBase/SeaLifeBase/AquaMaps are CC BY-NC. Either license them or compute depth/temperature envelopes in-house from OBIS + environmental layers.
+9. **iNaturalist's ban on commercial AI training.** Does it apply to iNat-derived data on GBIF/AWS, and does it cover our prediction models? Clarify with iNat in writing.
+10. **Wikimedia access at scale.** The 2026 API rate limits mean we use dumps or Wikimedia Enterprise, not live API calls. EU database rights matter for global expansion.
