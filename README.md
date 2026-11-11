@@ -12,19 +12,20 @@ An online resource to help people find wildlife. It fuses several data sources i
 
 ## Status
 
-**Phase 0 (skeleton) is done**; Phase 1, a baseline for every Southern California species, is next. For the research and design, start with [`docs/research/00-synthesis.md`](docs/research/00-synthesis.md). It summarizes the data landscape, the evidence behind the candidate signals, a proposed model architecture, ethics guardrails and next steps. It links to seven detailed research reports.
+**Phases 0–1 are done**: the skeleton plus a policy-enforced baseline for every species. Phase 2, profile generation, is next. For the research and design, start with [`docs/research/00-synthesis.md`](docs/research/00-synthesis.md). It summarizes the data landscape, the evidence behind the candidate signals, a proposed model architecture, ethics guardrails and next steps. It links to seven detailed research reports.
 
 The framework design (draft) is in [`docs/design/framework.md`](docs/design/framework.md). It covers the species-agnostic architecture: core concepts, species profiles generated from metadata, how signals are combined, rare and cryptic species, species-first and place-first queries, the policy layer and the roadmap.
 
 ## Development
 
-Phase 0 (the skeleton) is in place. It includes:
-- the canonical data model
-- H3 grid and as-of time utilities
-- the policy layer: tiers, fail-closed assignment and the egress filter
-- species profiles with inheritance
-- the first connectors
-- evaluation basics
+**Phase 0 (skeleton) and Phase 1 (a baseline for every species) are done.**
+
+Phase 1 adds:
+- GBIF snapshot ingestion into a DuckDB observation store
+- a Level-0 baseline for every species with enough records. It is corrected for where observers go (target-group background) and smoothed over seasons and space.
+- backtest gates against a range-only map
+- fail-closed sensitivity tiers
+- a policy-enforced query layer and HTTP API, for both species-first and place-first questions
 
 Requires Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/).
 
@@ -40,34 +41,78 @@ uv run pytest
 uv run ruff check . && uv run ruff format --check .
 ```
 
-Try the CLI. These commands work offline:
+### Try it offline
+
+This builds a synthetic demo database and serves it:
+
+```bash
+uv run wildlife-radar demo
+```
+
+```bash
+uv run wildlife-radar query place --db data/demo.duckdb --lat 32.85 --lon -117.27 --date 2026-05-15
+```
+
+```bash
+uv run wildlife-radar serve --db data/demo.duckdb
+```
+
+Then open `http://127.0.0.1:8000/docs`.
+
+### Real data for Southern California
+
+Data goes in `data/`, which git ignores:
+
+1. Ingest the GBIF monthly snapshot (AWS open data, needs DuckDB's `httpfs` extension), keeping only records inside the region:
+
+   ```bash
+   uv run wildlife-radar ingest-snapshot --region socal --snapshot-date 2026-11-01
+   ```
+
+2. Build the Level-0 baseline and backtest it against a range-only map:
+
+   ```bash
+   uv run wildlife-radar build-baseline --region socal
+   ```
+
+   ```bash
+   uv run wildlife-radar evaluate-baseline --region socal --split 2025-01-01
+   ```
+
+3. Look up conservation statuses and assign sensitivity tiers. Without a completed lookup, taxa fail closed to awareness-only:
+
+   ```bash
+   uv run wildlife-radar build-tiers --region socal
+   ```
+
+4. Query or serve:
+
+   ```bash
+   uv run wildlife-radar query taxa
+   ```
+
+   ```bash
+   uv run wildlife-radar serve
+   ```
+
+Other commands work without a database:
 
 ```bash
 uv run wildlife-radar astro --lat 32.8505 --lon -117.272 --date 2026-11-15 --utc-offset -8
 ```
 
 ```bash
-uv run wildlife-radar profiles list
-```
-
-```bash
 uv run wildlife-radar profiles tier atractoscion-nobilis --region socal --date 2026-05-01
 ```
-
-These commands need network access to the source APIs:
 
 ```bash
 uv run wildlife-radar tides --station 9410230 --start 2026-11-15 --days 2
 ```
 
-```bash
-uv run wildlife-radar observations --source gbif --taxon "Atractoscion nobilis" --region socal
-```
-
 Where things live:
 - `src/wildlife_radar/`: the package. Its layout is in [`docs/design/framework.md`](docs/design/framework.md) §11.
 - `profiles/`: species profiles and guild templates (drafts). See [`profiles/README.md`](profiles/README.md).
-- `regions/socal/`: the first region pack.
+- `regions/socal/`: the first region pack (places, status scopes, curated statuses).
 - [`DATA_SOURCES.md`](DATA_SOURCES.md): the sources each connector uses and their terms.
 
 ## License

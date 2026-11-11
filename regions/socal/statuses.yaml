@@ -1,0 +1,79 @@
+# Curated, supplementary conservation statuses for the socal region pack.
+#
+# This file can only RAISE protection: it is merged with automatic status lookups and never
+# counts as a complete lookup by itself (fail closed). Entries name the population a status
+# applies to when it is narrower than the species; species-level tiers take the highest tier of
+# any listed population present in the region.
+#
+# Verify each entry against USFWS ECOS / CDFW lists before relying on it (see `verify`).
+
+statuses:
+  - taxon_id: puma-concolor
+    authority: CESA
+    code: T
+    scope: ca-southern-central-coast
+    population: Southern California / Central Coast DPS
+    source: Fish and Game Commission vote, Feb 2026 (docs/research/06-rare-carnivores.md)
+    verify: final adoption of findings
+  - taxon_id: canis-lupus
+    authority: CESA
+    code: E
+    scope: us-ca
+    source: CESA listing 2014
+  - taxon_id: canis-lupus
+    authority: ESA
+    code: E
+    scope: us-ca
+    source: Federal listing outside the Northern Rockies DPS (status under litigation, 2026)
+  - taxon_id: enhydra-lutris
+    authority: ESA
+    code: T
+    scope: us-ca
+    population: southern sea otter (E. l. nereis)
+    source: USFWS ECOS
+  - taxon_id: haliotis-cracherodii
+    authority: ESA
+    code: E
+    scope: us
+    source: USFWS/NOAA (black abalone)
+  - taxon_id: haliotis-sorenseni
+    authority: ESA
+    code: E
+    scope: us
+    source: USFWS/NOAA (white abalone)
+  - taxon_id: polioptila-californica
+    authority: ESA
+    code: T
+    scope: us-ca
+    population: coastal California gnatcatcher (P. c. californica)
+    source: USFWS ECOS
+  - taxon_id: charadrius-nivosus
+    authority: ESA
+    code: T
+    scope: us-ca
+    population: western snowy plover, Pacific coast DPS
+    source: USFWS ECOS
+  - taxon_id: sternula-antillarum
+    authority: ESA
+    code: E
+    scope: us-ca
+    population: California least tern (S. a. browni)
+    source: USFWS ECOS
+  - taxon_id: rallus-obsoletus
+    authority: ESA
+    code: E
+    scope: us-ca
+    population: light-footed Ridgway's rail (R. o. levipes)
+    source: USFWS ECOS
+  - taxon_id: euphydryas-editha
+    authority: ESA
+    code: E
+    scope: us-ca
+    population: Quino checkerspot (E. e. quino)
+    source: USFWS ECOS
+  - taxon_id: chelonia-mydas
+    authority: ESA
+    code: T
+    scope: us
+    population: East Pacific DPS
+    source: USFWS/NOAA

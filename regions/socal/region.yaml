@@ -1,6 +1,6 @@
 id: socal
-name: Southern California Bight
-bbox: [-121.0, 32.4, -117.0, 34.6]
+name: Southern California
+bbox: [-121.0, 32.4, -114.1, 35.8]
 notes: >
   First region pack. Coordinates are approximate and for indexing only. Tide station ids and
   coordinates must be verified against the NOAA CO-OPS metadata API before `verified: true`.
@@ -12,6 +12,12 @@ scopes:
   - california
   - ca-southern-central-coast
   - socal
+
+# iNaturalist place ids → status scopes. Statuses scoped to other places are ignored
+# (verify ids against the iNaturalist places API before relying on them).
+inat_place_scopes:
+  "1": us
+  "14": us-ca
 
 tide_stations:
   - {station_id: "9410230", name: "La Jolla (Scripps Pier)", lat: 32.867, lon: -117.257}

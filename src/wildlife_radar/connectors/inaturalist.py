@@ -24,6 +24,7 @@ from wildlife_radar.connectors.base import (
     make_client,
 )
 from wildlife_radar.core.geometry import PointFootprint
+from wildlife_radar.core.ids import hash_identifier
 from wildlife_radar.core.licenses import ALL_RIGHTS_RESERVED, parse_license
 from wildlife_radar.core.observations import (
     EvidenceGrade,
@@ -33,7 +34,7 @@ from wildlife_radar.core.observations import (
     SensitivityFlags,
 )
 from wildlife_radar.core.sources import ObservationProcess, ObservationType, Source, SourceKind
-from wildlife_radar.core.taxa import TaxonRef, TaxonScheme
+from wildlife_radar.core.taxa import TaxonRef, TaxonScheme, target_group
 from wildlife_radar.core.time import Precision, TimeWindow, ensure_utc, utcnow
 
 BASE_URL = "https://api.inaturalist.org/v1"
@@ -147,6 +148,8 @@ def parse_observation(
             "common_name": taxon.get("preferred_common_name"),
             "n_photos": len(photos),
             "n_sounds": len(sounds),
+            "group": target_group(inat_iconic=taxon.get("iconic_taxon_name")),
+            "observer_hash": hash_identifier(str((rec.get("user") or {}).get("id") or "")),
         },
     )
 

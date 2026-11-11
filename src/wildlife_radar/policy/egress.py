@@ -182,6 +182,7 @@ def _aggregate(key: tuple, members: list[Prediction], tier: PolicyTier) -> Predi
     }
     lifts = [m.lift_regional for m in members if m.lift_regional is not None]
     anomalies = [m.anomaly_vs_norm for m in members if m.anomaly_vs_norm is not None]
+    seasonal = [m.seasonal_index for m in members if m.seasonal_index is not None]
     intervals = [m.interval for m in members if m.interval is not None]
     return Prediction(
         taxon_id=taxon_id,
@@ -198,6 +199,7 @@ def _aggregate(key: tuple, members: list[Prediction], tier: PolicyTier) -> Predi
         ),
         lift_regional=_mean(lifts) if lifts else None,
         anomaly_vs_norm=_mean(anomalies) if anomalies else None,
+        seasonal_index=_mean(seasonal) if seasonal else None,
         confidence=min((m.confidence for m in members), key=_CONFIDENCE_ORDER.index),
         contributions=contributions,
         maturity_level=min(m.maturity_level for m in members),

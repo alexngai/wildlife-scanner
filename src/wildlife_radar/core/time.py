@@ -141,8 +141,17 @@ def add_granularity(dt: datetime, granularity: Granularity) -> datetime:
     raise ValueError(f"unknown granularity {granularity!r}")
 
 
+_PRECISION_ORDER = list(Precision)
+
+
 def coarsen_window(window: TimeWindow, granularity: Granularity) -> TimeWindow:
-    """Smallest window aligned to ``granularity`` bins that contains ``window``."""
+    """Smallest window aligned to ``granularity`` bins that contains ``window``.
+
+    Windows whose precision is already at least as coarse as ``granularity`` are returned as-is.
+    """
+    target = _GRANULARITY_PRECISION[granularity]
+    if _PRECISION_ORDER.index(window.precision) >= _PRECISION_ORDER.index(target):
+        return window
     start = floor_time(window.start, granularity)
     end_floor = floor_time(window.end, granularity)
     if window.is_instant or end_floor != window.end:

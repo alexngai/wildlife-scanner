@@ -24,13 +24,18 @@ class ConservationStatus(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     authority: str
-    """E.g. ``IUCN``, ``ESA``, ``CESA``, ``NatureServe``, ``CA-SSC``, ``CA-FP``, ``CITES``."""
+    """E.g. ``IUCN``, ``ESA``, ``CESA``, ``NatureServe``, ``CA-SSC``, ``CA-FP``, ``CITES``.
+
+    ``IUCN-EQUIV`` is an IUCN-equivalent category assigned by another authority (as iNaturalist
+    reports for state and national lists) and is treated like IUCN."""
     code: str
     scope: str = "global"
     """Where the status applies: ``global`` or a region/place scope id (e.g. ``us-ca``)."""
     threats: frozenset[str] = frozenset()
     population: str | None = None
     """Subspecies / DPS / ESU the status applies to, if not the whole taxon."""
+    source: str | None = None
+    """Where the status came from (e.g. ``inaturalist: CDFW threatened``, a citation)."""
 
 
 class SensitivityInputs(BaseModel):
@@ -64,7 +69,7 @@ def _status_tier(s: ConservationStatus) -> tuple[PolicyTier, str] | None:
     auth = s.authority.upper()
     code = s.code.strip().upper()
     label = f"{s.authority}:{s.code}" + (f" ({s.population})" if s.population else "")
-    if auth == "IUCN":
+    if auth in {"IUCN", "IUCN-EQUIV"}:
         if code in {"EX", "EW"}:
             return PolicyTier.WITHHELD, f"{label}: extinct/extinct in the wild"
         if code in {"VU", "EN", "CR"} and s.threats & TAKE_THREATS:

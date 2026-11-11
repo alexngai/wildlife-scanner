@@ -78,5 +78,14 @@ STANDARD_METHODS: dict[str, EncounterMethod] = {
             standard_effort=Effort(duration_min=180),
             description="3-hour boat-based viewing trip",
         ),
+        EncounterMethod(
+            method_id="observer_visit",
+            modality=Modality.SEE,
+            standard_effort=Effort(),
+            description=(
+                "A typical recorded visit (one observer, one day, one place) by someone who "
+                "reports this taxon group. Level-0 proxy: not effort-standardized."
+            ),
+        ),
     )
 }

@@ -1,4 +1,4 @@
-"""Minimal operator CLI for exploring connectors, profiles and policy.
+"""Operator CLI: connectors, profiles, policy, and the baseline pipeline.
 
 Observation commands print aggregate summaries only (counts, months, licenses), never
 coordinates: public outputs must go through the policy egress filter.
@@ -186,6 +186,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("sources", help="list connector sources and their terms")
     p.set_defaults(func=_cmd_sources)
+
+    from wildlife_radar.cli_pipeline import register
+
+    register(sub)
     return parser
 
 

@@ -35,6 +35,9 @@ class Prediction(BaseModel):
     interval: tuple[float, float] | None = None
     lift_regional: float | None = Field(default=None, ge=0)
     anomaly_vs_norm: float | None = Field(default=None, ge=0)
+    """Now vs. the seasonal norm for this place ("unusual right now"); needs a nowcast."""
+    seasonal_index: float | None = Field(default=None, ge=0)
+    """This time window vs. the annual mean at this place ("peaking now")."""
     confidence: Confidence = Confidence.LOW
     contributions: dict[str, float] = Field(default_factory=dict)
     """Additive log-odds contributions per term (including ``prior``) — the 'why'."""
