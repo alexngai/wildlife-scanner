@@ -1,0 +1,486 @@
+# wildlife-radar — framework design (draft v0.1)
+
+Status: **draft for discussion**. Builds on [`../research/00-synthesis.md`](../research/00-synthesis.md).
+
+## 0. Goals and decisions so far
+
+**Goal.** A species-agnostic informatics framework that combines many signals into predictions of *where and when* a species can be encountered. It must handle species ranging from abundant ones to elusive white seabass to rare, hard-to-spot carnivores like mountain lions and wolves. Data sources and methods may be species-specific; the framework is not.
+
+| Decision | Choice |
+|---|---|
+| Species coverage | **Any species.** Every species with data gets an automatic baseline. Featured species get deeper treatment. |
+| Species profiles | **Generated automatically** from collected metadata (Wikidata, trait databases, Wikipedia and literature via LLM extraction), then refined by **community contributions** and review. |
+| Query modes | **Both, first-class.** Species-first ("where/when can I find X?") and place-first ("what's likely, and what's *special*, near here?"). |
+| Geography | Start in **Southern California**; design for **global**. |
+| Stack | **Python** backend and data/ML; **TypeScript** web frontend later; API-first. |
+
+**Non-goals for v1:** real-time tracking of individual animals; navigation or safety advice ("safe to dive/hike"); harvest or hunting tools.
+
+**Design-validation species.** The core design must handle these five archetypes without special cases:
+
+| Archetype | Species | What it stresses |
+|---|---|---|
+| Sparse, dynamic, fishery-labeled | White seabass | Few direct sightings; labels come from catch data; prey and temperature drivers; spawning sensitivity |
+| Dense, strongly seasonal | Leopard shark (La Jolla) | Rich presence-only data; temperature-driven aggregation |
+| Effort-rich, condition-driven | A shorebird or migrant songbird | eBird checklists that record misses; tide or weather-radar drivers |
+| Rare, cryptic, territorial | Mountain lion | Evidence is mostly indirect (sign, cameras); tiny encounter probabilities; heavy sensitivity |
+| Rare, policy depends on region | Gray wolf | Persecution risk in some regions; established managed viewing in others (e.g., Yellowstone) |
+
+---
+
+## 1. The estimand: what every prediction means
+
+Every prediction answers the same question:
+
+> **P(encounter)** — the probability of encountering evidence of taxon *X*, using **method M** with **standard effort E**, within **place P** during **time window T**, given information available **as of time A**.
+
+- **The method generalizes to evidence modality.** This is what makes the framework work for rare species:
+  - *see*: dive, snorkel, hike, boat, birding checklist
+  - *hear*: listening, acoustic recorder
+  - *sign*: tracks, scat, kills
+  - *camera trap*
+  - *catch*: used only as a source of observations, never as a product output
+- **Different species, different headline methods.** For a mountain lion, the honest headline might be "probability of finding fresh sign on a 2-hour trail survey" or "camera-trap detection rate." The probability of seeing the animal can also be shown, but it will be tiny everywhere.
+- **Each method has a standard effort unit:**
+  - 60 min dive
+  - 1 h / ≤2 km birding checklist
+  - 2 h trail survey
+  - 1 camera-trap-week
+- **Every prediction carries:**
+  - the probability
+  - an uncertainty interval
+  - a confidence grade
+  - **per-signal contributions** (the "why")
+  - the model version
+  - the as-of time
+  - the policy tier applied
+
+**Relative framing for rare species.** When absolute probabilities are tiny, also report **lift**: the probability here and now relative to a regional baseline. For example: "8× the regional average; still uncommon."
+
+---
+
+## 2. Architecture
+
+```
+            ┌──────────── Profile generation (metadata → draft profiles; community review) ───────────┐
+            ▼                                                                                          │
+ Connectors ─► Canonical stores ─► Signal graph ─► Species models ─► Prediction store ─► Policy ─► API ─► Web app
+ (global +     observations,       raw → derived    prior + signals   sparse indexes:     tiers,    species-first
+  regional)    signals (as-of),    signals; other   + nowcast +       species→cells,      coarsen,  & place-first
+               places, context     species' models  detectability     cell→species        delay,    queries
+                                   as signals            │                                licenses
+                          ▲                              │
+                          └────── Evaluation harness ◄───┘  (backtests, baselines, calibration, maturity gates)
+```
+
+Two speeds:
+
+- **Batch (nightly/weekly):**
+  - ingest data
+  - refresh signals
+  - refit models
+  - recompute priors and forecast tensors
+  - run backtests
+- **Incremental (minutes):**
+  - new observation arrives
+  - nowcast update for affected cells and species
+  - prediction store patched
+
+---
+
+## 3. Core entities (canonical data model)
+
+These schemas are the contracts. Connectors produce them, and models and products consume them.
+
+### Taxon
+```
+taxon_id            internal stable id
+scientific_name, rank, parent_id, common_names{lang: [..]}
+crosswalk           {wikidata, gbif, inat, ebird, itis, worms, ncbi, iucn, fishbase, …, aliases: ["WSB", …]}
+guilds              ["kelp-forest-pelagic-predator", "large-terrestrial-carnivore", …]
+taxonomy_version    + synonym/split/lump history (so old observations map forward)
+```
+Wikidata is the planned hub for crosswalks because it is CC0 and carries most external IDs. Splits and lumps need explicit handling: an observation recorded under the "old" concept must map to the right current taxon or taxa.
+
+### Place and Cell
+- **Cell:** an H3 hexagon. Fields are stored at a small set of resolutions (e.g., res 5 ≈ 250 km², res 7 ≈ 5 km², res 9 ≈ 0.1 km²).
+- **Place:** a named polygon (dive site, hotspot, trailhead, park, zone) with kind, access status and habitat tags, mapped to its covering cells. Users think in places; the math runs on cells.
+
+### Source
+```
+source_id, kind (observation | signal | context), coverage (polygon + taxa), latency,
+license (per-record or per-source), attribution, terms_url, commercial_ok, redistribution_ok,
+observation_process (for observation sources — see below)
+```
+
+### Observation
+```
+taxon_id
+footprint           geometry + positional uncertainty (point, obscured cell, fishing block, trip zone, radar footprint…)
+time_window         start/end (+ timezone, + "date may be upload date" flags)
+method, protocol    see / hear / sign / camera / catch; e.g., "eBird complete checklist", "CPFV trip"
+effort              duration, distance, area, observers, angler-hours, trap-nights…
+outcome             detected | not_detected | count | presence_only
+evidence_grade      vouchered (photo/audio/specimen) | expert-verified sign | unverified report | model detection (+score)
+source_id, source_record_id, license, sensitivity flags (obscured, embargoed), ingested_at
+```
+
+### ObservationProcess (per source; the key to combining sources)
+Each source declares how it observes the true state, so models can use it correctly:
+```
+type                presence_only | detection_nondetection | count | catch_rate | acoustic | camera
+effort_model        how effort scales detection (e.g., 1 − exp(−λ·effort·q))
+bias_model          e.g., target-group background, access/road proximity, observer density
+false_positive      misidentification / classifier error rate (prior + learnable)
+spatial_support     how footprints map to cells (point / area integration)
+latency, dedup_rule e.g., group checklists, multiple divers reporting one encounter
+```
+False-positive-aware observation models are needed in three places:
+- misidentified mountain lions (bobcats and house cats reported as lions)
+- acoustic classifier errors (BirdNET)
+- species-name confusion in fishing reports
+
+### Signal
+```
+signal_id, version, units, footprint (cell | station | region), valid_time, issue_time, value
+(or quantiles / ensemble), source lineage
+```
+`issue_time` vs `valid_time` gives forecast semantics and leak-free backtests ("as-of" queries).
+
+**Signals form a DAG:**
+- raw → derived (anomalies, lags, rolling windows, hours-after-sunset, tide stage at dawn, snow-tracking conditions)
+- **a species prediction can itself be a signal.** For example, a market squid aggregation forecast → white seabass; mule deer fawning → mountain lion; migration intensity → warblers.
+
+### SpeciesProfile
+See §4. A declarative, versioned document with a provenance record for every field.
+
+### Prediction
+```
+taxon_id, cell|place, time_bin, method, effort_unit, as_of,
+p, interval, lift_regional, anomaly_vs_norm, confidence_grade,
+contributions{term: Δlog-odds}, maturity_level, model_version, policy_tier_applied
+```
+
+---
+
+## 4. Species profiles: generated, inherited, reviewed
+
+### 4.1 Inheritance
+```
+kingdom → class → order → guild template(s) → species profile → regional override
+```
+Templates supply defaults:
+- the "large-terrestrial-carnivore" template supplies crepuscular activity, territory-scale state, sign- and camera-based methods and a conservative policy;
+- the "shorebird" template supplies tide signals and checklist methods.
+
+A species profile overrides only what differs. A **regional override** allows different behavior or policy per region. For example, wolves in Yellowstone (established managed viewing) vs. wolves in California (recolonizing, endangered).
+
+### 4.2 Traits drive model defaults ("any species" gets sensible behavior)
+| Trait (source: trait DBs / extraction) | Default it sets |
+|---|---|
+| Home range / territory size | Latent-state spatial scale, nowcast spatial kernel, **minimum display resolution** |
+| Mobility / migratory status | Nowcast decay half-life; seasonal-prior structure (resident vs. migrant) |
+| Activity pattern (diurnal / nocturnal / crepuscular) | Diel curve within a day |
+| Habitat, depth range, elevation range | Habitat mask from land cover, bathymetry, DEM |
+| Thermal range (ectotherms, marine) | Shape prior on temperature response |
+| Breeding / spawning / migration timing | Seasonal prior shape; sensitivity windows |
+| Conservation status, persecution risk | Policy tier (see §8) |
+| Body size, detectability class | Detection-model priors per method |
+
+### 4.3 Generation pipeline
+1. **Resolve identity.** Wikidata plus the taxonomic backbones give the crosswalk and synonyms.
+2. **Pull structured traits** from trait databases, ranges from range sources, and status from status sources (exact sources and licenses: see `../research/07-*` when complete).
+3. **Extract unstructured knowledge** from Wikipedia and literature with an LLM: behavior, seasonality, habitat, diet, candidate signals. Every extracted field must carry:
+   - a citation (source + passage),
+   - a confidence,
+   - an extraction-model version.
+4. **Reconcile.** Precedence is curated databases > expert/community review > literature extraction > Wikipedia extraction. Conflicts are recorded, not silently resolved.
+5. **Validate:**
+   - schema checks;
+   - sanity checks against occurrence data (e.g., an extracted breeding season vs. the observed seasonal peak);
+   - flag disagreements for review.
+6. **Publish as a draft profile** with maturity Level 0/1 (§5.3).
+
+**Principle: generated metadata enters as weak priors and hypotheses, never as ground truth.** A profile's assumptions about how a species behaves only shape predictions until observed data overrides them. Every candidate signal is a hypothesis that the evaluation harness measures (§9).
+
+### 4.4 Community contributions
+Contributions are typed, versioned and reviewed, like pull requests:
+
+- **Observations with effort**, including **non-detections**: dive logs, trail surveys, checklists. These are the highest-value contribution.
+- **Profile edits:** traits, seasonality, sources, with citations.
+- **Hypotheses:** "species X responds to signal Y". These are queued for automatic ablation testing and get a public scorecard.
+- **Place notes:** access, habitat, local regulations.
+- **Verification:** confirming IDs and evidence grades.
+
+Supporting mechanisms:
+- a trust/reputation system
+- reviewer roles (including invited experts)
+- contributor license terms (CC BY 4.0 or CC0) so the commercial question stays open
+- moderation of sensitive locations at submission time (§8)
+
+### 4.5 Example profile (abridged)
+```yaml
+taxon: puma-concolor
+extends: [guild/large-terrestrial-carnivore]
+methods:
+  headline: sign_survey            # 2 h trail survey for fresh tracks/scat/scrapes
+  also: [camera_trap, see]
+latent_state: {scale: territory, spatial_km: from_trait(home_range), dynamics: slow}
+signals:
+  diel_activity:   {from_trait: activity_pattern}           # crepuscular
+  prey_index:      {signal: species/odocoileus-hemionus, direction: +, strength: weak, hypothesis: true}
+  tracking_conditions: {signal: derived/substrate_or_snow_recent, applies_to: sign_survey}
+sources:
+  inaturalist:   {obs: presence_only, false_positive: elevated}
+  camera_traps:  {obs: camera, effort: trap_nights}
+  roadkill:      {obs: presence_only, bias: roads}
+  user_surveys:  {obs: detection, method: sign_survey}
+policy:
+  default_tier: 2                   # landscape-scale only, no hotspots, no nowcast
+  regions:
+    some-managed-viewing-region: {tier: 1}   # example of a regional override
+```
+
+---
+
+## 5. Fusion model
+
+### 5.1 Additive structure (the shared format)
+```
+logit P(encounter | cell, t, method) =
+      prior(cell, season)                      # where/when it usually is (slow)
+    + Σ_k f_k(signal_k(cell, t))               # conditions, prey, moon, weather… (fast)
+    + nowcast(recent evidence near cell, t)    # decayed in space/time; contagion-corrected
+    + detect(method, conditions, effort)       # can you detect it if present?
+```
+- **Explanations:** each term's contribution is the "why".
+- **Expert/profile priors:** each `f_k` gets a shape and strength prior (e.g., "optimum 14–18 °C, moderate"). These priors are then learned from data.
+- **Black-box terms allowed:** a GBM or neural term can fill any `f_k` where data are rich, wrapped so it still reports a contribution.
+
+### 5.2 Linking data sources to the latent state
+Each source's `ObservationProcess` ties its records to the same latent intensity λ, integrated over the record's footprint:
+
+| Source type | Link to λ |
+|---|---|
+| Catch data | Poisson(λ·effort·catchability) |
+| Checklists and dive logs | Bernoulli(1 − exp(−λ·q·effort)) |
+| Presence-only | Thinned point process with a bias model |
+| Acoustic and camera | Detection with false positives |
+
+This is an **integrated species distribution model**. It is implemented in stages, with simple per-source models first and joint fitting later.
+
+### 5.3 Multi-scale latent state
+Species declare a characteristic spatial and temporal scale, from traits or overridden in the profile:
+
+- **Kelp-forest fish:** km-scale, day-to-week dynamics.
+- **Large carnivores:** a slow **territory-occupancy** state (10s–100s of km², months), combined with fast within-territory **activity** (diel, season, prey). Predictions at fine resolution are then derived products of a coarse state. That is both more honest and safer.
+- **Migrants:** a seasonal flow component driven by migration-intensity signals.
+
+### 5.4 Maturity ladder (with gates)
+| Level | Content | Built by | Gate to show |
+|---|---|---|---|
+| 0 Baseline | Seasonal × spatial prior from occurrences, bias-corrected; range/habitat masks | Automatic | Enough records; beats a range-only map |
+| 1 Conditions | Plus guild/trait-default signals | Templates | Beats Level 0 out-of-sample |
+| 2 Live | Plus nowcast from recent evidence | Automatic when a live source exists | Beats Level 1 and persistence |
+| 3 Curated | Plus species-specific signals and observation models | Profile + review | Beats Level 2; calibration acceptable |
+
+When a gate fails, the product shows the lower level, **labeled as such**. Species with too little data show range and seasonality only, with an explicit "insufficient data" state.
+
+---
+
+## 6. Rare and cryptic species
+
+What changes for mountain lions, wolves and similar species, and how the framework absorbs it:
+
+| Challenge | Framework answer |
+|---|---|
+| Direct sightings are vanishingly rare | Headline methods are **sign** and **camera**; report **lift** alongside absolute p |
+| Few, biased, often misidentified reports | Evidence grading and false-positive-aware observation models; down-weight unverified reports |
+| Key data held by agencies and researchers (collars, camera grids) | Partnership connectors with per-source embargo and resolution rules; never re-expose |
+| Territory-scale ecology | Multi-scale latent state (§5.3); coarse occupancy + diel/seasonal activity |
+| Detectability depends on conditions | `detect()` term, e.g., fresh snow or soft substrate for tracks, camera density |
+| Persecution, harassment, habituation, public-safety risk | Tier 2–3 policy by default (§8): landscape-scale only, no hotspots, no nowcast, long delays |
+| Region-dependent ethics | Policy is keyed by **(taxon, region)**: managed viewing destinations can get a different tier from recolonizing populations |
+
+**Two product modes for these species:**
+
+- **Awareness mode** (default):
+  - "you're in mountain lion country"
+  - typical activity times
+  - safety and coexistence guidance
+  - what sign to look for
+- **Viewing mode** (only where the policy tier allows):
+  - for established, managed viewing contexts
+  - points users to official guidance, guides and outfitters rather than coordinates
+
+Specific data sources and status details for lions and wolves: see `../research/06-*` when complete.
+
+---
+
+## 7. Query model: species-first and place-first
+
+Both query types read from the same **sparse prediction store**.
+
+### 7.1 Storage
+- **Prior tensor** (Levels 0–1): species × cell (res 7) × week-of-year. Stored **only where p > ε**.
+- **Two indexes:**
+  - species → cells, for species-first maps;
+  - cell → species, for place-first lists.
+- **Partitioning:** by H3 parent cell and taxon group, in Parquet. Served via DuckDB or a service cache.
+- **Dynamic layers** (conditions, nowcast) are computed:
+  - nightly for featured regions and species;
+  - on demand for the candidate set the indexes return (prefilter by prior, then apply dynamic terms).
+
+### 7.2 Species-first ("where/when can I find X?")
+- **Inputs:** taxon, region or radius, date window, method.
+- **Outputs:**
+  - a map of p (or lift) by cell/place;
+  - a **best-windows calendar** (days × time-of-day);
+  - the top drivers;
+  - confidence;
+  - regulations and ethics notes.
+
+### 7.3 Place-first ("what's here, and what's special here?")
+- **Inputs:** location or place, date window, method(s), optional user life list.
+- Four ranked lists, computed per (species, place, time):
+
+| List | Metric | Meaning |
+|---|---|---|
+| **Most likely** | p | What you'll probably encounter |
+| **Special to here** | lift = p_place / p_region (region = ~100–300 km neighborhood or ecoregion) | What this place offers that the surroundings don't. "TF-IDF for wildlife." |
+| **Unusual right now** | anomaly = p_now / p_norm(place, week) | Seasonal peaks, irruptions, rarities, conditions-driven events |
+| **New for you** | p × 1[not on life list] | Personal targets |
+
+Interest weighting (global rarity, community "charisma" votes) is applied as a re-ranker, not baked into p.
+
+Place-first output is the most exposed surface for sensitive species. Policy filtering runs **before** ranking, so tier-2+ species never leak through "special to here".
+
+---
+
+## 8. Policy layer (enforced at egress)
+
+Policy is part of the framework, not a feature. All outputs (API, exports, tiles, alerts) pass through one enforcement point.
+
+- **Tiers.** Each tier sets minimum spatial resolution, minimum delay before recent evidence is shown, whether nowcast and alerts are allowed, and whether the species appears in place-first lists.
+
+  | Tier | Meaning | Example |
+  |---|---|---|
+  | 0 | Open | Default ≥1 km resolution; 24 h delay on public sightings |
+  | 1 | Coarse | Zone × week; ≥7-day delay; no nowcast boost |
+  | 2 | Landscape | Range/region only; no hotspots; awareness mode only |
+  | 3 | Withheld | No spatial output |
+
+- **Automatic tiering, failing closed.** Tiers are derived from:
+  - conservation status (IUCN, national and state lists);
+  - persecution and poaching risk;
+  - iNaturalist taxon geoprivacy and the eBird sensitive-species list;
+  - sensitive life stages: nests, roosts, dens, spawning aggregations.
+
+  Unknown → conservative. Humans can override with a recorded reason and review date.
+- **Seasonal and regional windows:**
+  - (taxon, region, date range) → tier, for example spawning-season white seabass;
+  - (taxon, region) overrides, for example managed viewing areas.
+- **Never de-obscure.** Honor source obscuring, embargoes and user geoprivacy. User-submitted sensitive locations are coarsened at submission time.
+- **License ledger:**
+  - per-record license carried through to predictions;
+  - outputs tagged with the most restrictive license of their inputs;
+  - NC-licensed inputs blocked from monetized surfaces;
+  - attribution strings generated automatically.
+- **Context in outputs:** regulations (MPAs, take rules), approach distances, safety and coexistence guidance.
+
+---
+
+## 9. Evaluation harness
+
+- **As-of backtesting:** predictions are recomputed using only signals with `issue_time ≤ as_of`.
+- **Splits:** forward-in-time and spatial-block. Never random.
+- **Baselines for every species:**
+  - climatology (place × week);
+  - persistence (last period);
+  - range-only (Level 0's competitor).
+- **Metrics:**
+  - Brier score and log loss;
+  - reliability diagrams;
+  - skill vs. baselines;
+  - for rare species, PR-AUC and calibration at the low end.
+- **Hypothesis testing:** for each candidate signal, run an ablation (with/without) and record Δskill with an interval in a **public hypothesis scorecard**. This tests "squid → white seabass" and "moon → X" honestly.
+- **Maturity gates:** §5.4 levels are granted or revoked automatically by the harness.
+- **Monitoring:** data freshness (`time_coverage_end`), drift, connector health, and calibration on live outcomes (user logs with non-detections).
+
+---
+
+## 10. Global design, Southern California first
+
+- **Global defaults:**
+  - occurrence data: GBIF snapshots, iNaturalist, OBIS, eBird (subject to terms);
+  - ocean and weather: Copernicus, ERA5/GFS/ECMWF, satellite SST and ocean color;
+  - global land cover, bathymetry and DEM;
+  - astronomy (local computation).
+- **Region packs** bundle the region-specific pieces. The first is `socal`:
+  - regional connectors, e.g., NOAA CO-OPS, CDIP, SCCOOS, CDFW datasets, fishing reports via partnership;
+  - places (dive sites, hotspots, trailheads);
+  - regulations (MPAs, take rules);
+  - policy overrides;
+  - local partners.
+
+  A new region = a new pack. The core is untouched.
+- Everything is keyed by H3 cells and ISO timestamps (UTC + local-time derivations), with units as SI internally.
+
+---
+
+## 11. Tech stack and repo layout (proposal)
+
+**Backend (Python):**
+- **Storage:**
+  - xarray + Zarr for gridded signals;
+  - Parquet + DuckDB for observations and predictions;
+  - Postgres + PostGIS for places, profiles, users and contributions.
+- **Spatial and orchestration:**
+  - `h3` for indexing;
+  - Dagster for orchestration (assets with partitions fit "as-of" signals well).
+- **Modeling:** statsmodels/pyGAM/mgcv-via-rpy2 (TBD) for GAMs; LightGBM; NumPyro/PyMC for hierarchical and integrated models; scikit-learn calibration.
+- **API:** FastAPI with an OpenAPI schema, so the TypeScript client is generated.
+
+**Frontend (later):** TypeScript; MapLibre GL + deck.gl H3 layers.
+
+```
+wildlife-radar/
+  packages/
+    core/          # entities, schemas, H3/time utils, as-of semantics
+    connectors/    # one module per source (global/, regions/socal/)
+    signals/       # signal definitions + derivation DAG
+    profiles/      # profile schema, inheritance, generation pipeline, templates/
+    models/        # prior, terms, nowcast, detect, observation processes, fitting
+    policy/        # tiers, windows, egress filter, license ledger
+    evaluation/    # backtests, baselines, scorecards
+    api/           # FastAPI service
+  profiles/        # versioned profile documents (generated + curated)
+  regions/socal/   # region pack: places, regulations, policy overrides
+  docs/
+```
+
+---
+
+## 12. Phased roadmap (proposal)
+
+| Phase | Deliverable | Validates |
+|---|---|---|
+| **0 — Skeleton** | Core schemas; H3 and as-of utilities; 3–4 connectors (GBIF snapshot, iNaturalist, NOAA tides, astronomy); policy filter stub; evaluation harness stub | The contracts |
+| **1 — Baseline for everything (SoCal)** | Level-0 priors for all SoCal species with enough GBIF/iNat data; sparse store; place-first "most likely / special here" and species-first maps via API | "Any species" + both query modes |
+| **2 — Profiles** | Generation pipeline (Wikidata → traits → LLM extraction with citations); guild templates; auto policy tiering; review workflow | Metadata-driven profiles |
+| **3 — Conditions and live** | Signal DAG with ocean, weather and astronomy; Level 1–2 for the five validation species; hypothesis scorecard | Fusion + honest testing |
+| **4 — Contributions** | Effort-aware logs (dives, surveys, checklists) incl. non-detections; trust and review | The data moat |
+| **5 — Web app** | TypeScript frontend | Product |
+
+Partnership outreach runs in parallel from Phase 0 (see the research synthesis §7).
+
+---
+
+## 13. Open questions
+
+1. **LLM extraction:** which model and provider, the budget per species, and the human-review threshold. Which fields may be auto-published, and which need review?
+2. **Community governance:** who can approve profile changes and policy downgrades? Invited experts only, or reputation-based?
+3. **Commercial status:** still open. It decides eBird, iNaturalist, FishBase and IUCN usage and the contributor license terms.
+4. **Global scale target for Level 0:** all taxa, or start with vertebrates?
+5. **Identity and accounts:** needed for contributions and life lists. Build or buy?
+6. **How much carnivore viewing mode is acceptable,** and in which regions? Should this be decided with agency input?
