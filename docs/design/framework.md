@@ -121,7 +121,8 @@ time_window         start/end (+ timezone, + "date may be upload date" flags)
 method, protocol    see / hear / sign / camera / catch; e.g., "eBird complete checklist", "CPFV trip"
 effort              duration, distance, area, observers, angler-hours, trap-nights…
 outcome             detected | not_detected | count | presence_only
-evidence_grade      vouchered (photo/audio/specimen) | expert-verified sign | unverified report | model detection (+score)
+evidence_grade      C1 hard evidence (photo/audio/specimen/DNA/carcass, verified) | C2 expert-verified sign
+                    | C3 unverified report | M model detection (+score)   — SCALP-style C1–C3 grades used in carnivore monitoring
 source_id, source_record_id, license, sensitivity flags (obscured, embargoed), ingested_at
 ```
 
@@ -131,7 +132,10 @@ Each source declares how it observes the true state, so models can use it correc
 type                presence_only | detection_nondetection | count | catch_rate | acoustic | camera
 effort_model        how effort scales detection (e.g., 1 − exp(−λ·effort·q))
 bias_model          e.g., target-group background, access/road proximity, observer density
-false_positive      misidentification / classifier error rate (prior + learnable)
+false_positive      misidentification / classifier error rate (prior + learnable), plus a confusion
+                    matrix of look-alike taxa (e.g., bobcat/house cat/coyote/dog → puma)
+reporting_dynamics  duplicate reports of one individual; spikes after media coverage; preferential sampling
+                    (roads, trails, backyard cameras)
 spatial_support     how footprints map to cells (point / area integration)
 latency, dedup_rule e.g., group checklists, multiple divers reporting one encounter
 ```
@@ -236,9 +240,21 @@ sources:
   roadkill:      {obs: presence_only, bias: roads}
   user_surveys:  {obs: detection, method: sign_survey}
 policy:
-  default_tier: 2                   # landscape-scale only, no hotspots, no nowcast
+  default_tier: 2                   # awareness only: territory scale or coarser, no hotspots, no nowcast
   regions:
-    some-managed-viewing-region: {tier: 1}   # example of a regional override
+    ca-southern-central-coast: {tier: 2, note: "CESA threatened DPS (Feb 2026 vote)"}
+    torres-del-paine:          {tier: 1, mode: viewing, via: licensed_guides}   # managed viewing
+```
+
+```yaml
+taxon: canis-lupus
+extends: [guild/large-terrestrial-carnivore]
+policy:
+  default_tier: 2
+  regions:
+    california:            {tier: 2}          # CESA endangered; recolonizing
+    yellowstone-np:        {tier: 1, mode: viewing, exclude: [boundary_hunting_units_in_season]}
+  always_suppress: [dens, rendezvous_sites, collared_individuals, dispersers]
 ```
 
 ---
@@ -273,7 +289,14 @@ This is an **integrated species distribution model**. It is implemented in stage
 Species declare a characteristic spatial and temporal scale, from traits or overridden in the profile:
 
 - **Kelp-forest fish:** km-scale, day-to-week dynamics.
-- **Large carnivores:** a slow **territory-occupancy** state (10s–100s of km², months), combined with fast within-territory **activity** (diel, season, prey). Predictions at fine resolution are then derived products of a coarse state. That is both more honest and safer.
+- **Large carnivores:** a chain of nested states, from slow to fast:
+  1. **range** (years)
+  2. **territory occupancy ψ** (season; cells about a home-range fraction, e.g., H3 res 5–6 for pumas, whose SoCal home ranges run ~134–372 km²)
+  3. **use intensity** (weeks: prey, fire, recreation pressure)
+  4. **availability** (diel, weather)
+  5. **method-specific detection**
+
+  Fine-resolution outputs are derived products of the coarse state. That is both more honest and safer. Individual-level states (named or collared animals) stay internal.
 - **Migrants:** a seasonal flow component driven by migration-intensity signals.
 
 ### 5.4 Maturity ladder (with gates)
@@ -302,18 +325,44 @@ What changes for mountain lions, wolves and similar species, and how the framewo
 | Persecution, harassment, habituation, public-safety risk | Tier 2–3 policy by default (§8): landscape-scale only, no hotspots, no nowcast, long delays |
 | Region-dependent ethics | Policy is keyed by **(taxon, region)**: managed viewing destinations can get a different tier from recolonizing populations |
 
+**What is realistically predictable** (see [`../research/06-rare-carnivores.md`](../research/06-rare-carnivores.md)):
+
+| Estimand | Meaning | Where valid |
+|---|---|---|
+| ψ(cell, season) | Territory-scale occupancy | Everywhere with data |
+| λ_sign(route, day) | Expected sign detections per km, given ψ, substrate, days since snow/rain, trail type | Everywhere |
+| λ_cam(site, period) | Expected camera detections per 100 trap-nights | Everywhere |
+| P(≥1 sighting \| n days, guided) | Calibrated against watcher or operator logs | **Only managed viewing systems** |
+| Awareness index | Relative, never absolute; never claims "safe" or absence | Everywhere |
+
+**Managed viewing systems share five traits:**
+- high density
+- open terrain with long sightlines
+- habituated animals
+- a human spotter network (scopes, radios, guides)
+- governance
+
+Examples: Yellowstone's Lamar Valley wolves, Torres del Paine pumas, Pantanal jaguars, Sierra de la Culebra wolves. Pumas in SoCal chaparral meet none of these conditions.
+
+There is also evidence that **hunting next to viewing areas reduces viewing**: visitor sighting odds were 45% higher in years without harvest of road-associated Yellowstone packs. So in boundary hunting units during the season, viewing-mode outputs are suppressed.
+
+**Agency data is used as coarse priors, never redistributed at fine scale.**
+- Agencies publish carnivore locations for *conflict awareness*, coarsened or delayed. Examples: CDFW wolf territories; ODFW areas of known wolf activity; WDFW pack polygons via ArcGIS REST; Colorado's monthly watershed map.
+- Fine-scale feeds (e.g., CDFW's daily collared-wolf tracker for livestock producers) are not ingested for redistribution.
+- Wildlife-radar applies its own policy and does not rely on upstream obscuring. For example, Wildlife Insights fuzzes only IUCN CR/EN/VU species, so LC pumas and wolves may be exact upstream.
+
 **Two product modes for these species:**
 
 - **Awareness mode** (default):
   - "you're in mountain lion country"
   - typical activity times
-  - safety and coexistence guidance
+  - safety and coexistence guidance (pets, livestock, children, encounter behavior)
   - what sign to look for
-- **Viewing mode** (only where the policy tier allows):
+- **Viewing mode** (only where the (taxon, region) tier allows):
   - for established, managed viewing contexts
-  - points users to official guidance, guides and outfitters rather than coordinates
-
-Specific data sources and status details for lions and wolves: see `../research/06-*` when complete.
+  - season and time-of-day guidance, plus etiquette
+  - points users to official guidance and licensed guides rather than coordinates
+  - never real-time pack or individual positions
 
 ---
 
@@ -380,7 +429,16 @@ Policy is part of the framework, not a feature. All outputs (API, exports, tiles
 - **Seasonal and regional windows:**
   - (taxon, region, date range) → tier, for example spawning-season white seabass;
   - (taxon, region) overrides, for example managed viewing areas.
+- **Always suppressed, whatever the tier:**
+  - dens, rendezvous sites, nests, roosts
+  - named or collared individuals and dispersers
+  - anything derived from collar data
+  - small counts, which are suppressed in aggregate outputs
 - **Never de-obscure.** Honor source obscuring, embargoes and user geoprivacy. User-submitted sensitive locations are coarsened at submission time.
+- **Re-identification resistance:**
+  - Obscured points can be inferred from a user's nearby observations, and images leak location. Coarsening has to consider the whole output, not single records.
+  - Abuse detection: rate limits, flagging repeated fine-grained queries on sensitive taxa, and no export of sensitive layers.
+- **Never claim absence or safety.** A false negative ("no lions here") is a harm.
 - **License ledger:**
   - per-record license carried through to predictions;
   - outputs tagged with the most restrictive license of their inputs;

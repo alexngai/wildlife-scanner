@@ -9,6 +9,7 @@ This summarizes five parallel research reports (files `01`–`05` in this folder
 | [03-white-seabass-case-study.md](03-white-seabass-case-study.md) | WSB ecology, evidence for each signal, market squid data, fishery data, regulations, MVP model |
 | [04-birding-signals.md](04-birding-signals.md) | eBird S&T/API/EBD, BirdCast, NEXRAD + Dark Ecology, weather drivers, phenology, BirdWeather, birding MVP |
 | [05-prior-art-methods-ethics.md](05-prior-art-methods-ethics.md) | Competitors, modeling methodology, evaluation, ethics, licensing, liability |
+| [06-rare-carnivores.md](06-rare-carnivores.md) | Mountain lions & gray wolves: agency/camera/roadkill data, managed-viewing systems, signals, estimands, sensitivity policy *(added after the first round)* |
 
 ---
 
