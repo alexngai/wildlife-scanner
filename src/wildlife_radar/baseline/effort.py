@@ -19,13 +19,17 @@ class                     effort unit                                  estimator
 Survey classes come from structured monitoring programs that record absences (GBIF
 "sampling event" datasets); their effort is the species' own trials, not a shared visit count.
 
-Classes are assigned per dataset: a region's ``datasets.yaml`` registry first, then GBIF
-dataset metadata (``SAMPLING_EVENT`` → survey), then heuristics (eBird → checklist; datasets
-recording absences → survey; machine observations → sensor; otherwise casual).
+Classes are assigned per dataset: a region's ``datasets.yaml`` registry first, then heuristics
+(eBird → checklist; datasets recording absences → survey; machine observations → sensor;
+otherwise casual). Survey estimators need recorded absences: a dataset assigned a survey class
+without any absences is treated as casual, so effort groups stay internally consistent. GBIF
+dataset metadata (``annotate-datasets``) helps curate the registry: ``SAMPLING_EVENT`` datasets
+include encounter surveys but also plankton tows, eDNA and sequencing studies to exclude.
 """
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import duckdb
@@ -86,6 +90,9 @@ class DatasetEntry(BaseModel):
 
     effort_class: str | None = None
     exclude: bool = False
+    placeholder_dates: list[date] = Field(default_factory=list)
+    """Dates the publisher stamped on records whose real date is unknown (e.g. a release
+    date); records on these dates are dropped. ``date_spikes`` finds candidates."""
     name: str | None = None
     reason: str | None = None
 
@@ -132,7 +139,12 @@ def create_dataset_classes(
             "INSERT INTO _registry VALUES (?, ?, ?)",
             [(k, e.effort_class, e.exclude) for k, e in registry.datasets.items()],
         )
+    conn.execute("CREATE OR REPLACE TEMP TABLE _baddates (ds_id VARCHAR, d DATE)")
+    bad = [(k, d) for k, e in registry.datasets.items() for d in e.placeholder_dates]
+    if bad:
+        conn.executemany("INSERT INTO _baddates VALUES (?, ?)", bad)
     survey = "'survey'"
+    surveys = ", ".join(f"'{c}'" for c in SURVEY_CLASSES)
     conn.execute(
         f"""
         CREATE OR REPLACE TEMP TABLE _dsclass AS
@@ -141,16 +153,53 @@ def create_dataset_classes(
                 bool_or(outcome = 'not_detected') AS has_absence,
                 mode(modality) AS modality
             FROM observations GROUP BY 1
+        ),
+        assigned AS (
+            SELECT ds.ds_id, ds.has_absence,
+                coalesce(r.effort_class, CASE
+                    WHEN ds.ds_id = '{EBIRD_EOD_DATASET}' THEN 'checklist'
+                    WHEN ds.has_absence THEN {survey}
+                    WHEN ds.modality IN ('sensor', 'camera') THEN 'sensor'
+                    ELSE 'casual' END) AS effort_class,
+                coalesce(r.excluded, FALSE) AS excluded,
+                m.type AS gbif_type
+            FROM ds
+            LEFT JOIN _registry r ON r.ds_id = ds.ds_id
+            LEFT JOIN dataset_meta m ON m.dataset_key = ds.ds_id
         )
-        SELECT ds.ds_id,
-            coalesce(r.effort_class, CASE
-                WHEN ds.ds_id = '{EBIRD_EOD_DATASET}' THEN 'checklist'
-                WHEN m.type = 'SAMPLING_EVENT' OR ds.has_absence THEN {survey}
-                WHEN ds.modality IN ('sensor', 'camera') THEN 'sensor'
-                ELSE 'casual' END) AS effort_class,
-            coalesce(r.excluded, FALSE) AS excluded
-        FROM ds
-        LEFT JOIN _registry r ON r.ds_id = ds.ds_id
-        LEFT JOIN dataset_meta m ON m.dataset_key = ds.ds_id
+        -- Survey estimators need recorded absences; presence-only "surveys" use outing effort.
+        SELECT ds_id, has_absence, excluded, gbif_type,
+            CASE WHEN effort_class IN ({surveys}) AND NOT has_absence THEN 'casual'
+                 ELSE effort_class END AS effort_class
+        FROM assigned
         """
     )
+
+
+def date_spikes(
+    conn: duckdb.DuckDBPyConnection, *, min_records: int = 1000, min_share: float = 0.2
+) -> list[tuple[str, date, int, float]]:
+    """Single dates holding an implausible share of a dataset's records.
+
+    Real surveys spread over many field days; one date with a large share usually means a
+    placeholder (publication or release date) rather than the observation date. Returns
+    ``(dataset_key, date, records, share)``, largest share first, for curators to review.
+    """
+    rows = conn.execute(
+        """
+        WITH per_day AS (
+            SELECT dataset_key, local_date, count(*) AS n FROM observations
+            WHERE dataset_key IS NOT NULL AND local_date IS NOT NULL GROUP BY ALL
+        ),
+        shares AS (
+            SELECT dataset_key, local_date, n, n / sum(n) OVER (PARTITION BY dataset_key) AS share,
+                count(*) OVER (PARTITION BY dataset_key) AS days
+            FROM per_day
+        )
+        SELECT dataset_key, local_date, n, share FROM shares
+        WHERE n >= ? AND share >= ? AND days > 1
+        ORDER BY share DESC
+        """,
+        [min_records, min_share],
+    ).fetchall()
+    return [(k, d, int(n), float(sh)) for k, d, n, sh in rows]

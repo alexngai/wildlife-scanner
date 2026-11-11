@@ -9,9 +9,22 @@ datasets:
   154d6192-bea0-4bcb-ab58-1c573081591d:
     name: Monitoring and Evaluation of Kelp Forest Ecosystems in the MLPA MPA Network
     effort_class: dive_survey
+    # ~250k records (mostly absences) carry eventDate 2023-11-30 while their eventID holds the
+    # real survey date (e.g. SAN_MATEO_KELP_20201008_OUTER_2_swath). Found in the 2025-11
+    # snapshot; recovering the dates from eventID needs a re-extract with that column.
+    placeholder_dates: [2023-11-30]
   4ef2bed0-d40f-49c9-bb64-c46a301a5a72:
     name: Reef Check California — rocky reef fishes, invertebrates and algae
     effort_class: dive_survey
+  f84538b9-5488-48af-a668-a45cdd0fc558:
+    name: PISCO Kelp Forest Community Surveys
+    effort_class: dive_survey
+  f02fb197-9597-4c3e-9ba0-ba29847ccdef:
+    name: MARINe/PISCO Coastal Biodiversity Surveys — swaths
+    effort_class: intertidal_survey
+  cf3bdc30-370c-48d3-8fff-b587a39d72d6:
+    name: eButterfly Surveys
+    effort_class: checklist
   58ffefab-20aa-4cec-b0c0-dd7330ed7280:
     name: MARINe/PISCO Coastal Biodiversity Surveys — point contact
     effort_class: intertidal_survey
@@ -26,3 +39,19 @@ datasets:
     name: California Harmful Algal Bloom Monitoring and Alert Program
     exclude: true
     reason: Plankton monitoring, not wildlife encounters.
+  27473ca0-1531-4a67-8a38-dd8c6b22bb5d:
+    name: CalCOFI Fish Larvae & Egg Tows
+    exclude: true
+    reason: Plankton net tows of larvae and eggs, not encounters.
+  3bb7e2f5-7d2d-42e8-b2b4-07439ccf9053:
+    name: eDNA_Subseafloor
+    exclude: true
+    reason: Sediment eDNA, not encounters.
+  a7dff6b5-7ca3-4639-ac3e-f0b413d1b160:
+    name: Invertebrate Collections made by R/V Velero III, IV, Atlantic, and Hubbs
+    exclude: true
+    reason: Ship-based dredge collections, not encounters.
+  39e1a4a8-204e-40f3-ac5a-a1bc1b4dae1d:
+    name: Macrofauna on mineral-rich substrates in the Southern California Borderland
+    exclude: true
+    reason: Deep-sea sampling, not encounters.

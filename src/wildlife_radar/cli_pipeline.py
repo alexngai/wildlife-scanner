@@ -115,6 +115,7 @@ def cmd_evaluate_baseline(args: argparse.Namespace) -> int:
                 res=args.res, min_visits=args.min_visits, since_year=args.since_year
             ),
             registry=_registry(args),
+            groups=args.groups.split(",") if args.groups else None,
         )
     passed = sum(s.passes for s in scores)
     print(
@@ -130,6 +131,7 @@ def cmd_evaluate_baseline(args: argparse.Namespace) -> int:
 
 
 def cmd_annotate_datasets(args: argparse.Namespace) -> int:
+    from wildlife_radar.baseline.effort import date_spikes
     from wildlife_radar.connectors.gbif_datasets import fetch_dataset_meta
     from wildlife_radar.storage import ObservationStore
 
@@ -138,7 +140,21 @@ def cmd_annotate_datasets(args: argparse.Namespace) -> int:
         rows = store.conn.execute(
             "SELECT type, count(*) FROM dataset_meta GROUP BY 1 ORDER BY 2 DESC"
         ).fetchall()
-    print(json.dumps({"fetched": n, "by_type": dict(rows)}, indent=2))
+        spikes = date_spikes(store.conn)
+    print(
+        json.dumps(
+            {
+                "fetched": n,
+                "by_type": dict(rows),
+                # Candidates for `placeholder_dates` in the region's datasets.yaml.
+                "suspicious_dates": [
+                    {"dataset_key": k, "date": d.isoformat(), "records": r, "share": round(sh, 3)}
+                    for k, d, r, sh in spikes
+                ],
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -314,6 +330,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--min-visits", type=int, default=5)
     p.add_argument("--since-year", type=int, help="ignore records before this year")
     p.add_argument("--datasets", help="dataset registry YAML (default: region pack's)")
+    p.add_argument("--groups", help="comma-separated effort groups to (re)score with this split")
     p.add_argument("--show", type=int, default=25)
     p.set_defaults(func=cmd_evaluate_baseline)
 

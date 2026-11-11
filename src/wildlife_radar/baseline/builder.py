@@ -94,6 +94,9 @@ class BaselineConfig:
     museum specimens, bulk barcoding samples) — and whose collecting isn't comparable effort."""
     exclude_licenses: tuple[str, ...] = ("ALL-RIGHTS-RESERVED", "UNKNOWN")
     """Records whose license doesn't allow publishing derived products (licensing.md §3)."""
+    survey_flat_season: bool = True
+    """Survey programs sample in a fixed season (and record campaign dates), so they can't
+    inform seasonality: their counts are spread evenly over the year (a per-site annual rate)."""
     model_version: str = "baseline-v1"
 
     def __post_init__(self) -> None:
@@ -112,6 +115,9 @@ class BaselineConfig:
             quoted = ", ".join("'" + b.replace("'", "''") + "'" for b in self.exclude_licenses)
             clauses.append(f"license_id NOT IN ({quoted})")
         return " AND ".join(clauses) or "TRUE"
+
+    def flat_kernel(self) -> list[tuple[int, float]]:
+        return [(d, 1 / 52) for d in range(-25, 27)]
 
     def kernel(self) -> list[tuple[int, float]]:
         k = self.kernel_half_width
@@ -184,6 +190,8 @@ def create_training_view(
             SELECT o.*, d.effort_class FROM observations o
             JOIN _dsclass d ON d.ds_id = coalesce(o.dataset_key, o.source_id)
             WHERE NOT d.excluded
+              AND NOT EXISTS (SELECT 1 FROM _baddates x
+                              WHERE x.ds_id = d.ds_id AND x.d = o.local_date)
               AND o.lat BETWEEN ? AND ? AND o.lon BETWEEN ? AND ?
               AND o.week IS NOT NULL AND o.group_id IS NOT NULL AND o.visit_key IS NOT NULL
               AND o.cell_r{R} IS NOT NULL
@@ -271,6 +279,11 @@ def build_baseline(
     )
     conn.execute("CREATE OR REPLACE TEMP TABLE _k (d INTEGER, w DOUBLE)")
     conn.executemany("INSERT INTO _k VALUES (?, ?)", cfg.kernel())
+    conn.execute("CREATE OR REPLACE TEMP TABLE _ks (d INTEGER, w DOUBLE)")
+    conn.executemany(
+        "INSERT INTO _ks VALUES (?, ?)",
+        cfg.flat_kernel() if cfg.survey_flat_season else cfg.kernel(),
+    )
 
     built_at = naive_utc(utcnow())
     clear_region(conn, region_id)
@@ -297,23 +310,24 @@ def build_baseline(
             f"""
             INSERT INTO prior_effort
             SELECT ?, t.egroup, t.taxon_id, ?, {col} AS cell, {week_expr} AS week, SUM(w)
-            FROM _t t JOIN _taxa USING (taxon_id, egroup) CROSS JOIN _k
+            FROM _t t JOIN _taxa USING (taxon_id, egroup) CROSS JOIN _ks
             GROUP BY ALL ORDER BY t.egroup, cell, week
             """,
             [region_id, level],
         )
-        conn.execute(
-            f"""
-            INSERT INTO prior_hits
-            SELECT ?, taxon_id, egroup, ?, {col} AS cell, {week_expr} AS week, SUM(w)
-            FROM (
-                SELECT taxon_id, egroup, c, c1, c2, week FROM _d
-                UNION ALL SELECT taxon_id, egroup, c, c1, c2, week FROM _t WHERE detected
-            ) h JOIN _taxa USING (taxon_id, egroup) CROSS JOIN _k
-            GROUP BY ALL ORDER BY taxon_id, cell, week
-            """,
-            [region_id, level],
-        )
+        for source, kernel in (
+            ("SELECT taxon_id, egroup, c, c1, c2, week FROM _d", "_k"),
+            ("SELECT taxon_id, egroup, c, c1, c2, week FROM _t WHERE detected", "_ks"),
+        ):
+            conn.execute(
+                f"""
+                INSERT INTO prior_hits
+                SELECT ?, taxon_id, egroup, ?, {col} AS cell, {week_expr} AS week, SUM(w)
+                FROM ({source}) h JOIN _taxa USING (taxon_id, egroup) CROSS JOIN {kernel}
+                GROUP BY ALL ORDER BY taxon_id, cell, week
+                """,
+                [region_id, level],
+            )
     conn.execute(
         """
         INSERT INTO prior_cells
@@ -395,6 +409,6 @@ def build_baseline(
     report.groups = dict(
         conn.execute("SELECT egroup, count(*) FROM _taxa GROUP BY 1 ORDER BY 2 DESC").fetchall()
     )
-    for tmp in ("_obs", "_d", "_v", "_t", "_taxa", "_k"):
+    for tmp in ("_obs", "_d", "_v", "_t", "_taxa", "_k", "_ks"):
         conn.execute(f"DROP TABLE IF EXISTS {tmp}")
     return report
