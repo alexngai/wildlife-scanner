@@ -181,13 +181,20 @@ def create_training_view(
     create_dataset_classes(conn, registry)
     lon_min, lat_min, lon_max, lat_max = bbox
     R, P1, P2 = cfg.res, cfg.parent_res, cfg.context_res
+    surveys = ", ".join(f"'{c}'" for c in SURVEY_CLASSES)
     after_n = naive_utc(after) if after else None
     before_n = naive_utc(before) if before else None
     conn.execute(
         f"""
         CREATE OR REPLACE TEMP TABLE {name} AS
         WITH base AS (
-            SELECT o.*, d.effort_class FROM observations o
+            SELECT o.*, d.ds_id,
+                -- Survey estimators need recorded absences for the taxon itself (programs may
+                -- record absences for fishes but only presences for invertebrates).
+                CASE WHEN d.effort_class IN ({surveys}) AND NOT bool_or(o.outcome = 'not_detected')
+                        OVER (PARTITION BY d.ds_id, o.taxon_id)
+                     THEN 'casual' ELSE d.effort_class END AS effort_class
+            FROM observations o
             JOIN _dsclass d ON d.ds_id = coalesce(o.dataset_key, o.source_id)
             WHERE NOT d.excluded
               AND NOT EXISTS (SELECT 1 FROM _baddates x

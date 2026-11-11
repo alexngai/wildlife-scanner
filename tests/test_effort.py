@@ -275,3 +275,33 @@ def test_placeholder_dates_are_dropped_and_detected():
         }
     )
     assert count(REGISTRY) - count(fixed) == len(restamped)
+
+
+def test_survey_taxa_without_absences_use_casual_effort(world_store):
+    # A program that records absences for fishes but only presences for a snail: the snail's
+    # records can't support a detections/trials estimate.
+    from wildlife_radar.baseline.builder import BaselineConfig, create_training_view
+
+    world, store, _ = world_store
+    store.conn.execute(
+        """
+        CREATE TEMP TABLE _snail AS
+        SELECT * REPLACE ('snail-' || dedupe_key AS dedupe_key, 'snail-' || obs_id AS obs_id,
+                          'megastraea-undosa' AS taxon_id, 'mollusks' AS group_id,
+                          'presence_only' AS outcome)
+        FROM observations WHERE dataset_key = 'synthetic-dive-survey' AND outcome = 'detected'
+        LIMIT 20
+        """
+    )
+    store.conn.execute("INSERT INTO observations SELECT * FROM _snail")
+    try:
+        create_training_view(store.conn, BaselineConfig(), world.bbox, REGISTRY)
+        classes = dict(
+            store.conn.execute(
+                "SELECT taxon_id, any_value(effort_class) FROM _obs "
+                "WHERE dedupe_key LIKE 'snail-%' OR taxon_id = 'piscis-communis' GROUP BY 1"
+            ).fetchall()
+        )
+    finally:
+        store.conn.execute("DELETE FROM observations WHERE dedupe_key LIKE 'snail-%'")
+    assert classes == {"megastraea-undosa": "casual", "piscis-communis": "dive_survey"}
