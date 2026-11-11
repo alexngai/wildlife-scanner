@@ -12,7 +12,7 @@ An online resource to help people find wildlife. It fuses several data sources i
 
 ## Status
 
-**Phases 0–1 are done**: the skeleton plus a policy-enforced baseline for every species. Phase 2, profile generation, is next. For the research and design, start with [`docs/research/00-synthesis.md`](docs/research/00-synthesis.md). It summarizes the data landscape, the evidence behind the candidate signals, a proposed model architecture, ethics guardrails and next steps. It links to seven detailed research reports.
+**Phases 0–2 are done**: the skeleton, a policy-enforced baseline for every species with method-specific effort models, and the profile-generation pipeline (identity crosswalk, trait import, occurrence-derived priors, evidence-checked LLM extraction, reconciliation and review). Phase 3, conditions and live signals, is next. For the research and design, start with [`docs/research/00-synthesis.md`](docs/research/00-synthesis.md). It summarizes the data landscape, the evidence behind the candidate signals, a proposed model architecture, ethics guardrails and next steps. It links to seven detailed research reports.
 
 The framework design (draft) is in [`docs/design/framework.md`](docs/design/framework.md). It covers the species-agnostic architecture: core concepts, species profiles generated from metadata, how signals are combined, rare and cryptic species, species-first and place-first queries, the policy layer and the roadmap.
 
@@ -94,6 +94,20 @@ Data goes in `data/`, which git ignores:
    ```bash
    uv run wildlife-radar serve
    ```
+
+5. Generate draft species profiles (written to `data/profiles/generated/`). Download [TetrapodTraits](https://zenodo.org/records/11303604) into `data/` first if you want trait values:
+
+   ```bash
+   uv run wildlife-radar profilegen generate "Puma concolor" "Limosa fedoa" --traits data/traits/TetrapodTraits_1.0.0.csv --db data/wildlife-radar.duckdb --region socal
+   ```
+
+   To resolve every baseline taxon (verified iNaturalist ids make `build-tiers` faster and robust to renamed taxa), run this before step 3:
+
+   ```bash
+   uv run wildlife-radar profilegen crosswalk --db data/wildlife-radar.duckdb --region-id socal
+   ```
+
+   LLM extraction from Wikipedia (`--extract`) needs the `llm` extra (`uv sync --extra llm`), an Anthropic API key, an extraction model (`--model` or `WILDLIFE_RADAR_EXTRACTION_MODEL`), and a User-Agent with your contact details (Wikimedia policy). See [`profiles/README.md`](profiles/README.md) for review and promotion.
 
 Other commands work without a database:
 

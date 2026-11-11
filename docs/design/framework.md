@@ -281,6 +281,8 @@ Wikipedia facts may be stored as structured fields with a revision-ID citation, 
 
 **Principle: generated metadata enters as weak priors and hypotheses, never as ground truth.** A profile's assumptions about how a species behaves only shape predictions until observed data overrides them. Every candidate signal is a hypothesis that the evaluation harness measures (§9).
 
+**Implementation (Phase 2).** `src/wildlife_radar/profilegen/` implements steps 1, 3–5 and 7–9; step 2 is the existing tier table (`policy/statuses.py`), now fed verified iNaturalist ids from the crosswalk. Drafts are written to `data/profiles/generated/` (git-ignored) and enter `profiles/species/` only through `profilegen promote`, which records the reviewer and locks the checked fields. Not yet done: taxonomic imputation (step 6), trait databases beyond TetrapodTraits, Plazi/BHL sources, cross-model agreement, and calibrating per-field acceptance thresholds on the overlap with trait databases. Findings from the first runs: [`../research/09-effort-models-and-profiles-2026-11.md`](../research/09-effort-models-and-profiles-2026-11.md).
+
 ### 4.4 Community contributions
 Contributions are typed, versioned and reviewed, like pull requests:
 
@@ -621,7 +623,7 @@ wildlife-radar/
 |---|---|---|
 | **0 — Skeleton** ✅ | Core schemas; H3 and as-of utilities; connectors (GBIF search + snapshot-row parser, iNaturalist, NOAA tides, astronomy); policy tiers, assignment and egress filter; evaluation harness basics; draft profiles for the five validation species; `socal` region pack | The contracts |
 | **1 — Baseline for everything (SoCal)** ✅ | Level-0 target-group baseline for every species with enough records; GBIF snapshot ingestion; sparse statistics store + on-demand estimates; backtest gates vs. range-only; fail-closed status/tier table (region file + iNaturalist statuses + observed geoprivacy); species-first map/calendar and place-first lists via a FastAPI service | "Any species" + both query modes |
-| **2 — Profiles** | Generation pipeline (Wikidata → traits → LLM extraction with citations); guild templates; auto policy tiering; review workflow | Metadata-driven profiles |
+| **2 — Profiles** ✅ | Generation pipeline (`profilegen`: GBIF + Wikidata identity crosswalk with iNaturalist verification → TetrapodTraits → occurrence-derived seasonality and diel priors → LLM extraction with verified evidence → reconciliation → drafts); group templates; crosswalk-backed auto policy tiering; review/promote with field locks. Also **effort models**: per-dataset effort classes (checklist, casual, sensor, dive/intertidal/structured survey) with trial-based survey effort. Live LLM extraction is wired but unvalidated (needs an operator API key and a contact User-Agent for Wikipedia) | Metadata-driven profiles |
 | **3 — Conditions and live** | Signal DAG with ocean, weather and astronomy; Level 1–2 for the five validation species; hypothesis scorecard | Fusion + honest testing |
 | **4 — Contributions** | Effort-aware logs (dives, surveys, checklists) incl. non-detections; trust and review | The data moat |
 | **5 — Web app** | TypeScript frontend | Product |

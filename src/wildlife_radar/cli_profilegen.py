@@ -133,6 +133,59 @@ def cmd_promote(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_crosswalk(args: argparse.Namespace) -> int:
+    """Resolve every baseline taxon in a region; verified iNaturalist ids feed build-tiers."""
+    from wildlife_radar.profilegen.identity import (
+        IDENTITY_SCHEMA,
+        IdentityResolver,
+        save_identities,
+    )
+    from wildlife_radar.storage import ObservationStore
+
+    resolver = IdentityResolver()
+    done = 0
+    with ObservationStore(args.db) as store:
+        store.conn.execute(IDENTITY_SCHEMA)
+        names = [
+            n
+            for (n,) in store.conn.execute(
+                """
+                SELECT DISTINCT scientific_name FROM prior_taxa
+                WHERE region_id = ? AND scientific_name IS NOT NULL
+                  AND (? OR scientific_name NOT IN (SELECT query_name FROM taxon_identity))
+                ORDER BY 1
+                """,
+                [args.region_id, args.refresh],
+            ).fetchall()
+        ][: args.limit]
+        for start in range(0, len(names), args.chunk):
+            chunk = names[start : start + args.chunk]
+            idents = resolver.resolve_many(chunk, gbif="fallback")
+            save_identities(store.conn, idents)
+            done += len(chunk)
+            print(f"resolved {done}/{len(names)}", file=sys.stderr)
+        summary = store.conn.execute(
+            """
+            SELECT count(*), count(*) FILTER (WHERE taxon_id IS NOT NULL),
+                count(*) FILTER (WHERE (record->>'$.verified.inaturalist')::BOOLEAN),
+                count(*) FILTER (WHERE record->>'$.wikidata' IS NOT NULL)
+            FROM taxon_identity
+            """
+        ).fetchone()
+    print(
+        json.dumps(
+            dict(
+                zip(
+                    ["identities", "resolved", "inaturalist_verified", "wikidata"],
+                    summary,
+                    strict=True,
+                )
+            )
+        )
+    )
+    return 0
+
+
 def register(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("profilegen", help="generate draft species profiles from metadata")
     actions = p.add_subparsers(dest="profilegen_action", required=True)
@@ -141,6 +194,16 @@ def register(sub: argparse._SubParsersAction) -> None:
     a.add_argument("names", nargs="*")
     a.add_argument("--names-file")
     a.set_defaults(func=cmd_resolve)
+
+    a = actions.add_parser(
+        "crosswalk", help="resolve every baseline taxon in a region (cached in the store)"
+    )
+    a.add_argument("--db", required=True)
+    a.add_argument("--region-id", required=True, help="baseline region id (e.g. sandiego)")
+    a.add_argument("--limit", type=int)
+    a.add_argument("--chunk", type=int, default=200)
+    a.add_argument("--refresh", action="store_true", help="re-resolve cached names")
+    a.set_defaults(func=cmd_crosswalk)
 
     a = actions.add_parser("generate", help="write draft profiles (data/profiles/generated)")
     a.add_argument("names", nargs="*")
