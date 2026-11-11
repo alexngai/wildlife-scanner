@@ -1,6 +1,10 @@
 # Licensing posture
 
-**Decision (2026-11-11):** wildlife-radar is **open source**, and the service is **free, non-commercial and educational**.
+**Decision (2026-11-11):** wildlife-radar is **exclusively non-commercial**.
+- It is a free, educational service.
+- No monetization of any kind: no ads, paid tiers, affiliate or referral links, or commercial sponsorship of features.
+- It is not operated by or on behalf of a for-profit entity.
+- The code is published openly. Which license it uses is still to be decided (§4).
 
 This note records what that changes. It is based on the research in [`../research/`](../research/). Several primary terms pages could not be read during that research (marked UNVERIFIED there). **Read the actual terms before relying on any row below.** This is not legal advice.
 
@@ -69,10 +73,20 @@ This note records what that changes. It is based on the research in [`../researc
 
 | Asset | Proposed license | Note |
 |---|---|---|
-| Code | **Apache-2.0** (alternatives: MIT; AGPL-3.0 to keep hosted forks open) | Decision needed |
+| Code | Decision needed; see below | |
 | Docs | CC BY 4.0 | |
 | Our own data products | CC BY 4.0 where all inputs allow; otherwise the inherited license (typically CC BY-NC 4.0) | Set automatically by the ledger |
 | User contributions | CC BY 4.0 (or CC0) | |
+
+### Code license: does "non-commercial" extend to the code?
+
+The project's *service and data* are non-commercial either way. A separate question is whether third parties may use the *code* commercially.
+
+| Option | Others' commercial use of the code | "Open source" (OSI)? | Notes |
+|---|---|---|---|
+| **AGPL-3.0** | Allowed, but anyone running a modified version as a service must publish their source | Yes | Deters closed commercial forks. Commercial forks also lack our NC data and partner data. |
+| Apache-2.0 / MIT | Allowed, no conditions beyond attribution | Yes | Maximizes reuse, including by companies |
+| PolyForm Noncommercial 1.0.0 | **Prohibited** | **No** ("source-available") | Hard NC guarantee. Some contributors, institutions and packagers avoid non-OSI licenses. |
 
 ## 5. Outreach angle
 
