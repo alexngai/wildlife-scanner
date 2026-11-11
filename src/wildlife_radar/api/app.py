@@ -124,9 +124,9 @@ def create_app(
             raise HTTPException(status_code=404, detail=NOT_AVAILABLE) from None
 
     @app.get("/species/{taxon_id}/map", response_model=SpeciesMap)
-    def species_map(taxon_id: str, date: str | None = None):
+    def species_map(taxon_id: str, date: str | None = None, method: str | None = None):
         try:
-            return queries.species_map(taxon_id, _parse_date(date))
+            return queries.species_map(taxon_id, _parse_date(date), method=method)
         except NotAvailable:
             raise HTTPException(status_code=404, detail=NOT_AVAILABLE) from None
 
@@ -137,10 +137,13 @@ def create_app(
         lon: float | None = None,
         place_id: str | None = None,
         year: int | None = None,
+        method: str | None = None,
     ):
         lat, lon = _location(lat, lon, place_id)
         try:
-            return queries.calendar(taxon_id, lat, lon, year or datetime.now(UTC).year)
+            return queries.calendar(
+                taxon_id, lat, lon, year or datetime.now(UTC).year, method=method
+            )
         except NotAvailable:
             raise HTTPException(status_code=404, detail=NOT_AVAILABLE) from None
         except ValueError as exc:

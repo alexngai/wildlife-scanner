@@ -89,6 +89,11 @@ class SyntheticWorld:
     end: date = date(2025, 12, 31)
     seed: int = 7
     visits: list[tuple[str, float, float, date]] = field(default_factory=list)
+    survey_sites: tuple[tuple[float, float], ...] = ()
+    """Fixed dive-survey sites, surveyed twice a month; every species gets a present/absent
+    record per survey (a structured program recording absences)."""
+    survey_species: tuple[SyntheticSpecies, ...] = ()
+    survey_dataset: str = "synthetic-dive-survey"
 
     def _visit_location(self, rng: random.Random) -> tuple[float, float]:
         lon_min, lat_min, lon_max, lat_max = self.bbox
@@ -140,4 +145,46 @@ class SyntheticWorld:
                             extras={"group": sp.group, "observer_hash": observer},
                         )
                     )
+        out.extend(self._surveys(rng, n))
+        return out
+
+    def _surveys(self, rng: random.Random, n0: int) -> list[Observation]:
+        out: list[Observation] = []
+        n = n0
+        day = self.start
+        while day <= self.end:
+            for d in (day, day + timedelta(days=14)):
+                if d > self.end:
+                    continue
+                week = min(d.isocalendar().week, 52)
+                when = datetime(d.year, d.month, d.day, 18, tzinfo=UTC)
+                for s_idx, (lat, lon) in enumerate(self.survey_sites):
+                    for sp in self.survey_species:
+                        n += 1
+                        seen = rng.random() < sp.p_true(lat, lon, week)
+                        out.append(
+                            Observation(
+                                obs_id=f"synthetic-survey:{n}",
+                                source_id="synthetic-survey",
+                                source_record_id=str(n),
+                                taxon=TaxonRef(
+                                    scheme=TaxonScheme.NAME,
+                                    id=sp.name,
+                                    name=sp.name,
+                                    rank="species",
+                                ),
+                                footprint=PointFootprint(lat=lat, lon=lon, uncertainty_m=20),
+                                time=TimeWindow.instant(when, Precision.MINUTE),
+                                modality=Modality.SEE,
+                                outcome=Outcome.DETECTED if seen else Outcome.NOT_DETECTED,
+                                evidence_grade=EvidenceGrade.C1,
+                                license=CC_BY,
+                                extras={
+                                    "group": sp.group,
+                                    "dataset_key": self.survey_dataset,
+                                    "observer_hash": f"site-{s_idx}",
+                                },
+                            )
+                        )
+            day = (day.replace(day=1) + timedelta(days=32)).replace(day=1)
         return out

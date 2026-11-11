@@ -1,5 +1,10 @@
 """Species-first and place-first queries over the Level-0 baseline, with policy enforcement.
 
+Estimates exist per *effort group* (taxon group × effort class, e.g. ``birds:checklist`` or
+``fishes:dive_survey``). Probabilities are only comparable within one effort group, so place
+lists are grouped by it, and species queries use one effort group — the one matching the
+requested method, or the taxon's best-sampled one.
+
 Each taxon is answered at the finest baseline level its effective tier allows — fine cells for
 open taxa, parent cells for generalized ones, context cells for coarse ones — and predictions
 pass through the shared ``EgressFilter``. Place-first lists never rank tier ≥ COARSE taxa; those
@@ -11,12 +16,14 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 
 import duckdb
 import h3
 from pydantic import BaseModel, Field
 
+from wildlife_radar.baseline.effort import METHOD_FOR_CLASS, label_for, method_for, split_egroup
 from wildlife_radar.baseline.estimate import Estimate, Level, estimate
 from wildlife_radar.connectors import ALL_SOURCES
 from wildlife_radar.core import spatial
@@ -30,14 +37,18 @@ from wildlife_radar.policy.tiers import PolicyTier, rule_for
 from wildlife_radar.regions import Region
 from wildlife_radar.storage.observations import week_of
 
-METHOD_ID = "observer_visit"
 LEVEL0_LABEL = (
-    "Level 0 baseline: how often people who record this group of species record this one here, "
-    "at this time of year. Based on historical records corrected for where observers go; not "
-    "adjusted for current conditions or recent sightings."
+    "Level 0 baseline: how often this species is recorded here at this time of year, per unit "
+    "of effort for the stated method (an outing for checklists and casual sightings, a survey "
+    "unit for structured surveys). Based on historical records corrected for where observers "
+    "go; not adjusted for current conditions or recent sightings."
 )
 _CONFIDENCE_ORDER = [Confidence.INSUFFICIENT, Confidence.LOW, Confidence.MEDIUM, Confidence.HIGH]
 _LEVELS: tuple[Level, ...] = ("cell", "parent", "context")
+AWARENESS_MESSAGE = (
+    "Present in this wider area. Shown for awareness only: no location or timing details are "
+    "given for sensitive species."
+)
 
 
 class NotAvailable(LookupError):
@@ -78,6 +89,17 @@ def _cap(conf: Confidence, cap: Confidence) -> Confidence:
     return min(conf, cap, key=_CONFIDENCE_ORDER.index)
 
 
+def distinctiveness(p: float, ratio: float | None) -> float:
+    """``p · ln(ratio)``: high only when a taxon is both likely and distinctive.
+
+    Ranking by the ratio alone favors rarely recorded taxa whose tiny probabilities produce huge
+    ratios; weighting by ``p`` (the expected excess, as in an information-gain term) does not.
+    """
+    if not ratio or ratio <= 1:
+        return 0.0
+    return p * math.log(ratio)
+
+
 class LicenseInfo(BaseModel):
     license_ids: list[str]
     noncommercial: bool
@@ -86,16 +108,27 @@ class LicenseInfo(BaseModel):
     attribution: list[str]
 
 
+class EffortGroupSummary(BaseModel):
+    group_id: str
+    label: str
+    method: str
+    records: int
+    gate: dict | None = None
+
+
 class TaxonSummary(BaseModel):
     taxon_id: str
     scientific_name: str | None
     common_name: str | None = None
     group: str | None
+    """Taxon group (birds, fishes, …)."""
     records_visits: int
     tier: int
     mode: str
     """``forecast`` (tiers 0–1) or ``awareness`` (tier 2)."""
     gate: dict | None = None
+    """Backtest gate of the primary (best-sampled) effort group."""
+    effort_groups: list[EffortGroupSummary] = Field(default_factory=list)
 
 
 class MapCell(BaseModel):
@@ -112,8 +145,9 @@ class SpeciesMap(BaseModel):
     date: date
     time_window: TimeWindow
     resolution_km: float
+    effort_group: str
+    method: str
     cells: list[MapCell]
-    method: str = METHOD_ID
     maturity_level: int = 0
     label: str = LEVEL0_LABEL
     license: LicenseInfo
@@ -132,6 +166,8 @@ class Calendar(BaseModel):
     cell: str
     resolution_km: float
     granularity: str
+    effort_group: str
+    method: str
     entries: list[CalendarEntry]
     area_fallback: bool = False
     label: str = LEVEL0_LABEL
@@ -159,10 +195,14 @@ class AwarenessItem(BaseModel):
 
 
 class GroupLists(BaseModel):
-    """Lists for one taxon group. Probabilities are only comparable within a group: each is
-    "per outing by someone who records this group"."""
+    """Lists for one effort group; probabilities are comparable only within it."""
 
     group: str
+    """Effort group id, e.g. ``birds:checklist``."""
+    taxon_group: str
+    effort_class: str
+    label: str
+    method: str
     most_likely: list[PlaceItem] = Field(default_factory=list)
     special_here: list[PlaceItem] = Field(default_factory=list)
     peaking_now: list[PlaceItem] = Field(default_factory=list)
@@ -182,21 +222,26 @@ class PlaceLists(BaseModel):
         return next((g for g in self.groups if g.group == name), None)
 
 
-def distinctiveness(p: float, ratio: float | None) -> float:
-    """``p · ln(ratio)``: high only when a taxon is both likely and distinctive.
-
-    Ranking by the ratio alone favors rarely recorded taxa whose tiny probabilities produce huge
-    ratios; weighting by ``p`` (the expected excess, as in an information-gain term) does not.
-    """
-    if not ratio or ratio <= 1:
-        return 0.0
-    return p * math.log(ratio)
+@dataclass(frozen=True)
+class _TaxonInfo:
+    name: str | None
+    taxon_group: str
+    records: int
+    egroups: tuple[tuple[str, str, int], ...]
+    """(group_id, effort_class, records), best-sampled first."""
 
 
-AWARENESS_MESSAGE = (
-    "Present in this wider area. Shown for awareness only: no location or timing details are "
-    "given for sensitive species."
-)
+def _matches(group_id: str, selector: str | None) -> bool:
+    """A selector is a taxon group (``fishes``), effort group, effort class or method id."""
+    if selector is None:
+        return True
+    taxon_group, effort_class = split_egroup(group_id)
+    return selector in {
+        group_id,
+        taxon_group,
+        effort_class,
+        METHOD_FOR_CLASS.get(effort_class, ""),
+    }
 
 
 class BaselineQueries:
@@ -221,23 +266,37 @@ class BaselineQueries:
         self.model_version, built_at, res, parent_res, context_res, self.shrinkage = build
         self.level_res = {"cell": res, "parent": parent_res, "context": context_res}
         self.as_of = built_at.replace(tzinfo=UTC)
-        self._taxa = {
-            row[0]: row
-            for row in conn.execute(
-                "SELECT taxon_id, scientific_name, group_id, n_visits FROM prior_taxa "
-                "WHERE region_id = ?",
-                [region.id],
-            ).fetchall()
+        rows = conn.execute(
+            "SELECT taxon_id, group_id, taxon_group, effort_class, scientific_name, n_visits "
+            "FROM prior_taxa WHERE region_id = ? ORDER BY n_visits DESC",
+            [region.id],
+        ).fetchall()
+        grouped: dict[str, list[tuple]] = defaultdict(list)
+        for row in rows:
+            grouped[row[0]].append(row)
+        self._taxa: dict[str, _TaxonInfo] = {
+            t: _TaxonInfo(
+                name=rs[0][4],
+                taxon_group=rs[0][2],
+                records=sum(r[5] for r in rs),
+                egroups=tuple((r[1], r[3], int(r[5])) for r in rs),
+            )
+            for t, rs in grouped.items()
         }
         self._species_profiles = set(profiles.ids(kind="species")) if profiles else set()
-        self._gates: dict[str, dict] = {}
+        self._gates: dict[tuple[str, str], dict] = {}
         tables = {r[0] for r in conn.execute("SHOW TABLES").fetchall()}
         if "baseline_gates" in tables:
-            for taxon_id, n_pos, bss, passes in conn.execute(
-                "SELECT taxon_id, n_pos, bss, passes FROM baseline_gates WHERE region_id = ?",
+            for taxon_id, group_id, n_pos, bss, passes in conn.execute(
+                "SELECT taxon_id, group_id, n_pos, bss, passes FROM baseline_gates "
+                "WHERE region_id = ?",
                 [region.id],
             ).fetchall():
-                self._gates[taxon_id] = {"n_pos": n_pos, "bss": bss, "passes": passes}
+                self._gates[(taxon_id, group_id)] = {
+                    "n_pos": n_pos,
+                    "bss": bss,
+                    "passes": passes,
+                }
         self._licenses = self._load_licenses(conn)
 
     # ------------------------------------------------------------------ helpers
@@ -302,18 +361,35 @@ class BaselineQueries:
     def _coarser(level: Level) -> list[Level]:
         return list(_LEVELS[_LEVELS.index(level) :])
 
+    def _choose_group(self, taxon_id: str, method: str | None) -> str:
+        for group_id, _, _ in self._taxa[taxon_id].egroups:
+            if _matches(group_id, method):
+                return group_id
+        raise NotAvailable(taxon_id)
+
     def taxon_summary(self, taxon_id: str, on: date) -> TaxonSummary:
         tier = self._tier(taxon_id, on)
-        _, name, group, n_visits = self._taxa[taxon_id]
+        info = self._taxa[taxon_id]
+        primary = info.egroups[0][0]
         return TaxonSummary(
             taxon_id=taxon_id,
-            scientific_name=name,
+            scientific_name=info.name,
             common_name=self.common_name(taxon_id),
-            group=group,
-            records_visits=int(n_visits),
+            group=info.taxon_group,
+            records_visits=info.records,
             tier=int(tier),
             mode="awareness" if tier >= PolicyTier.COARSE else "forecast",
-            gate=self._gates.get(taxon_id),
+            gate=self._gates.get((taxon_id, primary)),
+            effort_groups=[
+                EffortGroupSummary(
+                    group_id=g,
+                    label=label_for(g),
+                    method=method_for(g),
+                    records=n,
+                    gate=self._gates.get((taxon_id, g)),
+                )
+                for g, _, n in info.egroups
+            ],
         )
 
     def _prediction(
@@ -325,7 +401,7 @@ class BaselineQueries:
             taxon_id=e.taxon_id,
             cell=e.cell,
             time=window,
-            method_id=METHOD_ID,
+            method_id=method_for(e.group_id),
             as_of=self.as_of,
             p=min(max(e.p, 0.0), 1.0),
             lift_regional=e.lift,
@@ -341,10 +417,10 @@ class BaselineQueries:
         self, on: date, q: str | None = None, group: str | None = None, limit: int = 50
     ) -> list[TaxonSummary]:
         out = []
-        for taxon_id, (_, name, grp, _) in sorted(self._taxa.items(), key=lambda kv: -kv[1][3]):
-            if group and grp != group:
+        for taxon_id, info in sorted(self._taxa.items(), key=lambda kv: -kv[1].records):
+            if group and not any(_matches(g, group) for g, _, _ in info.egroups):
                 continue
-            if q and q.lower() not in f"{taxon_id} {name or ''}".lower():
+            if q and q.lower() not in f"{taxon_id} {info.name or ''}".lower():
                 continue
             try:
                 out.append(self.taxon_summary(taxon_id, on))
@@ -354,8 +430,9 @@ class BaselineQueries:
                 break
         return out
 
-    def species_map(self, taxon_id: str, on: date) -> SpeciesMap:
+    def species_map(self, taxon_id: str, on: date, method: str | None = None) -> SpeciesMap:
         summary = self.taxon_summary(taxon_id, on)
+        group_id = self._choose_group(taxon_id, method)
         tier = PolicyTier(summary.tier)
         level = self._level_for(tier)
         monthly = rule_for(tier).time_granularity is Granularity.MONTH
@@ -364,7 +441,7 @@ class BaselineQueries:
             weeks = [w for w in range(1, 53) if week_thursday(year, w).month == on.month]
         else:
             year, weeks = on.isocalendar().year, [week_of(on)]
-        estimates = self._estimate(level, taxon_ids=[taxon_id], weeks=weeks)
+        estimates = self._estimate(level, taxon_ids=[taxon_id], groups=[group_id], weeks=weeks)
         preds = [self._prediction(e, year, monthly) for e in estimates]
         public, _ = EgressFilter(lambda _t: tier).filter_predictions(preds)
         if public:
@@ -376,6 +453,8 @@ class BaselineQueries:
             date=on,
             time_window=window,
             resolution_km=spatial.edge_km(self.level_res[level]),
+            effort_group=group_id,
+            method=method_for(group_id),
             cells=[
                 MapCell(
                     cell=pr.cell,
@@ -389,13 +468,16 @@ class BaselineQueries:
                 )
                 for pr in sorted(public, key=lambda x: -x.p)
             ],
-            license=self.license_for([summary.group]),
+            license=self.license_for([group_id]),
         )
 
-    def calendar(self, taxon_id: str, lat: float, lon: float, year: int) -> Calendar:
+    def calendar(
+        self, taxon_id: str, lat: float, lon: float, year: int, method: str | None = None
+    ) -> Calendar:
         if not self.region.contains(lat, lon):
             raise ValueError("location is outside the region")
         summary = self.taxon_summary(taxon_id, date(year, 7, 1))
+        group_id = self._choose_group(taxon_id, method)
         tier = PolicyTier(summary.tier)
         monthly = rule_for(tier).time_granularity is Granularity.MONTH
         level0 = self._level_for(tier)
@@ -403,7 +485,9 @@ class BaselineQueries:
         used = level0
         for level in self._coarser(level0):
             target = spatial.cell_for_point(lat, lon, self.level_res[level])
-            estimates = self._estimate(level, taxon_ids=[taxon_id], cells=[target])
+            estimates = self._estimate(
+                level, taxon_ids=[taxon_id], groups=[group_id], cells=[target]
+            )
             if estimates:
                 used = level
                 break
@@ -420,6 +504,8 @@ class BaselineQueries:
             cell=public[0].cell,
             resolution_km=spatial.edge_km(self.level_res[used]),
             granularity="month" if monthly else "week",
+            effort_group=group_id,
+            method=method_for(group_id),
             entries=[
                 CalendarEntry(
                     start=pr.time.start.date(),
@@ -431,7 +517,7 @@ class BaselineQueries:
                 for pr in public
             ],
             area_fallback=fallback,
-            license=self.license_for([summary.group]),
+            license=self.license_for([group_id]),
         )
 
     # ------------------------------------------------------------------ place-first
@@ -448,6 +534,8 @@ class BaselineQueries:
         awareness_min_p: float = 0.002,
         group: str | None = None,
     ) -> PlaceLists:
+        """Lists per effort group. ``group`` selects a taxon group, effort group/class or
+        method id (e.g. ``fishes``, ``dive_survey`` or ``scuba_dive``)."""
         if not self.region.contains(lat, lon):
             raise ValueError("location is outside the region")
         week = week_of(on)
@@ -470,6 +558,8 @@ class BaselineQueries:
                 tiers[taxon_id] = self._tier(taxon_id, on)
             except NotAvailable:
                 continue
+            if not any(_matches(g, group) for g, _, _ in self._taxa[taxon_id].egroups):
+                continue
             if tiers[taxon_id] >= PolicyTier.COARSE:
                 aware.append(taxon_id)
             else:
@@ -477,43 +567,52 @@ class BaselineQueries:
 
         # Awareness: context-level presence only, never numbers.
         if aware:
+            seen: set[str] = set()
             for e in self._estimate("context", taxon_ids=aware, cells=[ctx], weeks=[week]):
-                if e.p >= awareness_min_p:
-                    _, name, grp, _ = self._taxa[e.taxon_id]
+                if e.p >= awareness_min_p and e.taxon_id not in seen:
+                    seen.add(e.taxon_id)
+                    info = self._taxa[e.taxon_id]
                     result.awareness.append(
                         AwarenessItem(
                             taxon_id=e.taxon_id,
-                            scientific_name=name,
+                            scientific_name=info.name,
                             common_name=self.common_name(e.taxon_id),
-                            group=grp,
+                            group=info.taxon_group,
                             message=AWARENESS_MESSAGE,
                         )
                     )
 
-        items: list[tuple[PlaceItem, PolicyTier]] = []
+        items: dict[str, list[tuple[PlaceItem, PolicyTier]]] = defaultdict(list)
         for level0, taxa in by_level.items():
-            pending = set(taxa)
+            pending = {
+                (t, g) for t in taxa for g, _, _ in self._taxa[t].egroups if _matches(g, group)
+            }
             for level in self._coarser(level0):
                 if not pending:
                     break
                 target = spatial.cell_for_point(lat, lon, self.level_res[level])
                 found = self._estimate(
-                    level, taxon_ids=sorted(pending), cells=[target], weeks=[week]
+                    level,
+                    taxon_ids=sorted({t for t, _ in pending}),
+                    cells=[target],
+                    weeks=[week],
                 )
                 for e in found:
-                    pending.discard(e.taxon_id)
+                    if (e.taxon_id, e.group_id) not in pending:
+                        continue
+                    pending.discard((e.taxon_id, e.group_id))
                     fallback = level != level0
-                    if fallback:
+                    if fallback and e.taxon_id not in result.area_fallback:
                         result.area_fallback.append(e.taxon_id)
                     conf = confidence_for(e.n_eff, e.n_region)
-                    _, name, grp, _ = self._taxa[e.taxon_id]
-                    items.append(
+                    info = self._taxa[e.taxon_id]
+                    items[e.group_id].append(
                         (
                             PlaceItem(
                                 taxon_id=e.taxon_id,
-                                scientific_name=name,
+                                scientific_name=info.name,
                                 common_name=self.common_name(e.taxon_id),
-                                group=grp,
+                                group=info.taxon_group,
                                 p=round(e.p, 6),
                                 lift=round(e.lift, 4) if e.lift is not None else None,
                                 seasonal_index=(
@@ -528,12 +627,8 @@ class BaselineQueries:
                         )
                     )
 
-        by_group: dict[str, list[tuple[PlaceItem, PolicyTier]]] = defaultdict(list)
-        for item, tier in items:
-            by_group[item.group or "other"].append((item, tier))
-        for name, members in sorted(by_group.items(), key=lambda kv: -len(kv[1])):
-            if group is not None and name != group:
-                continue
+        for group_id, members in sorted(items.items(), key=lambda kv: -len(kv[1])):
+            taxon_group, effort_class = split_egroup(group_id)
             ranked = sorted(members, key=lambda it: -it[0].p)
             special = [
                 i
@@ -553,7 +648,11 @@ class BaselineQueries:
             ]
             result.groups.append(
                 GroupLists(
-                    group=name,
+                    group=group_id,
+                    taxon_group=taxon_group,
+                    effort_class=effort_class,
+                    label=label_for(group_id),
+                    method=method_for(group_id),
                     most_likely=[i for i, _ in ranked[:limit]],
                     special_here=sorted(special, key=lambda i: -distinctiveness(i.p, i.lift))[
                         :limit
@@ -566,10 +665,8 @@ class BaselineQueries:
                         if life_list
                         else []
                     ),
-                    license=self.license_for([name]),
+                    license=self.license_for([group_id]),
                 )
             )
-        if group is not None:
-            result.awareness = [a for a in result.awareness if a.group == group]
         result.awareness.sort(key=lambda a: a.scientific_name or a.taxon_id)
         return result

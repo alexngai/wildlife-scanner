@@ -79,6 +79,18 @@ STANDARD_METHODS: dict[str, EncounterMethod] = {
             description="3-hour boat-based viewing trip",
         ),
         EncounterMethod(
+            method_id="tidepooling",
+            modality=Modality.SEE,
+            standard_effort=Effort(duration_min=60),
+            description="1-hour low-tide visit to the rocky intertidal",
+        ),
+        EncounterMethod(
+            method_id="standardized_survey",
+            modality=Modality.SEE,
+            standard_effort=Effort(),
+            description="One unit of a structured monitoring survey (transect, quadrat, point)",
+        ),
+        EncounterMethod(
             method_id="observer_visit",
             modality=Modality.SEE,
             standard_effort=Effort(),

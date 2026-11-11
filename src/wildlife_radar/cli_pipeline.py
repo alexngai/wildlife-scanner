@@ -18,6 +18,21 @@ def _region(args: argparse.Namespace):
     return load_region(args.region)
 
 
+def _registry(args: argparse.Namespace):
+    from pathlib import Path
+
+    from wildlife_radar.baseline.effort import DatasetRegistry
+    from wildlife_radar.regions import region_dir
+
+    region = _region(args)
+    path = (
+        Path(args.datasets)
+        if getattr(args, "datasets", None)
+        else (region_dir(region.id) / "datasets.yaml")
+    )
+    return DatasetRegistry.load(path)
+
+
 def _print(model) -> None:
     if hasattr(model, "model_dump_json"):
         print(model.model_dump_json(indent=2))
@@ -71,7 +86,13 @@ def cmd_build_baseline(args: argparse.Namespace) -> int:
     region = _region(args)
     cfg = BaselineConfig(res=args.res, min_visits=args.min_visits, since_year=args.since_year)
     with ObservationStore(args.db) as store:
-        report = build_baseline(store.conn, region_id=region.id, bbox=region.bbox, config=cfg)
+        report = build_baseline(
+            store.conn,
+            region_id=region.id,
+            bbox=region.bbox,
+            config=cfg,
+            registry=_registry(args),
+        )
     _print(report.__dict__)
     return 0
 
@@ -93,11 +114,31 @@ def cmd_evaluate_baseline(args: argparse.Namespace) -> int:
             config=BaselineConfig(
                 res=args.res, min_visits=args.min_visits, since_year=args.since_year
             ),
+            registry=_registry(args),
         )
     passed = sum(s.passes for s in scores)
-    print(f"{passed}/{len(scores)} taxa beat the range-only reference (Brier skill > 0)")
+    print(
+        f"{passed}/{len(scores)} taxon × effort groups beat the range-only reference "
+        "(Brier skill > 0)"
+    )
     for s in scores[: args.show]:
-        print(f"  {s.taxon_id:<40} n={s.n_test:<7} hits={s.n_pos:<6} BSS={s.bss:+.3f}")
+        print(
+            f"  {s.taxon_id:<36} {s.group_id:<24} n={s.n_test:<7} hits={s.n_pos:<6} "
+            f"BSS={s.bss:+.3f}"
+        )
+    return 0
+
+
+def cmd_annotate_datasets(args: argparse.Namespace) -> int:
+    from wildlife_radar.connectors.gbif_datasets import fetch_dataset_meta
+    from wildlife_radar.storage import ObservationStore
+
+    with ObservationStore(args.db) as store:
+        n = fetch_dataset_meta(store.conn, min_records=args.min_records)
+        rows = store.conn.execute(
+            "SELECT type, count(*) FROM dataset_meta GROUP BY 1 ORDER BY 2 DESC"
+        ).fetchall()
+    print(json.dumps({"fetched": n, "by_type": dict(rows)}, indent=2))
     return 0
 
 
@@ -161,9 +202,13 @@ def cmd_query(args: argparse.Namespace) -> int:
                     f"{t.taxon_id:<40} {t.group or '':<10} tier={t.tier} visits={t.records_visits}"
                 )
         elif args.what == "species":
-            _print(queries.species_map(args.taxon, on))
+            _print(queries.species_map(args.taxon, on, method=args.method))
         elif args.what == "calendar":
-            _print(queries.calendar(args.taxon, args.lat, args.lon, args.year or on.year))
+            _print(
+                queries.calendar(
+                    args.taxon, args.lat, args.lon, args.year or on.year, method=args.method
+                )
+            )
         elif args.what == "place":
             life = set((args.life_list or "").split(",")) - {""}
             _print(
@@ -258,6 +303,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--res", type=int, default=6)
     p.add_argument("--min-visits", type=int, default=5)
     p.add_argument("--since-year", type=int, help="ignore records before this year")
+    p.add_argument("--datasets", help="dataset registry YAML (default: region pack's)")
     p.set_defaults(func=cmd_build_baseline)
 
     p = sub.add_parser("evaluate-baseline", help="backtest the baseline vs. range-only")
@@ -267,8 +313,14 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--res", type=int, default=6)
     p.add_argument("--min-visits", type=int, default=5)
     p.add_argument("--since-year", type=int, help="ignore records before this year")
+    p.add_argument("--datasets", help="dataset registry YAML (default: region pack's)")
     p.add_argument("--show", type=int, default=25)
     p.set_defaults(func=cmd_evaluate_baseline)
+
+    p = sub.add_parser("annotate-datasets", help="fetch GBIF dataset metadata (type, title)")
+    common(p)
+    p.add_argument("--min-records", type=int, default=50)
+    p.set_defaults(func=cmd_annotate_datasets)
 
     p = sub.add_parser("build-tiers", help="look up statuses and assign sensitivity tiers")
     common(p)
@@ -285,7 +337,10 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--year", type=int)
     p.add_argument("--q")
     p.add_argument("--life-list", help="comma-separated taxon ids you've already seen")
-    p.add_argument("--group", help="taxon group for place lists, e.g. birds or fishes")
+    p.add_argument(
+        "--group", help="taxon group, effort class or method for place lists (e.g. fishes)"
+    )
+    p.add_argument("--method", help="effort class or method for species queries")
     p.add_argument("--limit", type=int, default=20)
     p.set_defaults(func=cmd_query)
 
