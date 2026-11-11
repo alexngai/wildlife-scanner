@@ -1,0 +1,7 @@
+id: group/herps
+kind: template
+extends: [base]
+notes: Default for generated reptile and amphibian profiles.
+methods:
+  headline: wildlife_viewing
+  also: [observer_visit]
