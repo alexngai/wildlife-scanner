@@ -13,7 +13,7 @@ Status: **draft for discussion**. Builds on [`../research/00-synthesis.md`](../r
 | Query modes | **Both, first-class.** Species-first ("where/when can I find X?") and place-first ("what's likely, and what's *special*, near here?"). |
 | Geography | Start in **Southern California**; design for **global**. |
 | Stack | **Python** backend and data/ML; **TypeScript** web frontend later; API-first. |
-| Licensing posture | **Open-source code; free, non-commercial, educational service.** See [`licensing.md`](licensing.md). |
+| Licensing posture | **Exclusively non-commercial**: a free, educational service with openly published code (code license TBD). See [`licensing.md`](licensing.md). |
 
 **Non-goals for v1:** real-time tracking of individual animals; navigation or safety advice ("safe to dive/hike"); harvest or hunting tools.
 
