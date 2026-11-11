@@ -106,14 +106,22 @@ def test_place_lists_respect_policy(client):
     r = client.get(
         "/nearby", params={**LA_JOLLA, "date": "2026-05-15", "life_list": "commonus-ubiquitus"}
     ).json()
-    ranked = {i["taxon_id"] for k in ("most_likely", "special_here", "peaking_now") for i in r[k]}
+    assert [g["group"] for g in r["groups"]] == ["birds"]
+    birds = r["groups"][0]
+    ranked = {
+        i["taxon_id"] for k in ("most_likely", "special_here", "peaking_now") for i in birds[k]
+    }
     assert "raritas-orientalis" not in ranked
     assert "secretus-maximus" not in ranked
     assert [a["taxon_id"] for a in r["awareness"]] == ["raritas-orientalis"]
-    assert all(i["lift"] >= 1.25 for i in r["special_here"])
-    assert r["peaking_now"][0]["taxon_id"] == "vernalis-litoralis"
-    assert "commonus-ubiquitus" not in {i["taxon_id"] for i in r["new_for_you"]}
+    assert all(i["lift"] >= 1.25 for i in birds["special_here"])
+    assert birds["peaking_now"][0]["taxon_id"] == "vernalis-litoralis"
+    assert "commonus-ubiquitus" not in {i["taxon_id"] for i in birds["new_for_you"]}
     assert "secretus" not in str(r)
+    fishes = client.get(
+        "/nearby", params={**LA_JOLLA, "date": "2026-05-15", "group": "fishes"}
+    ).json()
+    assert fishes["groups"] == [] and fishes["awareness"] == []
 
 
 def test_place_endpoint_and_errors(client):

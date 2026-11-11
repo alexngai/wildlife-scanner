@@ -9,6 +9,7 @@ unknown ones.
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from datetime import UTC, date, datetime, time, timedelta
 
@@ -157,17 +158,39 @@ class AwarenessItem(BaseModel):
     message: str
 
 
-class PlaceLists(BaseModel):
-    date: date
-    week: int
+class GroupLists(BaseModel):
+    """Lists for one taxon group. Probabilities are only comparable within a group: each is
+    "per outing by someone who records this group"."""
+
+    group: str
     most_likely: list[PlaceItem] = Field(default_factory=list)
     special_here: list[PlaceItem] = Field(default_factory=list)
     peaking_now: list[PlaceItem] = Field(default_factory=list)
     new_for_you: list[PlaceItem] = Field(default_factory=list)
+    license: LicenseInfo | None = None
+
+
+class PlaceLists(BaseModel):
+    date: date
+    week: int
+    groups: list[GroupLists] = Field(default_factory=list)
     awareness: list[AwarenessItem] = Field(default_factory=list)
     area_fallback: list[str] = Field(default_factory=list)
     label: str = LEVEL0_LABEL
-    license: LicenseInfo | None = None
+
+    def group(self, name: str) -> GroupLists | None:
+        return next((g for g in self.groups if g.group == name), None)
+
+
+def distinctiveness(p: float, ratio: float | None) -> float:
+    """``p · ln(ratio)``: high only when a taxon is both likely and distinctive.
+
+    Ranking by the ratio alone favors rarely recorded taxa whose tiny probabilities produce huge
+    ratios; weighting by ``p`` (the expected excess, as in an information-gain term) does not.
+    """
+    if not ratio or ratio <= 1:
+        return 0.0
+    return p * math.log(ratio)
 
 
 AWARENESS_MESSAGE = (
@@ -423,6 +446,7 @@ class BaselineQueries:
         min_peak: float = 1.2,
         min_lift: float = 1.25,
         awareness_min_p: float = 0.002,
+        group: str | None = None,
     ) -> PlaceLists:
         if not self.region.contains(lat, lon):
             raise ValueError("location is outside the region")
@@ -455,19 +479,18 @@ class BaselineQueries:
         if aware:
             for e in self._estimate("context", taxon_ids=aware, cells=[ctx], weeks=[week]):
                 if e.p >= awareness_min_p:
-                    _, name, group, _ = self._taxa[e.taxon_id]
+                    _, name, grp, _ = self._taxa[e.taxon_id]
                     result.awareness.append(
                         AwarenessItem(
                             taxon_id=e.taxon_id,
                             scientific_name=name,
                             common_name=self.common_name(e.taxon_id),
-                            group=group,
+                            group=grp,
                             message=AWARENESS_MESSAGE,
                         )
                     )
 
         items: list[tuple[PlaceItem, PolicyTier]] = []
-        groups: set[str | None] = set()
         for level0, taxa in by_level.items():
             pending = set(taxa)
             for level in self._coarser(level0):
@@ -483,15 +506,14 @@ class BaselineQueries:
                     if fallback:
                         result.area_fallback.append(e.taxon_id)
                     conf = confidence_for(e.n_eff, e.n_region)
-                    _, name, group, _ = self._taxa[e.taxon_id]
-                    groups.add(group)
+                    _, name, grp, _ = self._taxa[e.taxon_id]
                     items.append(
                         (
                             PlaceItem(
                                 taxon_id=e.taxon_id,
                                 scientific_name=name,
                                 common_name=self.common_name(e.taxon_id),
-                                group=group,
+                                group=grp,
                                 p=round(e.p, 6),
                                 lift=round(e.lift, 4) if e.lift is not None else None,
                                 seasonal_index=(
@@ -506,28 +528,48 @@ class BaselineQueries:
                         )
                     )
 
-        ranked = sorted(items, key=lambda it: -it[0].p)
-        result.most_likely = [i for i, _ in ranked[:limit]]
-        special = [
-            i
-            for i, t in items
-            if allowed_in_place_first_special(t)
-            and i.p >= min_p
-            and (i.lift or 0) >= min_lift
-            and i.confidence is not Confidence.INSUFFICIENT
-            and i.taxon_id not in result.area_fallback
-        ]
-        result.special_here = sorted(special, key=lambda i: -(i.lift or 0))[:limit]
-        peaking = [
-            i
-            for i, t in items
-            if allowed_in_place_first_special(t)
-            and i.p >= min_p
-            and (i.seasonal_index or 0) >= min_peak
-        ]
-        result.peaking_now = sorted(peaking, key=lambda i: -(i.seasonal_index or 0))[:limit]
-        if life_list:
-            result.new_for_you = [i for i, _ in ranked if i.taxon_id not in life_list][:limit]
+        by_group: dict[str, list[tuple[PlaceItem, PolicyTier]]] = defaultdict(list)
+        for item, tier in items:
+            by_group[item.group or "other"].append((item, tier))
+        for name, members in sorted(by_group.items(), key=lambda kv: -len(kv[1])):
+            if group is not None and name != group:
+                continue
+            ranked = sorted(members, key=lambda it: -it[0].p)
+            special = [
+                i
+                for i, t in members
+                if allowed_in_place_first_special(t)
+                and i.p >= min_p
+                and (i.lift or 0) >= min_lift
+                and i.confidence is not Confidence.INSUFFICIENT
+                and i.taxon_id not in result.area_fallback
+            ]
+            peaking = [
+                i
+                for i, t in members
+                if allowed_in_place_first_special(t)
+                and i.p >= min_p
+                and (i.seasonal_index or 0) >= min_peak
+            ]
+            result.groups.append(
+                GroupLists(
+                    group=name,
+                    most_likely=[i for i, _ in ranked[:limit]],
+                    special_here=sorted(special, key=lambda i: -distinctiveness(i.p, i.lift))[
+                        :limit
+                    ],
+                    peaking_now=sorted(
+                        peaking, key=lambda i: -distinctiveness(i.p, i.seasonal_index)
+                    )[:limit],
+                    new_for_you=(
+                        [i for i, _ in ranked if i.taxon_id not in life_list][:limit]
+                        if life_list
+                        else []
+                    ),
+                    license=self.license_for([name]),
+                )
+            )
+        if group is not None:
+            result.awareness = [a for a in result.awareness if a.group == group]
         result.awareness.sort(key=lambda a: a.scientific_name or a.taxon_id)
-        result.license = self.license_for(sorted(groups, key=str))
         return result

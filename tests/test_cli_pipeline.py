@@ -15,7 +15,7 @@ def test_demo_and_queries(tmp_path, capsys):
     args = ["query", "place", "--db", db, "--lat", "32.85", "--lon", "-117.27"]
     assert main([*args, "--date", "2026-05-15"]) == 0
     lists = json.loads(capsys.readouterr().out)
-    assert lists["most_likely"] and lists["awareness"]
+    assert lists["groups"][0]["most_likely"] and lists["awareness"]
 
     assert main(["query", "species", "no-such", "--db", db]) == 1
     assert "not available" in capsys.readouterr().out

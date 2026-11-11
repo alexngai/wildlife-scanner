@@ -161,7 +161,11 @@ def cmd_query(args: argparse.Namespace) -> int:
             _print(queries.calendar(args.taxon, args.lat, args.lon, args.year or on.year))
         elif args.what == "place":
             life = set((args.life_list or "").split(",")) - {""}
-            _print(queries.place_lists(args.lat, args.lon, on, life, limit=args.limit))
+            _print(
+                queries.place_lists(
+                    args.lat, args.lon, on, life, limit=args.limit, group=args.group
+                )
+            )
     except NotAvailable:
         print("not available (unknown or sensitive taxon, or no data)")
         return 1
@@ -276,6 +280,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--year", type=int)
     p.add_argument("--q")
     p.add_argument("--life-list", help="comma-separated taxon ids you've already seen")
+    p.add_argument("--group", help="taxon group for place lists, e.g. birds or fishes")
     p.add_argument("--limit", type=int, default=20)
     p.set_defaults(func=cmd_query)
 

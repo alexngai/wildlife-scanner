@@ -1,0 +1,31 @@
+id: stereolepis-gigas
+kind: species
+scientific_name: Stereolepis gigas
+common_name: Giant sea bass
+extends: [guild/marine-nearshore-fish]
+status: draft
+notes: >
+  Take has been prohibited in California since 1982. Summer courtship/spawning aggregations at
+  known kelp sites draw divers; one genetic estimate puts breeding adults below 500. It is not
+  ESA/CESA listed, so automatic triggers may not fire. This profile raises it to coarse,
+  awareness-only outputs year-round (docs/research/00-synthesis.md §6).
+
+methods:
+  headline: scuba_dive
+  also: [freedive]
+
+prior:
+  seasonal: elicited
+  peak: Jun–Sep
+
+policy:
+  default_tier: 2
+
+provenance:
+  policy.default_tier:
+    source: docs/research/05-prior-art-methods-ethics.md
+    method: human
+    confidence: 0.8
+    evidence: >
+      Prohibited take since 1982; small breeding population; predictable aggregations invite
+      crowding, harassment and poaching.

@@ -84,6 +84,21 @@ class BaselineConfig:
     """Minimum detection visits region-wide for a taxon to get a baseline."""
     since_year: int | None = None
     """Ignore records before this year (land use, ranges and observer behavior change)."""
+    exclude_basis: tuple[str, ...] = (
+        "LIVING_SPECIMEN",
+        "FOSSIL_SPECIMEN",
+        "PRESERVED_SPECIMEN",
+        "MATERIAL_CITATION",
+    )
+    """Records that aren't evidence of encounterable wild presence (zoos and gardens, fossils,
+    museum specimens) — and whose collecting trips aren't comparable effort units."""
+
+    def basis_filter(self) -> str:
+        if not self.exclude_basis:
+            return "TRUE"
+        quoted = ", ".join("'" + b.replace("'", "''") + "'" for b in self.exclude_basis)
+        return f"(basis_of_record IS NULL OR basis_of_record NOT IN ({quoted}))"
+
     model_version: str = "baseline-v0"
 
     def __post_init__(self) -> None:
@@ -148,6 +163,7 @@ def build_baseline(
           AND cell_r{R} IS NOT NULL
           AND (?::TIMESTAMP IS NULL OR time_start < ?::TIMESTAMP)
           AND (?::INTEGER IS NULL OR year(local_date) >= ?::INTEGER)
+          AND {cfg.basis_filter()}
         """,
         [
             lat_min,

@@ -142,3 +142,42 @@ def test_config_validation():
         BaselineConfig(res=5, parent_res=5)
     weights = BaselineConfig().kernel()
     assert sum(w for _, w in weights) == pytest.approx(1.0)
+
+
+def test_specimens_and_captives_are_excluded():
+    from datetime import timedelta
+
+    from wildlife_radar.core import Observation, Outcome, TaxonRef, TaxonScheme, TimeWindow
+    from wildlife_radar.core.licenses import CC_BY
+
+    world = SyntheticWorld(seed=9, observers=10, visits_per_observer=20)
+    obs = world.generate()
+    start = datetime(2024, 3, 1, 17, tzinfo=UTC)
+    zoo = [
+        Observation(
+            obs_id=f"zoo:{i}",
+            source_id="zoo",
+            taxon=TaxonRef(scheme=TaxonScheme.NAME, id="x", name="Canis lupus", rank="species"),
+            footprint={"kind": "point", "lat": 32.74, "lon": -117.15, "uncertainty_m": 10},
+            time=TimeWindow.instant(start + timedelta(days=i)),
+            outcome=Outcome.PRESENCE_ONLY,
+            license=CC_BY,
+            extras={"group": "birds", "basis_of_record": basis, "observer_hash": f"z{i}"},
+        )
+        for i, basis in enumerate(["LIVING_SPECIMEN"] * 6 + ["PRESERVED_SPECIMEN"] * 6)
+    ]
+    store = ObservationStore()
+    store.add([*obs, *zoo])
+    build_baseline(store.conn, region_id="z", bbox=world.bbox)
+    taxa = {r[0] for r in store.conn.execute("SELECT taxon_id FROM prior_taxa").fetchall()}
+    assert "canis-lupus" not in taxa
+    build_baseline(
+        store.conn, region_id="z2", bbox=world.bbox, config=BaselineConfig(exclude_basis=())
+    )
+    taxa = {
+        r[0]
+        for r in store.conn.execute(
+            "SELECT taxon_id FROM prior_taxa WHERE region_id = 'z2'"
+        ).fetchall()
+    }
+    assert "canis-lupus" in taxa
