@@ -13,7 +13,7 @@ Status: **draft for discussion**. Builds on [`../research/00-synthesis.md`](../r
 | Query modes | **Both, first-class.** Species-first ("where/when can I find X?") and place-first ("what's likely, and what's *special*, near here?"). |
 | Geography | Start in **Southern California**; design for **global**. |
 | Stack | **Python** backend and data/ML; **TypeScript** web frontend later; API-first. |
-| Licensing posture | **Exclusively non-commercial**: a free, educational service with openly published code (code license TBD). See [`licensing.md`](licensing.md). |
+| Licensing posture | **Exclusively non-commercial**: a free, educational service run by the founder as an individual; code under **AGPL-3.0**. See [`licensing.md`](licensing.md). |
 
 **Non-goals for v1:** real-time tracking of individual animals; navigation or safety advice ("safe to dive/hike"); harvest or hunting tools.
 
@@ -620,8 +620,8 @@ Partnership outreach runs in parallel from Phase 0 (see the research synthesis Â
 1. **LLM extraction:** which model and provider, the budget per species, and the human-review threshold. Which fields may be auto-published, and which need review?
 2. **Community governance:** who can approve profile changes and policy downgrades? Invited experts only, or reputation-based?
 3. ~~Commercial status~~ **Decided: open source, free, non-commercial, educational** ([`licensing.md`](licensing.md)). Still open:
-   - the code license (Apache-2.0 vs MIT vs AGPL-3.0);
-   - the governance home (individual, nonprofit, fiscal sponsor or university), so "non-commercial" stays unambiguous.
+   - ~~Code license~~ Decided: AGPL-3.0.
+   - ~~Operator~~ Decided: the founder, as an individual for now. Revisit a fiscal sponsor or nonprofit if grants are needed.
 4. **Global scale target for Level 0:** all taxa, or start with vertebrates?
 5. **Identity and accounts:** needed for contributions and life lists. Build or buy?
 6. **How much carnivore viewing mode is acceptable,** and in which regions? Should this be decided with agency input?

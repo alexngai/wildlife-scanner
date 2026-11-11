@@ -15,3 +15,10 @@ An online resource to help people find wildlife. It fuses several data sources i
 Research / design phase. Start with [`docs/research/00-synthesis.md`](docs/research/00-synthesis.md). It summarizes the data landscape, the evidence behind the candidate signals, a proposed model architecture, ethics guardrails and next steps. It links to five detailed research reports.
 
 The framework design (draft) is in [`docs/design/framework.md`](docs/design/framework.md). It covers the species-agnostic architecture: core concepts, species profiles generated from metadata, how signals are combined, rare and cryptic species, species-first and place-first queries, the policy layer and the roadmap.
+
+## License
+
+wildlife-radar is an exclusively **non-commercial**, free, educational project.
+
+- **Code:** [GNU AGPL-3.0](LICENSE). If you run a modified version as a network service, you must offer its source to your users.
+- **Third-party data:** not included in this repository. Each source keeps its own license and terms; many are non-commercial. Anyone running this code is responsible for complying with them. See [`docs/design/licensing.md`](docs/design/licensing.md).
