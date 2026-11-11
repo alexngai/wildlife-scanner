@@ -11,6 +11,7 @@ This summarizes five parallel research reports (files `01`–`05` in this folder
 | [05-prior-art-methods-ethics.md](05-prior-art-methods-ethics.md) | Competitors, modeling methodology, evaluation, ethics, licensing, liability |
 | [06-rare-carnivores.md](06-rare-carnivores.md) | Mountain lions & gray wolves: agency/camera/roadkill data, managed-viewing systems, signals, estimands, sensitivity policy *(added after the first round)* |
 | [07-species-metadata-profiles.md](07-species-metadata-profiles.md) | Taxonomy backbones & crosswalks, trait DBs, range maps, status/sensitivity sources, Wikipedia, LLM extraction accuracy, profile pipeline, licensing traffic-light *(added after the first round)* |
+| [08-real-data-run-2026-11.md](08-real-data-run-2026-11.md) | First real-data run: Level-0 baseline on the 2026-11-01 GBIF snapshot for San Diego County — scale, backtest gates, natural-history checks, fixes *(added after Phase 1)* |
 
 ---
 
