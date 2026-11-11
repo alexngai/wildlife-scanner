@@ -125,6 +125,10 @@ def test_cutoff_and_min_visits():
     )
     full = build_baseline(store.conn, region_id="b", bbox=world.bbox)
     assert early.visits < full.visits
+    recent = build_baseline(
+        store.conn, region_id="d", bbox=world.bbox, config=BaselineConfig(since_year=2025)
+    )
+    assert recent.visits < full.visits
     strict = build_baseline(
         store.conn, region_id="c", bbox=world.bbox, config=BaselineConfig(min_visits=10_000)
     )
