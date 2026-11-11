@@ -6,7 +6,7 @@ applies to observations. Field names follow the public API v1 taxon JSON
 (``conservation_statuses[].{iucn, status, authority, geoprivacy, place}``); verify against live
 responses before production use.
 
-Statuses scoped to places the region doesn't map (``Region.inat_place_scopes``) are ignored and
+Statuses for places that neither contain the region nor lie inside it are ignored and
 reported, because iNaturalist carries lists from many other jurisdictions. iNaturalist's own
 obscuring of observations still reaches the policy layer through the observed
 ``taxon_geoprivacy`` of ingested records.
@@ -30,22 +30,42 @@ BATCH = 30
 IUCN_EQUIVALENTS = {5: "DD", 10: "LC", 20: "NT", 30: "VU", 40: "EN", 50: "CR", 60: "EW", 70: "EX"}
 
 
-def parse_taxon_statuses(taxon: dict[str, Any], place_scopes: dict[str, str]) -> StatusLookup:
+def status_scope(
+    place: dict[str, Any] | None, place_scopes: dict[str, str], innermost_place: str | None
+) -> str | None:
+    """Scope a place-scoped status applies to, or ``None`` if it doesn't apply to the region.
+
+    A status applies if its place *contains* the region (its id is one of the region's mapped
+    places, e.g. the US or California), or — conservatively — if it lies *inside* the region's
+    innermost mapped place (e.g. a county within California). Note ``ancestor_place_ids`` lists
+    the places containing the status's place: Michigan's include the US, which must not make a
+    Michigan-only status apply in California.
+    """
+    if not place:
+        return "global"
+    place_id = str(place.get("id"))
+    if place_id in place_scopes:
+        return place_scopes[place_id]
+    ancestors = {str(x) for x in place.get("ancestor_place_ids") or []}
+    if innermost_place is not None and innermost_place in ancestors:
+        return place_scopes.get(innermost_place)
+    return None
+
+
+def parse_taxon_statuses(
+    taxon: dict[str, Any],
+    place_scopes: dict[str, str],
+    innermost_place: str | None = None,
+) -> StatusLookup:
     statuses: list[ConservationStatus] = []
     geoprivacies: list[str | None] = []
     ignored: list[str] = []
     for cs in taxon.get("conservation_statuses") or []:
         place = cs.get("place")
-        if not place:
-            scope = "global"
-        else:
-            ids = [str(place.get("id"))] + [str(x) for x in place.get("ancestor_place_ids") or []]
-            scope = next((place_scopes[i] for i in ids if i in place_scopes), None)
-            if scope is None:
-                ignored.append(
-                    f"{cs.get('authority')}: {cs.get('status')} @ place {place.get('id')}"
-                )
-                continue
+        scope = status_scope(place, place_scopes, innermost_place)
+        if scope is None:
+            ignored.append(f"{cs.get('authority')}: {cs.get('status')} @ place {place.get('id')}")
+            continue
         geoprivacies.append(cs.get("geoprivacy"))
         code = IUCN_EQUIVALENTS.get(cs.get("iucn"))
         if code is None:
@@ -75,8 +95,10 @@ class InatTaxonStatusProvider:
         place_scopes: dict[str, str],
         client: httpx.Client | None = None,
         limiter: RateLimiter | None = None,
+        innermost_place: str | None = None,
     ) -> None:
         self.place_scopes = place_scopes
+        self.innermost_place = innermost_place
         self.client = client or make_client()
         self.limiter = limiter if limiter is not None else RateLimiter(1.0)
 
@@ -123,6 +145,8 @@ class InatTaxonStatusProvider:
                 taxon = by_id[inat_id]
                 record = found.get(inat_id)
                 out[taxon.taxon_id] = (
-                    parse_taxon_statuses(record, self.place_scopes) if record else None
+                    parse_taxon_statuses(record, self.place_scopes, self.innermost_place)
+                    if record
+                    else None
                 )
         return out

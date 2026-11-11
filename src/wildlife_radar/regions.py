@@ -36,7 +36,9 @@ class Region(BaseModel):
     scopes: list[str] = Field(default_factory=lambda: ["global"])
     """Conservation-status scopes that apply inside the region (e.g. ``us``, ``us-ca``)."""
     inat_place_scopes: dict[str, str] = Field(default_factory=dict)
-    """iNaturalist place id → status scope (e.g. ``"14": us-ca``), for place-scoped statuses."""
+    """iNaturalist ids of places that *contain* the region → status scope (``"14": us-ca``)."""
+    inat_innermost_place: str | None = None
+    """The smallest mapped place; statuses for places inside it also apply (conservatively)."""
     tide_stations: list[TideStation] = Field(default_factory=list)
     places: list[Place] = Field(default_factory=list)
     notes: str | None = None

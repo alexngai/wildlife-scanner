@@ -130,16 +130,36 @@ INAT_TAXON = {
             "iucn": 40,
             "geoprivacy": "private",
         },
+        {
+            "place": {"id": 29, "name": "Michigan", "ancestor_place_ids": [97394, 1, 29]},
+            "status": "S1",
+            "authority": "NatureServe",
+            "iucn": 50,
+            "geoprivacy": "obscured",
+        },
     ],
 }
 
 
 def test_parse_inat_statuses():
-    lookup = parse_taxon_statuses(INAT_TAXON, {"1": "us", "14": "us-ca"})
+    lookup = parse_taxon_statuses(INAT_TAXON, {"1": "us", "14": "us-ca"}, "14")
     codes = {(s.code, s.scope) for s in lookup.statuses}
     assert codes == {("LC", "global"), ("VU", "us-ca")}
     assert lookup.geoprivacy == "obscured"  # the unmapped place's "private" is ignored
-    assert len(lookup.ignored) == 1
+    assert len(lookup.ignored) == 2  # "somewhere else" and Michigan
+
+
+def test_status_scope_direction():
+    from wildlife_radar.connectors.inaturalist_taxa import status_scope
+
+    scopes = {"1": "us", "14": "us-ca"}
+    michigan = {"id": 29, "ancestor_place_ids": [97394, 1, 29]}
+    sd_county = {"id": 829, "ancestor_place_ids": [97394, 1, 14, 829]}
+    assert status_scope(None, scopes, "14") == "global"
+    assert status_scope({"id": 1}, scopes, "14") == "us"
+    assert status_scope(michigan, scopes, "14") is None  # inside the US is not containing SoCal
+    assert status_scope(sd_county, scopes, "14") == "us-ca"  # inside California: applies
+    assert status_scope(sd_county, scopes, None) is None
 
 
 def test_inat_provider_and_cache():
@@ -153,6 +173,7 @@ def test_inat_provider_and_cache():
 
     inner = InatTaxonStatusProvider(
         {"14": "us-ca"},
+        innermost_place="14",
         client=make_client(transport=httpx.MockTransport(handler)),
         limiter=RateLimiter(0),
     )
