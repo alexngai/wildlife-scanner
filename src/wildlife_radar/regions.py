@@ -35,6 +35,8 @@ class Region(BaseModel):
     """``(lon_min, lat_min, lon_max, lat_max)``."""
     scopes: list[str] = Field(default_factory=lambda: ["global"])
     """Conservation-status scopes that apply inside the region (e.g. ``us``, ``us-ca``)."""
+    inat_place_scopes: dict[str, str] = Field(default_factory=dict)
+    """iNaturalist place id → status scope (e.g. ``"14": us-ca``), for place-scoped statuses."""
     tide_stations: list[TideStation] = Field(default_factory=list)
     places: list[Place] = Field(default_factory=list)
     notes: str | None = None
@@ -60,6 +62,10 @@ class Region(BaseModel):
             if p.place_id == place_id:
                 return p
         raise KeyError(place_id)
+
+
+def region_dir(region_id: str, root: Path = DEFAULT_REGIONS_DIR) -> Path:
+    return root / region_id
 
 
 def load_region(region: str | Path, root: Path = DEFAULT_REGIONS_DIR) -> Region:

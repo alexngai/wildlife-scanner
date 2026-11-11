@@ -19,6 +19,7 @@ import httpx
 
 from wildlife_radar.connectors.base import ObservationQuery, RateLimiter, get_json, make_client
 from wildlife_radar.core.geometry import PointFootprint
+from wildlife_radar.core.ids import hash_identifier
 from wildlife_radar.core.licenses import UNKNOWN, parse_license
 from wildlife_radar.core.observations import (
     Effort,
@@ -28,7 +29,7 @@ from wildlife_radar.core.observations import (
     Outcome,
 )
 from wildlife_radar.core.sources import ObservationProcess, ObservationType, Source, SourceKind
-from wildlife_radar.core.taxa import TaxonRef, TaxonScheme
+from wildlife_radar.core.taxa import TaxonRef, TaxonScheme, target_group
 from wildlife_radar.core.time import Precision, TimeWindow, ensure_utc, utcnow
 
 BASE_URL = "https://api.gbif.org/v1"
@@ -142,7 +143,7 @@ def parse_dwc_record(
     if lat is None or lon is None or taxon_key is None:
         return None
     lat, lon = float(lat), float(lon)
-    window = parse_event_date(rec.get("eventDate"), lon)
+    window = _record_window(rec, lon)
     if window is None:
         return None
 
@@ -161,7 +162,9 @@ def parse_dwc_record(
         grade = EvidenceGrade.C1
     elif basis == "MACHINE_OBSERVATION":
         grade = EvidenceGrade.M
-    elif rec.get("datasetKey") == INATURALIST_RG_DATASET or rec.get("media"):
+    elif (
+        rec.get("datasetKey") == INATURALIST_RG_DATASET or rec.get("media") or rec.get("mediaType")
+    ):
         grade = EvidenceGrade.C1
     else:
         grade = EvidenceGrade.C3
@@ -201,10 +204,31 @@ def parse_dwc_record(
             "dataset_key": rec.get("datasetKey"),
             "occurrence_id": rec.get("occurrenceID"),
             "basis_of_record": basis or None,
-            "issues": list(rec.get("issues") or []),
+            "issues": list(rec.get("issues") or rec.get("issue") or []),
             "license_raw": rec.get("license"),
+            "group": target_group(rec.get("kingdom"), rec.get("phylum"), rec.get("class")),
+            "observer_hash": hash_identifier(
+                rec.get("recordedByID") or rec.get("recordedBy") or None
+            ),
         },
     )
+
+
+def _record_window(rec: _CI, lon: float) -> TimeWindow | None:
+    """Event time, honoring GBIF's year/month/day columns when the day is unknown.
+
+    In snapshots ``eventDate`` is a naive timestamp set to the 1st of the month (or year) when
+    the day is unknown; the separate ``year``/``month``/``day`` fields carry the real precision.
+    """
+    has_ymd = any(k in rec for k in ("year", "month", "day"))
+    if has_ymd and rec.get("day") is None:
+        year, month = rec.get("year"), rec.get("month")
+        if year and month:
+            return parse_event_date(f"{int(year):04d}-{int(month):02d}", lon)
+        if year:
+            return parse_event_date(f"{int(year):04d}", lon)
+        return None
+    return parse_event_date(rec.get("eventDate"), lon)
 
 
 class GBIFConnector:

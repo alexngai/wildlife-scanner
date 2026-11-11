@@ -25,6 +25,7 @@ This note records what that changes. It is based on the research in [`../researc
 | IUCN Red List API / spatial data | Non-commercial; commercial via IBAT | Blocked | ⚠ Likely usable, but **check the limits on redistributing raw data and range polygons** and the registration requirements |
 | BirdLife range maps | Non-commercial, by request | Blocked | ⚠ Request per purpose; raw maps can't be redistributed |
 | CITES Species+ | Commercial use needs written permission | Permission needed | ✅ Likely |
+| **eBird Observation Dataset via GBIF** | **CC BY 4.0** (verified on 2026-11-01 snapshot records, dataset `4fa7b334-…`) | ✅ | ✅ Presence-only eBird data **without** the eBird API/EBD terms. It has no effort or non-detections, updates roughly annually, and sensitive species are withheld. Our Level-0 baseline only needs presence records. |
 
 ## 2. What being non-commercial does *not* fix
 

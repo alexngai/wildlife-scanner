@@ -449,14 +449,20 @@ There is also evidence that **hunting next to viewing areas reduces viewing**: v
 Both query types read from the same **sparse prediction store**.
 
 ### 7.1 Storage
-- **Prior tensor** (Levels 0–1): species × cell (res 7) × week-of-year. Stored **only where p > ε**.
-- **Two indexes:**
-  - species → cells, for species-first maps;
-  - cell → species, for place-first lists.
-- **Partitioning:** by H3 parent cell and taxon group, in Parquet. Served via DuckDB or a service cache.
-- **Dynamic layers** (conditions, nowcast) are computed:
-  - nightly for featured regions and species;
-  - on demand for the candidate set the indexes return (prefilter by prior, then apply dynamic terms).
+As built in Phase 1, the store holds **sparse sufficient statistics, not a dense prior tensor**. On the first real-data sample, a dense species × cell × week tensor was ~70× larger than the data that produced it.
+
+- **What is stored:**
+  - smoothed effort per group × level × cell × week;
+  - smoothed detections per taxon × level × cell × week, only where non-zero;
+  - the cells with effort and their H3 parents;
+  - each taxon's range mask (context cells with records + one ring).
+- **Estimates are computed on demand.** The hierarchical shrinkage runs only for the cells a query needs (`baseline/estimate.py`), so storage scales with the data rather than with taxa × cells.
+- **Answering at the policy tier's level.** A query is answered at the finest level its policy tier allows: cell (res 6) for open, parent (res 5) for generalized, context (res 3) for coarse. A coarse answer is therefore a genuinely coarse estimate, not an average of fine ones.
+- **Two access paths:**
+  - species → cells, via the range mask, for species-first maps;
+  - context cell → candidate taxa, via the mask, for place-first lists.
+- **Consistent hierarchy.** Coarser cells are always H3 parents of the finest valid cell, so the store, the baseline hierarchy and the policy coarsening agree. Independent point lookups don't nest exactly.
+- **Dynamic layers** (conditions, nowcast; Phase 3) will be computed on demand for the candidate set, with nightly precomputation for featured regions and species.
 
 ### 7.2 Species-first ("where/when can I find X?")
 - **Inputs:** taxon, region or radius, date window, method.
@@ -594,9 +600,13 @@ wildlife-radar/
     models/        # additive log-odds structure (priors/terms/nowcast fitting: Phase 1+)
     policy/        # tiers, fail-closed assignment, windows/overrides, egress filter
     evaluation/    # scoring rules, calibration, baselines, forward-in-time splits
+    storage/       # DuckDB observation store (multi-res cells, visits, dedupe)
+    baseline/      # Level-0 builder (sparse statistics), on-demand estimates, backtests
+    serving/       # policy-enforced species-first / place-first queries
+    api/           # FastAPI service
     regions.py     # region-pack loader
-    cli.py         # operator CLI
-    (api/)         # FastAPI service — Phase 1
+    synthetic.py   # synthetic world with known truth (tests, offline demo)
+    cli.py, cli_pipeline.py  # operator CLI
   profiles/        # versioned profile documents (templates/ + species/)
   regions/socal/   # region pack: places, tide stations, status scopes
   tests/
@@ -610,7 +620,7 @@ wildlife-radar/
 | Phase | Deliverable | Validates |
 |---|---|---|
 | **0 — Skeleton** ✅ | Core schemas; H3 and as-of utilities; connectors (GBIF search + snapshot-row parser, iNaturalist, NOAA tides, astronomy); policy tiers, assignment and egress filter; evaluation harness basics; draft profiles for the five validation species; `socal` region pack | The contracts |
-| **1 — Baseline for everything (SoCal)** | Level-0 priors for all SoCal species with enough GBIF/iNat data; sparse store; place-first "most likely / special here" and species-first maps via API | "Any species" + both query modes |
+| **1 — Baseline for everything (SoCal)** ✅ | Level-0 target-group baseline for every species with enough records; GBIF snapshot ingestion; sparse statistics store + on-demand estimates; backtest gates vs. range-only; fail-closed status/tier table (region file + iNaturalist statuses + observed geoprivacy); species-first map/calendar and place-first lists via a FastAPI service | "Any species" + both query modes |
 | **2 — Profiles** | Generation pipeline (Wikidata → traits → LLM extraction with citations); guild templates; auto policy tiering; review workflow | Metadata-driven profiles |
 | **3 — Conditions and live** | Signal DAG with ocean, weather and astronomy; Level 1–2 for the five validation species; hypothesis scorecard | Fusion + honest testing |
 | **4 — Contributions** | Effort-aware logs (dives, surveys, checklists) incl. non-detections; trust and review | The data moat |

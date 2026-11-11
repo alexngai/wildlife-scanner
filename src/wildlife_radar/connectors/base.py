@@ -101,8 +101,8 @@ class ObservationQuery(BaseModel):
 
     @model_validator(mode="after")
     def _checks(self) -> ObservationQuery:
-        if self.taxon_name is None and self.source_taxon_id is None:
-            raise ValueError("query needs taxon_name or source_taxon_id")
+        if self.taxon_name is None and self.source_taxon_id is None and self.bbox is None:
+            raise ValueError("query needs a taxon (taxon_name/source_taxon_id) or a bbox")
         if self.start and self.end and self.end < self.start:
             raise ValueError("end before start")
         if self.bbox is not None:
