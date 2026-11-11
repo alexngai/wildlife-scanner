@@ -166,7 +166,7 @@ def test_dataset_classification_and_exclusion():
     assert classes[EBIRD_EOD_DATASET] == ("checklist", False)
     assert classes["surveyish"] == ("survey", False)
     assert classes["machines"] == ("sensor", False)
-    assert classes["meta-event"] == ("survey", False)
+    assert classes["meta-event"] == ("casual", False)  # sampling event without absences
     assert classes["trawl"][1] is True
     assert classes["inaturalist"] == ("casual", False)
     with pytest.raises(ValueError):
@@ -187,3 +187,91 @@ def test_bundled_registry_is_valid():
     registry.check()
     assert any(e.effort_class == "dive_survey" for e in registry.datasets.values())
     assert any(e.exclude for e in registry.datasets.values())
+
+
+def test_backtest_can_score_selected_groups(world_store):
+    world, store, _ = world_store
+    backtest_baseline(
+        store.conn,
+        region_id="socal",
+        bbox=world.bbox,
+        split=datetime(2025, 1, 1, tzinfo=UTC),
+        registry=REGISTRY,
+    )
+    before = store.conn.execute(
+        "SELECT count(*) FROM baseline_gates WHERE group_id = 'birds:casual'"
+    ).fetchone()[0]
+    scores = backtest_baseline(
+        store.conn,
+        region_id="socal",
+        bbox=world.bbox,
+        split=datetime(2024, 1, 1, tzinfo=UTC),
+        registry=REGISTRY,
+        groups=["fishes:dive_survey"],
+    )
+    assert {s.group_id for s in scores} == {"fishes:dive_survey"}
+    after = store.conn.execute(
+        "SELECT count(*) FROM baseline_gates WHERE group_id = 'birds:casual'"
+    ).fetchone()[0]
+    assert before == after > 0
+
+
+def test_survey_groups_have_flat_seasonality(world_store):
+    # Survey campaign dates don't measure seasonality, so survey estimates are flat over weeks.
+    _, store, _ = world_store
+    est = estimate(
+        store.conn,
+        "socal",
+        "cell",
+        5.0,
+        taxon_ids=["piscis-kelpensis"],
+        groups=["fishes:dive_survey"],
+        weeks=[5, 30],
+    )
+    by_cell: dict[str, set[float]] = {}
+    for e in est:
+        by_cell.setdefault(e.cell, set()).add(round(e.p, 9))
+    assert by_cell and all(len(ps) == 1 for ps in by_cell.values())
+
+
+def test_placeholder_dates_are_dropped_and_detected():
+    from datetime import timedelta
+
+    from wildlife_radar.baseline.builder import BaselineConfig, create_training_view
+    from wildlife_radar.baseline.effort import date_spikes
+    from wildlife_radar.core.time import Precision, TimeWindow
+
+    world = SyntheticWorld(
+        observers=5,
+        visits_per_observer=10,
+        survey_sites=SITES,
+        survey_species=(KELP_FISH, COMMON_FISH),
+    )
+    records = world.generate()
+    # Re-stamp a quarter of the survey records with a "release date".
+    stamp = datetime(2024, 11, 30, 8, tzinfo=UTC)
+    survey = [r for r in records if r.source_id == "synthetic-survey"]
+    restamped = {r.obs_id for r in survey[::4]}
+    window = TimeWindow(start=stamp, end=stamp + timedelta(days=1), precision=Precision.DAY)
+    records = [
+        r.model_copy(update={"time": window}) if r.obs_id in restamped else r for r in records
+    ]
+    store = ObservationStore()
+    store.add(records)
+    spikes = date_spikes(store.conn, min_records=10)
+    assert [(k, d) for k, d, _, _ in spikes] == [("synthetic-dive-survey", date(2024, 11, 30))]
+
+    def count(registry):
+        create_training_view(store.conn, BaselineConfig(), world.bbox, registry)
+        return store.conn.execute(
+            "SELECT count(*) FROM _obs WHERE effort_class = 'dive_survey'"
+        ).fetchone()[0]
+
+    fixed = DatasetRegistry(
+        datasets={
+            "synthetic-dive-survey": DatasetEntry(
+                effort_class="dive_survey", placeholder_dates=[date(2024, 11, 30)]
+            )
+        }
+    )
+    assert count(REGISTRY) - count(fixed) == len(restamped)

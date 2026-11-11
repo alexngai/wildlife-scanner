@@ -70,7 +70,10 @@ def backtest_baseline(
     floor: float = 1e-4,
     max_test_visits: int = 50_000,
     max_test_trials: int = 200_000,
+    groups: list[str] | None = None,
 ) -> list[TaxonScore]:
+    """``groups`` restricts scoring to these effort groups (e.g. survey programs whose data end
+    earlier need their own split); gates of other groups are left untouched."""
     cfg = config or BaselineConfig()
     bt = f"{region_id}__backtest"
     build_baseline(conn, region_id=bt, bbox=bbox, config=cfg, cutoff=split, registry=registry)
@@ -108,8 +111,9 @@ def backtest_baseline(
             f"CREATE OR REPLACE TEMP TABLE _ts AS SELECT * FROM _ts "
             f"USING SAMPLE reservoir({int(max_test_trials)} ROWS) REPEATABLE (42)"
         )
+    group_filter = f"AND t.group_id IN ({', '.join('?' * len(groups))})" if groups else ""
     conn.execute(
-        """
+        f"""
         CREATE OR REPLACE TEMP TABLE _trials AS
         SELECT t.taxon_id, t.group_id, v.c, v.c1, v.c2, v.week,
             (h.visit_key IS NOT NULL)::INTEGER AS y
@@ -117,13 +121,13 @@ def backtest_baseline(
         JOIN _tv v ON v.egroup = t.group_id
         LEFT JOIN _th h
             ON h.taxon_id = t.taxon_id AND h.egroup = t.group_id AND h.visit_key = v.visit_key
-        WHERE t.region_id = ?
+        WHERE t.region_id = ? {group_filter}
         UNION ALL
         SELECT t.taxon_id, t.group_id, s.c, s.c1, s.c2, s.week, s.y
         FROM prior_taxa t JOIN _ts s ON s.taxon_id = t.taxon_id AND s.egroup = t.group_id
-        WHERE t.region_id = ?
+        WHERE t.region_id = ? {group_filter}
         """,
-        [bt, bt],
+        [bt, *(groups or []), bt, *(groups or [])],
     )
     for name, level, col in (
         ("_e0", "cell", "c"),
@@ -178,7 +182,14 @@ def backtest_baseline(
         )
 
     ensure_gates_schema(conn)
-    conn.execute("DELETE FROM baseline_gates WHERE region_id = ?", [region_id])
+    if groups:
+        conn.execute(
+            f"DELETE FROM baseline_gates WHERE region_id = ? "
+            f"AND group_id IN ({', '.join('?' * len(groups))})",
+            [region_id, *groups],
+        )
+    else:
+        conn.execute("DELETE FROM baseline_gates WHERE region_id = ?", [region_id])
     evaluated_at = naive_utc(utcnow())
     if scores:
         conn.executemany(
