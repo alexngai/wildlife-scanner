@@ -13,6 +13,7 @@ Status: **draft for discussion**. Builds on [`../research/00-synthesis.md`](../r
 | Query modes | **Both, first-class.** Species-first ("where/when can I find X?") and place-first ("what's likely, and what's *special*, near here?"). |
 | Geography | Start in **Southern California**; design for **global**. |
 | Stack | **Python** backend and data/ML; **TypeScript** web frontend later; API-first. |
+| Licensing posture | **Open-source code; free, non-commercial, educational service.** See [`licensing.md`](licensing.md). |
 
 **Non-goals for v1:** real-time tracking of individual animals; navigation or safety advice ("safe to dive/hike"); harvest or hunting tools.
 
@@ -271,7 +272,10 @@ Sources, licenses and the evidence on LLM extraction accuracy: [`../research/07-
 
 **Per-field provenance record:** value, vocabulary/unit, source + version, retrieval date, **license**, method (import / extracted / imputed / computed / human), evidence URL + span, confidence, taxonomy version, review state.
 
-**License taint tracking.** Every value carries its source license, including LLM extractions, which inherit the licenses of the texts they read. A "commercial build" excludes anything derived from NC or permission-only sources. Examples of such sources: IUCN, BirdLife, FishBase, AquaMaps, Map of Life, eBird S&T, Semantic Scholar.
+**License taint tracking.** Every value carries its source license, including LLM extractions, which inherit the licenses of the texts they read. The project is non-commercial ([`licensing.md`](licensing.md)), so NC sources are usable. Taint tracking now:
+- labels each published product with its inherited license;
+- produces a **fully open variant** from CC0/CC BY/public-domain inputs for unrestricted reuse;
+- keeps restricted and partner inputs from being re-exposed.
 
 Wikipedia facts may be stored as structured fields with a revision-ID citation, never the sentences. Displayed Wikipedia text is CC BY-SA and lives in a separately licensed component.
 
@@ -289,7 +293,7 @@ Contributions are typed, versioned and reviewed, like pull requests:
 Supporting mechanisms:
 - a trust/reputation system
 - reviewer roles (including invited experts)
-- contributor license terms (CC0 or CC BY 4.0) so the commercial question stays open
+- contributor license terms (CC BY 4.0 or CC0), so contributions are maximally reusable by science and education
 - **field-level locks:** sensitivity and status fields are editable only by privileged reviewers
 - upstream re-syncs **never overwrite verified fields**; they raise conflicts instead
 - text pasted from NC or BY-SA sources is rejected
@@ -517,8 +521,10 @@ Policy is part of the framework, not a feature. All outputs (API, exports, tiles
 - **License ledger:**
   - per-record license carried through to predictions;
   - outputs tagged with the most restrictive license of their inputs;
-  - NC-licensed inputs blocked from monetized surfaces;
+  - published products labeled with their inherited license (NC in → NC out), plus a fully open variant;
+  - restricted and partner inputs never re-exposed;
   - attribution strings generated automatically.
+- **Public data products are always post-policy.** This covers the API, tiles, bulk dumps and released model artifacts. Unfiltered intermediates for tier ≥1 species are never published.
 - **Context in outputs:** regulations (MPAs, take rules), approach distances, safety and coexistence guidance.
 
 ---
@@ -613,11 +619,13 @@ Partnership outreach runs in parallel from Phase 0 (see the research synthesis �
 
 1. **LLM extraction:** which model and provider, the budget per species, and the human-review threshold. Which fields may be auto-published, and which need review?
 2. **Community governance:** who can approve profile changes and policy downgrades? Invited experts only, or reputation-based?
-3. **Commercial status:** still open. It decides eBird, iNaturalist, FishBase and IUCN usage and the contributor license terms.
+3. ~~Commercial status~~ **Decided: open source, free, non-commercial, educational** ([`licensing.md`](licensing.md)). Still open:
+   - the code license (Apache-2.0 vs MIT vs AGPL-3.0);
+   - the governance home (individual, nonprofit, fiscal sponsor or university), so "non-commercial" stays unambiguous.
 4. **Global scale target for Level 0:** all taxa, or start with vertebrates?
 5. **Identity and accounts:** needed for contributions and life lists. Build or buy?
 6. **How much carnivore viewing mode is acceptable,** and in which regions? Should this be decided with agency input?
-7. **IUCN categories via Wikidata (P141).** They are CC0 on Wikidata but derived from IUCN, whose data is non-commercial (commercial use goes through IBAT). Get legal review before relying on them at scale in a commercial build.
-8. **Marine traits.** FishBase/SeaLifeBase/AquaMaps are CC BY-NC. Either license them or compute depth/temperature envelopes in-house from OBIS + environmental layers.
-9. **iNaturalist's ban on commercial AI training.** Does it apply to iNat-derived data on GBIF/AWS, and does it cover our prediction models? Clarify with iNat in writing.
+7. **IUCN data.** Non-commercial use is permitted. Check the IUCN terms on redistributing raw data and range polygons before serving them.
+8. ~~Marine traits~~ Resolved by the non-commercial posture: FishBase/SeaLifeBase/AquaMaps (CC BY-NC) are usable with attribution.
+9. **eBird for a public web service.** API caching, EBD-derived products and S&T map redistribution still need written confirmation from Cornell, even for non-commercial use.
 10. **Wikimedia access at scale.** The 2026 API rate limits mean we use dumps or Wikimedia Enterprise, not live API calls. EU database rights matter for global expansion.
