@@ -11,6 +11,7 @@ Drafts never contain ``policy``: tiers come only from status providers and human
 from __future__ import annotations
 
 import copy
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -167,8 +168,8 @@ def promote(
     draft: dict[str, Any],
     *,
     reviewer: str,
-    lock: list[str],
-    reject: list[str] = (),  # type: ignore[assignment]
+    lock: Sequence[str],
+    reject: Sequence[str] = (),
     existing: dict[str, Any] | None = None,
     today: datetime | None = None,
 ) -> dict[str, Any]:
