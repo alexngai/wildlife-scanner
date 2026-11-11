@@ -82,6 +82,8 @@ class BaselineConfig:
     kernel_half_width: int = 3
     min_visits: int = 5
     """Minimum detection visits region-wide for a taxon to get a baseline."""
+    since_year: int | None = None
+    """Ignore records before this year (land use, ranges and observer behavior change)."""
     model_version: str = "baseline-v0"
 
     def __post_init__(self) -> None:
@@ -145,8 +147,18 @@ def build_baseline(
           AND week IS NOT NULL AND group_id IS NOT NULL AND visit_key IS NOT NULL
           AND cell_r{R} IS NOT NULL
           AND (?::TIMESTAMP IS NULL OR time_start < ?::TIMESTAMP)
+          AND (?::INTEGER IS NULL OR year(local_date) >= ?::INTEGER)
         """,
-        [lat_min, lat_max, lon_min, lon_max, cutoff_naive, cutoff_naive],
+        [
+            lat_min,
+            lat_max,
+            lon_min,
+            lon_max,
+            cutoff_naive,
+            cutoff_naive,
+            cfg.since_year,
+            cfg.since_year,
+        ],
     )
     cols = f"cell_r{R} AS c, cell_r{P1} AS c1, cell_r{P2} AS c2, week"
     conn.execute(
@@ -199,16 +211,16 @@ def build_baseline(
         conn.execute(
             f"""
             INSERT INTO prior_effort
-            SELECT ?, group_id, ?, {col}, {week_expr}, SUM(w)
-            FROM _v CROSS JOIN _k GROUP BY ALL
+            SELECT ?, group_id, ?, {col} AS cell, {week_expr} AS week, SUM(w)
+            FROM _v CROSS JOIN _k GROUP BY ALL ORDER BY group_id, cell, week
             """,
             [region_id, level],
         )
         conn.execute(
             f"""
             INSERT INTO prior_hits
-            SELECT ?, taxon_id, ?, {col}, {week_expr}, SUM(w)
-            FROM _d2 CROSS JOIN _k GROUP BY ALL
+            SELECT ?, taxon_id, ?, {col} AS cell, {week_expr} AS week, SUM(w)
+            FROM _d2 CROSS JOIN _k GROUP BY ALL ORDER BY taxon_id, cell, week
             """,
             [region_id, level],
         )

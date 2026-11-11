@@ -69,7 +69,7 @@ def cmd_build_baseline(args: argparse.Namespace) -> int:
     from wildlife_radar.storage import ObservationStore
 
     region = _region(args)
-    cfg = BaselineConfig(res=args.res, min_visits=args.min_visits)
+    cfg = BaselineConfig(res=args.res, min_visits=args.min_visits, since_year=args.since_year)
     with ObservationStore(args.db) as store:
         report = build_baseline(store.conn, region_id=region.id, bbox=region.bbox, config=cfg)
     _print(report.__dict__)
@@ -90,7 +90,9 @@ def cmd_evaluate_baseline(args: argparse.Namespace) -> int:
             bbox=region.bbox,
             split=split,
             end=end,
-            config=BaselineConfig(res=args.res, min_visits=args.min_visits),
+            config=BaselineConfig(
+                res=args.res, min_visits=args.min_visits, since_year=args.since_year
+            ),
         )
     passed = sum(s.passes for s in scores)
     print(f"{passed}/{len(scores)} taxa beat the range-only reference (Brier skill > 0)")
@@ -246,6 +248,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     common(p)
     p.add_argument("--res", type=int, default=6)
     p.add_argument("--min-visits", type=int, default=5)
+    p.add_argument("--since-year", type=int, help="ignore records before this year")
     p.set_defaults(func=cmd_build_baseline)
 
     p = sub.add_parser("evaluate-baseline", help="backtest the baseline vs. range-only")
@@ -254,6 +257,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--end")
     p.add_argument("--res", type=int, default=6)
     p.add_argument("--min-visits", type=int, default=5)
+    p.add_argument("--since-year", type=int, help="ignore records before this year")
     p.add_argument("--show", type=int, default=25)
     p.set_defaults(func=cmd_evaluate_baseline)
 
