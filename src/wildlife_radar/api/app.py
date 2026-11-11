@@ -154,17 +154,32 @@ def create_app(
         ]
 
     @app.get("/places/{place_id}/lists", response_model=PlaceLists)
-    def place_lists(place_id: str, date: str | None = None, life_list: str | None = None):
+    def place_lists(
+        place_id: str,
+        date: str | None = None,
+        life_list: str | None = None,
+        group: str | None = None,
+    ):
         lat, lon = _location(None, None, place_id)
-        return _lists(lat, lon, date, life_list)
+        return _lists(lat, lon, date, life_list, group)
 
     @app.get("/nearby", response_model=PlaceLists)
-    def nearby(lat: float, lon: float, date: str | None = None, life_list: str | None = None):
-        return _lists(lat, lon, date, life_list)
+    def nearby(
+        lat: float,
+        lon: float,
+        date: str | None = None,
+        life_list: str | None = None,
+        group: str | None = None,
+    ):
+        return _lists(lat, lon, date, life_list, group)
 
-    def _lists(lat: float, lon: float, day: str | None, life_list: str | None) -> PlaceLists:
+    def _lists(
+        lat: float, lon: float, day: str | None, life_list: str | None, group: str | None
+    ) -> PlaceLists:
         try:
-            return queries.place_lists(lat, lon, _parse_date(day), _life_list(life_list))
+            return queries.place_lists(
+                lat, lon, _parse_date(day), _life_list(life_list), group=group
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
 

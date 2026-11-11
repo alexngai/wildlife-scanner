@@ -13,6 +13,7 @@ VALIDATION_SPECIES = {
     "limosa-fedoa",
     "puma-concolor",
     "canis-lupus",
+    "stereolepis-gigas",
 }
 
 
@@ -113,3 +114,9 @@ def test_socal_region():
     assert "ca-southern-central-coast" in region.scopes
     cove = region.place("la-jolla-cove")
     assert len(cove.cells(9)) >= 1
+
+
+def test_giant_sea_bass_is_coarse_without_any_listing(lib):
+    gsb = lib.resolve("stereolepis-gigas")
+    eff = gsb.effective_tier(PolicyTier.OPEN, region="socal", on=date(2026, 7, 1), now=NOW)
+    assert eff.tier is PolicyTier.COARSE

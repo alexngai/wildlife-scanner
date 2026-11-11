@@ -67,6 +67,7 @@ def backtest_baseline(
           AND week IS NOT NULL AND group_id IS NOT NULL AND visit_key IS NOT NULL
           AND cell_r{R} IS NOT NULL AND time_start >= ?
           AND (?::TIMESTAMP IS NULL OR time_start < ?::TIMESTAMP)
+          AND {cfg.basis_filter()}
         """,
         [lat_min, lat_max, lon_min, lon_max, split_n, end_n, end_n],
     )

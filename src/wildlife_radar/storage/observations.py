@@ -83,9 +83,12 @@ CREATE TABLE IF NOT EXISTS observations (
     taxon_geoprivacy VARCHAR,
     observer_hash VARCHAR,
     dataset_key VARCHAR,
-    ingested_at TIMESTAMP
+    ingested_at TIMESTAMP,
+    basis_of_record VARCHAR
 )
 """
+#: Columns added after the first schema version (appended, so column order stays stable).
+MIGRATIONS = ("ALTER TABLE observations ADD COLUMN IF NOT EXISTS basis_of_record VARCHAR",)
 COLUMNS = [
     "dedupe_key",
     "obs_id",
@@ -120,6 +123,7 @@ COLUMNS = [
     "observer_hash",
     "dataset_key",
     "ingested_at",
+    "basis_of_record",
 ]
 
 
@@ -233,6 +237,7 @@ def observation_row(obs: Observation) -> tuple:
         observer,
         dataset,
         naive_utc(obs.ingested_at),
+        obs.extras.get("basis_of_record"),
     )
 
 
@@ -243,6 +248,8 @@ class ObservationStore:
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self.conn = duckdb.connect(self.path)
         self.conn.execute(SCHEMA)
+        for migration in MIGRATIONS:
+            self.conn.execute(migration)
 
     def add(self, observations: Iterable[Observation], batch_size: int = 20_000) -> int:
         n = 0

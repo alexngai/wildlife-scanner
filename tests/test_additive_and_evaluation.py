@@ -77,3 +77,13 @@ def test_baselines():
     pers = Persistence(default=0.1).fit(events)
     assert pers.predict("cove", 2) == 1.0
     assert pers.predict("cove", 1) == 0.1
+
+
+def test_distinctiveness_prefers_likely_and_distinctive():
+    from wildlife_radar.serving.queries import distinctiveness
+
+    rare_fluke = distinctiveness(0.012, 80.0)  # rarely recorded, huge ratio
+    local_specialty = distinctiveness(0.21, 50.0)  # e.g. pygmy nuthatch in the pines
+    common_everywhere = distinctiveness(0.6, 1.1)
+    assert local_specialty > max(rare_fluke, common_everywhere) > 0
+    assert distinctiveness(0.5, 0.8) == 0.0 and distinctiveness(0.5, None) == 0.0
