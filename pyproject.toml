@@ -17,6 +17,10 @@ dependencies = [
     "uvicorn>=0.30",
 ]
 
+[project.optional-dependencies]
+# LLM extraction for profile generation (docs/design/framework.md §4.3).
+llm = ["anthropic>=2.8"]
+
 [project.scripts]
 wildlife-radar = "wildlife_radar.cli:main"
 

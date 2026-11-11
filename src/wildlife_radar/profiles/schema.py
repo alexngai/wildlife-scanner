@@ -171,15 +171,50 @@ class PolicySpec(BaseModel):
         ]
 
 
+ProvenanceMethod = Literal["import", "extracted", "imputed", "computed", "human", "elicited"]
+
+
 class Provenance(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source: str
-    method: Literal["import", "extracted", "imputed", "computed", "human", "elicited"]
+    method: ProvenanceMethod
     confidence: float | None = Field(default=None, ge=0, le=1)
     evidence: str | None = None
+    """Where to verify the value (e.g. a revision id and character range), never copied text."""
     license: str | None = None
     retrieved: date | None = None
+    measured: bool | None = None
+    """For curated trait databases: measured (True) vs imputed by the database (False)."""
+    extractor: str | None = None
+    """For LLM extraction: extraction model and prompt hash."""
+    review: Literal["unreviewed", "accepted", "rejected"] = "unreviewed"
+
+
+class Conflict(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    field: str
+    values: list[Any]
+    sources: list[str]
+    kind: Literal["categorical", "numeric"]
+
+
+class GenerationInfo(BaseModel):
+    """How a generated profile was made; kept with the draft for review and regeneration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pipeline_version: str
+    generated_at: datetime
+    licenses: list[str] = Field(default_factory=list)
+    """Licenses inherited from every source used (license taint)."""
+    open_variant: bool = False
+    """True when every value comes from CC0/CC BY/public-domain sources."""
+    conflicts: list[Conflict] = Field(default_factory=list)
+    review_queue: list[str] = Field(default_factory=list)
+    """Fields to review first, ranked by uncertainty × impact."""
+    notes: list[str] = Field(default_factory=list)
 
 
 class SpeciesProfile(BaseModel):
@@ -201,6 +236,11 @@ class SpeciesProfile(BaseModel):
     nowcast: NowcastSpec | None = None
     policy: PolicySpec = Field(default_factory=PolicySpec)
     provenance: dict[str, Provenance] = Field(default_factory=dict)
+    crosswalk: dict[str, str] = Field(default_factory=dict)
+    """Verified identifiers in other databases (``gbif``, ``inaturalist``, ``wikidata``, ...)."""
+    locked: list[str] = Field(default_factory=list)
+    """Field paths a reviewer fixed; regeneration never changes them."""
+    generation: GenerationInfo | None = None
     notes: str | None = None
 
     @field_validator("signals")

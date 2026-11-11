@@ -18,7 +18,18 @@ UNION_LIST_KEYS = frozenset({"always_suppress", "guilds"})
 
 #: Keys that describe the document itself and are never inherited from parents.
 NON_INHERITED_KEYS = frozenset(
-    {"id", "kind", "extends", "scientific_name", "common_name", "status", "notes"}
+    {
+        "id",
+        "kind",
+        "extends",
+        "scientific_name",
+        "common_name",
+        "status",
+        "notes",
+        "crosswalk",
+        "locked",
+        "generation",
+    }
 )
 
 
@@ -41,17 +52,30 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
 
 
 class ProfileLibrary:
-    def __init__(self, root: Path | str = DEFAULT_PROFILES_DIR) -> None:
+    """Profiles under ``root`` plus ``extra_dirs`` (e.g. generated drafts in ``data/``)."""
+
+    def __init__(
+        self, root: Path | str = DEFAULT_PROFILES_DIR, extra_dirs: tuple[Path | str, ...] = ()
+    ) -> None:
         self.root = Path(root)
         self._raw: dict[str, dict[str, Any]] = {}
         self._paths: dict[str, Path] = {}
         if not self.root.is_dir():
             raise ProfileError(f"profiles directory not found: {self.root}")
-        for path in sorted(self.root.rglob("*.yaml")):
+        self.shadowed: list[Path] = []
+        """Drafts in ``extra_dirs`` hidden by a profile of the same id under ``root``."""
+        paths = [(p, False) for p in sorted(self.root.rglob("*.yaml"))]
+        for extra in extra_dirs:
+            if Path(extra).is_dir():
+                paths.extend((p, True) for p in sorted(Path(extra).rglob("*.yaml")))
+        for path, is_extra in paths:
             doc = yaml.safe_load(path.read_text(encoding="utf-8"))
             if not isinstance(doc, dict) or "id" not in doc:
                 raise ProfileError(f"{path}: profile documents need an 'id'")
             pid = doc["id"]
+            if is_extra and pid in self._raw and self._paths[pid].is_relative_to(self.root):
+                self.shadowed.append(path)
+                continue
             if pid in self._raw:
                 raise ProfileError(f"duplicate profile id {pid!r} in {path} and {self._paths[pid]}")
             self._raw[pid] = doc

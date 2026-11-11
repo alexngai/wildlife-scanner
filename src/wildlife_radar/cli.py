@@ -188,8 +188,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=_cmd_sources)
 
     from wildlife_radar.cli_pipeline import register
+    from wildlife_radar.cli_profilegen import register as register_profilegen
 
     register(sub)
+    register_profilegen(sub)
     return parser
 
 

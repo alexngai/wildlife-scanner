@@ -1,0 +1,7 @@
+id: group/mammals
+kind: template
+extends: [base]
+notes: Default for generated mammal profiles until a guild template is assigned in review.
+methods:
+  headline: wildlife_viewing
+  also: [camera_trap, sign_survey]
