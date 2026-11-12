@@ -1,0 +1,51 @@
+id: puma-concolor
+kind: species
+scientific_name: Puma concolor
+common_name: Mountain lion
+extends: [guild/large-terrestrial-carnivore]
+status: draft
+
+traits:
+  activity_pattern: crepuscular
+  home_range_km2: [134, 372]
+
+signals:
+  prey_index:
+    signal: species.odocoileus-hemionus
+    direction: "+"
+    strength: weak
+    hypothesis: true
+
+sources:
+  inaturalist:
+    obs: presence_only
+    false_positive: elevated
+    lookalikes: [lynx-rufus, felis-catus, canis-latrans, canis-familiaris]
+
+policy:
+  default_tier: 2
+  regions:
+    ca-southern-central-coast:
+      tier: 2
+      mode: awareness
+      note: CESA threatened population (Fish and Game Commission vote, Feb 2026).
+    torres-del-paine:
+      tier: 1
+      mode: viewing
+      via: licensed_guides
+      note: >
+        PENDING REVIEW. Managed puma viewing under municipal good-practice guidelines. Ignored by
+        the policy layer until two reviewers approve it with a review date.
+      approved_by: []
+
+provenance:
+  traits.home_range_km2:
+    source: docs/research/06-rare-carnivores.md
+    method: elicited
+    confidence: 0.6
+    evidence: Santa Monica Mountains study — adult female ~134 km², adult male ~372 km².
+  traits.activity_pattern:
+    source: docs/research/06-rare-carnivores.md
+    method: elicited
+    confidence: 0.8
+    evidence: Crepuscular/nocturnal; shifts later near recreation (Wang 2017; Bolas 2025).

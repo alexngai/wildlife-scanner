@@ -1,0 +1,28 @@
+id: base
+kind: template
+notes: Root template with defaults shared by every taxon.
+
+nowcast:
+  enabled: true
+  half_life_days: 7
+
+sources:
+  gbif:
+    obs: presence_only
+    bias: [observer_density, access]
+    background: target_group
+  inaturalist:
+    obs: presence_only
+    bias: [observer_density, access]
+    background: target_group
+
+policy:
+  always_suppress:
+    - nest
+    - den
+    - roost
+    - rendezvous_site
+    - lek
+    - hibernaculum
+    - spawning_aggregation
+    - collared_individual

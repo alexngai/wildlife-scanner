@@ -1,0 +1,55 @@
+id: socal
+name: Southern California
+bbox: [-121.0, 32.4, -114.1, 35.8]
+notes: >
+  First region pack. Coordinates are approximate and for indexing only. Tide station ids and
+  coordinates must be verified against the NOAA CO-OPS metadata API before `verified: true`.
+
+scopes:
+  - global
+  - us
+  - us-ca
+  - california
+  - ca-southern-central-coast
+  - socal
+
+# iNaturalist places that contain the region (United States = 1, California = 14; verified
+# against the live API). Statuses for places inside California also apply, conservatively;
+# statuses for other places (e.g. other states) are ignored.
+inat_place_scopes:
+  "1": us
+  "14": us-ca
+inat_innermost_place: "14"
+
+tide_stations:
+  - {station_id: "9410230", name: "La Jolla (Scripps Pier)", lat: 32.867, lon: -117.257}
+  - {station_id: "9410170", name: "San Diego", lat: 32.714, lon: -117.174}
+  - {station_id: "9410660", name: "Los Angeles", lat: 33.720, lon: -118.272}
+
+places:
+  - place_id: la-jolla-cove
+    name: La Jolla Cove
+    kind: dive_site
+    region: socal
+    habitat: [kelp, rocky_reef]
+    footprint: {kind: point, lat: 32.8505, lon: -117.2720, uncertainty_m: 300}
+    notes: Inside a no-take marine reserve.
+  - place_id: la-jolla-shores
+    name: La Jolla Shores
+    kind: dive_site
+    region: socal
+    habitat: [sand, canyon]
+    footprint: {kind: point, lat: 32.8575, lon: -117.2570, uncertainty_m: 500}
+  - place_id: point-loma-kelp
+    name: Point Loma kelp forest
+    kind: zone
+    region: socal
+    habitat: [kelp]
+    footprint: {kind: point, lat: 32.70, lon: -117.27, uncertainty_m: 3000}
+  - place_id: casino-point
+    name: Casino Point (Avalon, Catalina)
+    kind: dive_site
+    region: socal
+    habitat: [kelp, rocky_reef]
+    footprint: {kind: point, lat: 33.3485, lon: -118.3245, uncertainty_m: 300}
+    notes: Inside a no-take marine conservation area.

@@ -1,0 +1,7 @@
+id: group/fishes
+kind: template
+extends: [base]
+notes: Default for generated fish profiles until a guild template is assigned in review.
+methods:
+  headline: snorkel
+  also: [scuba_dive, freedive]

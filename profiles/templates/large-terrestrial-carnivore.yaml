@@ -1,0 +1,61 @@
+id: guild/large-terrestrial-carnivore
+kind: template
+extends: [base]
+guilds: [large-terrestrial-carnivore]
+notes: >
+  Rare, cryptic, territorial carnivores. Sightings are not a predictable quantity outside managed
+  viewing systems; the headline method is a sign survey. Default policy is awareness-only.
+  See docs/research/06-rare-carnivores.md.
+
+methods:
+  headline: sign_survey
+  also: [camera_trap, wildlife_viewing]
+
+latent_state:
+  scale: territory
+  from_trait: home_range_km2
+  dynamics: slow
+
+signals:
+  diel_activity:
+    signal: astro.sun_altitude_deg
+    role: availability
+    from_trait: activity_pattern
+    strength: strong
+  tracking_conditions:
+    signal: derived.days_since_precip_or_snow
+    role: detectability
+    applies_to: [sign_survey]
+    strength: strong
+  human_activity:
+    signal: human.recreation_intensity
+    direction: "-"
+    strength: strong
+  moonlight:
+    # Moonlight changes prey and predator activity; the direction for encounters is unknown
+    # (UNVERIFIED; tested by the hypothesis scorecard).
+    signal: astro.moon_illumination
+    role: availability
+    strength: weak
+    hypothesis: true
+
+sources:
+  inaturalist:
+    obs: presence_only
+    bias: [observer_density, access, media_spikes]
+    false_positive: elevated
+  camera_traps:
+    obs: camera
+    status: planned
+    effort: trap_nights
+  roadkill:
+    obs: presence_only
+    status: planned
+    bias: [roads]
+
+nowcast:
+  enabled: false
+
+policy:
+  default_tier: 2
+  always_suppress: [disperser]

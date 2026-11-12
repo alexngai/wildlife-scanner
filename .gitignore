@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Local data, caches and credentials — third-party data never goes in the repo
+data/
+cache/
+*.parquet
+*.zarr/
+*.nc
+.env
+.env.*
+*.key
+secrets/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store

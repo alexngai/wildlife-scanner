@@ -1,0 +1,7 @@
+id: group/other_animals
+kind: template
+extends: [base]
+notes: Default for generated profiles in the 'other_animals' target group.
+methods:
+  headline: observer_visit
+  also: [wildlife_viewing]
