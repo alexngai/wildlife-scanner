@@ -45,7 +45,7 @@ def observation(n: int, name: str, observer: str, day: date, lat: float, lon: fl
     when = datetime(day.year, day.month, day.day, 18, tzinfo=UTC)
     return Observation(
         obs_id=f"cond:{n}",
-        source_id="cond-test",
+        source_id="inaturalist",  # a live source: nowcast inputs come only from these
         source_record_id=str(n),
         taxon=TaxonRef(scheme=TaxonScheme.NAME, id=name, name=name, rank="species"),
         footprint=PointFootprint(lat=lat, lon=lon, uncertainty_m=20),

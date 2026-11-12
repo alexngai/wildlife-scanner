@@ -23,7 +23,7 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from wildlife_radar.baseline.builder import BaselineConfig, create_training_view
-from wildlife_radar.baseline.effort import DatasetRegistry, method_for
+from wildlife_radar.baseline.effort import DatasetRegistry, method_for, split_egroup
 from wildlife_radar.conditions.levels import SignalLookup, stations_in_store
 from wildlife_radar.conditions.model import OffsetLogit, TermSpec
 from wildlife_radar.core import spatial
@@ -65,9 +65,9 @@ class RecentItem(BaseModel):
     effort_group: str
     method: str
     recent_detections: int
-    """Outings with records of the taxon in the ~10 km cell during the window."""
+    """Outings with live-source records (iNaturalist) of the taxon in the ~10 km cell."""
     recent_outings: int
-    """All outings of the effort group in the cell during the window."""
+    """Live-source outings recording the taxon's group in the cell during the window."""
     p_usual: float
     """Baseline (Level 0) chance per outing at this place and week."""
     p_now: float
@@ -178,13 +178,13 @@ class ForecastService:
             # Published bundles carry aggregates (no raw records), already delayed by policy.
             k = self.conn.execute(
                 "SELECT coalesce(sum(k), 0) FROM recent_detections WHERE taxon_id = ? "
-                "AND group_id = ? AND c1 = ? AND day >= ? AND day < ?",
-                [taxon_id, group_id, c1, start, on],
+                "AND c1 = ? AND day >= ? AND day < ?",
+                [taxon_id, c1, start, on],
             ).fetchone()[0]
             n = self.conn.execute(
-                "SELECT coalesce(sum(n), 0) FROM recent_effort WHERE group_id = ? AND c1 = ? "
-                "AND day >= ? AND day < ?",
-                [group_id, c1, start, on],
+                "SELECT coalesce(sum(n), 0) FROM recent_effort WHERE taxon_group = ? "
+                "AND c1 = ? AND day >= ? AND day < ?",
+                [split_egroup(group_id)[0], c1, start, on],
             ).fetchone()[0]
             return float(k), float(n)
         create_training_view(
@@ -200,9 +200,9 @@ class ForecastService:
             """
             SELECT count(DISTINCT visit_key) FILTER (WHERE taxon_id = ? AND detected),
                    count(DISTINCT visit_key)
-            FROM _fc WHERE egroup = ? AND c1 = ?
+            FROM _fc WHERE live AND taxon_group = ? AND c1 = ?
             """,
-            [taxon_id, group_id, c1],
+            [taxon_id, split_egroup(group_id)[0], c1],
         ).fetchone()
         return float(k or 0), float(n or 0)
 
@@ -278,14 +278,15 @@ def _recent_rows(service: ForecastService, c1: str, start: date, end: date) -> l
     return conn.execute(
         """
         WITH d AS (
-            SELECT taxon_id, group_id, sum(k) AS k FROM recent_detections
+            SELECT taxon_id, taxon_group, sum(k) AS k FROM recent_detections
             WHERE c1 = ? AND day >= ? AND day < ? GROUP BY ALL
         ),
         e AS (
-            SELECT group_id, sum(n) AS n FROM recent_effort
+            SELECT taxon_group, sum(n) AS n FROM recent_effort
             WHERE c1 = ? AND day >= ? AND day < ? GROUP BY ALL
         )
-        SELECT d.taxon_id, d.group_id, d.k, coalesce(e.n, d.k) FROM d LEFT JOIN e USING (group_id)
+        SELECT d.taxon_id, d.taxon_group, d.k, coalesce(e.n, d.k)
+        FROM d LEFT JOIN e USING (taxon_group)
         ORDER BY d.k DESC
         """,
         [c1, start, end, c1, start, end],
@@ -321,14 +322,17 @@ def recent_activity(
     if not rows:
         out.notes.append("no recent records published for this area")
         return out
-    for taxon_id, group_id, k, n in rows:
+    for taxon_id, _taxon_group, k, n in rows:
         # Only openly mapped taxa, re-checked for this date (profiles can raise tiers seasonally).
         if q.tiers.get(taxon_id, on) != PolicyTier.OPEN:
             continue
         try:
-            fc = service.forecast(taxon_id, lat, lon, on, method=group_id)
+            # The taxon's best-sampled effort group (e.g. checklists for birds); its Level-2
+            # model reads the live-source recent counts.
+            fc = service.forecast(taxon_id, lat, lon, on)
         except (NotAvailable, ValueError):
             continue
+        group_id = fc.effort_group
         boost = None
         if fc.level >= 2:
             nowcast = sum(d.contribution for d in fc.drivers if d.signal.startswith("nowcast."))
