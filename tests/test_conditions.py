@@ -244,3 +244,34 @@ def test_forecast_uses_gated_levels_and_explains(world):
     flat = service.forecast("piscis-indifferens", *SITE, warm)
     assert flat.level == 0 and flat.p == flat.p_level0
     assert any("gate" in n for n in flat.notes)
+
+
+def test_nowcast_for_open_taxa_without_profiles(world):
+    from wildlife_radar.baseline import build_baseline
+    from wildlife_radar.conditions.nowcast import run_nowcasts
+    from wildlife_radar.policy.statuses import StaticStatusProvider, build_tier_table
+
+    conn = world.conn
+    build_baseline(conn, region_id="now", bbox=BBOX)
+    build_tier_table(conn, region_id="now", scopes=["global"], providers=[StaticStatusProvider()])
+    summary = run_nowcasts(
+        conn,
+        region_id="now",
+        bbox=BBOX,
+        split=SPLIT,
+        exclude={"piscis-calida"},
+        min_detections=50,
+        pool=4000,
+        reps=50,
+    )
+    assert summary.fitted >= 2
+    gates = {
+        t: passes
+        for t, passes in conn.execute(
+            "SELECT taxon_id, passes FROM conditions_gates WHERE region_id = 'now' AND level = 2"
+        ).fetchall()
+    }
+    assert gates["piscis-pulsans"] is True  # pulses: recent sightings predict the next days
+    assert gates["piscis-indifferens"] is False  # steady: nothing to gain
+    assert "piscis-calida" not in gates  # profiled taxa are handled by run_conditions
+    assert [b[0] for b in summary.best][:1] == ["piscis-pulsans"]

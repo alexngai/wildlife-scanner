@@ -317,6 +317,30 @@ def _conditions(ctx: JobContext) -> dict:
     return {"fitted": len(reports), "passing": passing}
 
 
+def _nowcast(ctx: JobContext) -> dict:
+    from wildlife_radar.conditions.nowcast import run_nowcasts
+    from wildlife_radar.profiles import ProfileLibrary
+
+    with ctx.store() as store:
+        summary = run_nowcasts(
+            store.conn,
+            region_id=ctx.region.id,
+            bbox=ctx.region.bbox,
+            split=ctx.conditions_split(),
+            config=ctx.config(),
+            registry=ctx.registry(),
+            exclude=set(ProfileLibrary().ids(kind="species")),
+            max_taxa=int(ctx.params.get("nowcast_max_taxa", 300)),
+            log=ctx.log,
+        )
+    return {
+        "fitted": summary.fitted,
+        "passing": summary.passing,
+        "skipped": summary.skipped,
+        "best": summary.best,
+    }
+
+
 def _publish(ctx: JobContext) -> dict:
     from wildlife_radar.pipeline.publish import publish_bundle
 
@@ -362,8 +386,15 @@ JOBS: dict[str, Job] = {
         ),
         Job("conditions", ("baseline",), _conditions, timedelta(days=30), "Levels 1–2, scorecard"),
         Job(
+            "nowcast",
+            ("baseline", "tiers", "conditions"),
+            _nowcast,
+            timedelta(days=30),
+            "recent-sightings Level 2, OPEN taxa",
+        ),
+        Job(
             "publish",
-            ("tiers", "backtest", "conditions", "signals", "live"),
+            ("tiers", "backtest", "conditions", "nowcast", "signals", "live"),
             _publish,
             None,
             "audit-gated serving bundle",
