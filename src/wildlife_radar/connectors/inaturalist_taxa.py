@@ -70,8 +70,20 @@ def parse_taxon_statuses(
         geoprivacies.append(cs.get("geoprivacy"))
         code = IUCN_EQUIVALENTS.get(cs.get("iucn"))
         if code is None:
+            authority = cs.get("authority") or ""
+            if "natureserve" in authority.lower() and cs.get("status"):
+                # NatureServe ranks (S1–S5, G…, N…) have their own tier rules.
+                statuses.append(
+                    ConservationStatus(
+                        authority="NatureServe",
+                        code=str(cs["status"]),
+                        scope=scope,
+                        source=f"inaturalist: {authority}",
+                    )
+                )
+                continue
             # Applies here but has no IUCN equivalent: kept visible for the tier audit.
-            unmapped.append(f"{cs.get('authority')}: {cs.get('status')} ({scope})")
+            unmapped.append(f"{authority}: {cs.get('status')} ({scope})")
             continue
         statuses.append(
             ConservationStatus(

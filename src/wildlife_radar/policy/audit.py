@@ -33,6 +33,7 @@ from wildlife_radar.policy.tiers import PolicyTier
 
 THREATENED = {"VU", "EN", "CR", "EW"}
 _INAT_THREATENED = re.compile(r"\b(endangered|threatened|vulnerable|critically)\b", re.I)
+_NS_SENSITIVE = re.compile(r"^[GTSN][12HX]", re.I)
 
 
 @dataclass(frozen=True)
@@ -98,7 +99,19 @@ def audit_tiers(
                 continue
             lookup = StatusLookup.model_validate_json(payload)
             for status in lookup.unmapped:
-                findings.append(Finding("high", "open_with_unmapped_status", t, status))
+                # Threat words make it high; other unknown statuses still deserve a look.
+                severity = "high" if _INAT_THREATENED.search(status) else "medium"
+                findings.append(Finding(severity, "open_with_unmapped_status", t, status))
+            for status in lookup.statuses:
+                if status.authority == "NatureServe" and _NS_SENSITIVE.match(status.code):
+                    findings.append(
+                        Finding(
+                            "high",
+                            "open_with_sensitive_natureserve_rank",
+                            t,
+                            f"NatureServe {status.code} ({status.scope})",
+                        )
+                    )
             elsewhere = [s for s in lookup.ignored if _INAT_THREATENED.search(s)]
             if elsewhere:
                 findings.append(
