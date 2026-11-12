@@ -413,11 +413,9 @@ def evaluate_taxon(
     # compares against that recalibrated Level 0, so only the condition terms earn the pass.
     m0 = OffsetLogit([]).fit(sub(train), y[train], off[train], w[train])
     m1 = OffsetLogit(terms).fit(sub(train), y[train], off[train], w[train])
-    m2 = OffsetLogit([*terms, *NOWCAST_TERMS]).fit(sub(train), y[train], off[train], w[train])
     yt, wt, p0t = y[held], w[held], p0[held]
     p0r = m0.predict(sub(held), off[held])
     p1 = m1.predict(sub(held), off[held])
-    p2 = m2.predict(sub(held), off[held])
     kt, nt = k[held], n[held]
     persistence = (kt + 5 * p0r) / (nt + 5)
     blocks = np.array([d.toordinal() for d, h in zip(days, held, strict=True) if h])
@@ -437,7 +435,12 @@ def evaluate_taxon(
         return LevelResult(level_no, len(yt), int(yt.sum()), b_ref, b, skill_all, ci, passes)
 
     l1 = level(1, p0r, p1)
-    l2 = level(2, p1, p2)
+    # Level 2 builds on the best level below it: the conditions model if Level 1 passed,
+    # otherwise the recalibrated Level 0 (recent sightings can help without conditions).
+    base_terms, p_base = (terms, p1) if l1.passes else ([], p0r)
+    m2 = OffsetLogit([*base_terms, *NOWCAST_TERMS]).fit(sub(train), y[train], off[train], w[train])
+    p2 = m2.predict(sub(held), off[held])
+    l2 = level(2, p_base, p2)
     report.brier_persistence = brier(yt, persistence, wt)
     report.brier_level0 = brier(yt, p0t, wt)
     l2.passes = l2.passes and l2.brier < report.brier_persistence
