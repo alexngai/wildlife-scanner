@@ -180,3 +180,54 @@ def test_registry_live_datasets_are_live_in_training_views(tmp_path):
             "SELECT count(*) FILTER (WHERE live) FROM _obs WHERE effort_class = 'dive_survey'"
         ).fetchone()[0]
     assert counts[False] == 0 and counts[True] > 0
+
+
+def test_repairs_resume_after_an_interruption(tmp_path, monkeypatch):
+    from datetime import date
+
+    from wildlife_radar.connectors import gbif_events
+    from wildlife_radar.pipeline import runner
+    from wildlife_radar.storage import ObservationStore
+
+    registry = tmp_path / "datasets.yaml"
+    registry.write_text(
+        "datasets:\n  kelp: {placeholder_dates: [2023-11-30], event_id_date: '_(\\d{8})_'}\n",
+        encoding="utf-8",
+    )
+    c = ctx(tmp_path)
+    c.params["datasets"] = str(registry)
+    with ObservationStore(c.db) as store:
+        for i in range(6):
+            store.conn.execute(
+                "INSERT INTO observations (dedupe_key, obs_id, source_id, source_record_id, "
+                "dataset_key, local_date, lon) VALUES (?, ?, 'gbif', ?, 'kelp', ?, -117.2)",
+                [f"k{i}", f"o{i}", str(i), date(2023, 11, 30)],
+            )
+    events = [(f"SITE_2020010{e + 1}_A", 2) for e in range(3)]  # records 0-1, 2-3, 4-5
+    index = {name: e for e, (name, _) in enumerate(events)}
+    fetched: list[str] = []
+    fail = {"on": "SITE_20200103_A"}
+
+    def fake_fetch(key, chunk, **_kw):
+        out = []
+        for name, _n in chunk:
+            if name == fail["on"]:
+                raise RuntimeError("connection reset")
+            fetched.append(name)
+            e = index[name]
+            out += [(str(2 * e), name), (str(2 * e + 1), name)]
+        return out
+
+    monkeypatch.setattr(gbif_events, "event_ids", lambda *a, **k: events)
+    monkeypatch.setattr(gbif_events, "fetch_events", fake_fetch)
+    monkeypatch.setattr(runner, "REPAIR_CHUNK", 1)
+    jobs = {"repairs": Job("repairs", (), runner._repairs)}
+    first = run("repairs", c, jobs=jobs)[0]
+    assert "connection reset" in first["outcome"]
+    fail["on"] = None
+    second = run("repairs", c, jobs=jobs)[0]
+    assert fetched == ["SITE_20200101_A", "SITE_20200102_A", "SITE_20200103_A"]  # no repeats
+    assert second["outcome"]["redated"]["kelp"] == 6
+    with ObservationStore(c.db) as store:
+        days = store.conn.execute("SELECT DISTINCT local_date FROM observations").fetchall()
+    assert sorted(d for (d,) in days) == [date(2020, 1, 1), date(2020, 1, 2), date(2020, 1, 3)]

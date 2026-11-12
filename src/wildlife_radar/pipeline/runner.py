@@ -151,26 +151,66 @@ def _snapshot(ctx: JobContext) -> dict:
     return out
 
 
+REPAIR_CHUNK = 200
+"""Events per checkpoint when fetching event ids (a restart skips finished events)."""
+
+
 def _repairs(ctx: JobContext) -> dict:
-    from wildlife_radar.connectors.gbif_events import fetch_event_ids
+    """Re-date records a dataset stamped with a placeholder date, from their event ids.
+
+    Event ids come from the GBIF API (snapshots don't carry them), event by event, in chunks
+    that are checkpointed in ``repair_events``: an interrupted run resumes where it stopped.
+    """
+    from wildlife_radar.connectors.base import make_client
+    from wildlife_radar.connectors.gbif_events import event_ids, fetch_events
     from wildlife_radar.storage.repair import (
         missing_event_ids,
         redate_from_event_ids,
         set_event_ids,
     )
 
-    out = {}
+    workers = int(ctx.params.get("repair_workers") or 8)
+    out: dict = {}
     with ctx.store() as store:
+        conn = store.conn
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS repair_events (dataset_key VARCHAR, event_date DATE, "
+            "event_id VARCHAR, done_at TIMESTAMP)"
+        )
+        client = make_client(timeout=60)
         for key, entry in ctx.registry().datasets.items():
             if not (entry.event_id_date and entry.placeholder_dates):
                 continue
             for d in entry.placeholder_dates:
-                if missing_event_ids(store.conn, key, [d]):
-                    set_event_ids(
-                        store.conn, key, fetch_event_ids(key, d.isoformat(), ctx.region.bbox)
+                if not missing_event_ids(conn, key, [d]):
+                    continue
+                done = {
+                    e
+                    for (e,) in conn.execute(
+                        "SELECT event_id FROM repair_events WHERE dataset_key = ? "
+                        "AND event_date = ?",
+                        [key, d],
+                    ).fetchall()
+                }
+                events = [
+                    e
+                    for e in event_ids(client, key, d.isoformat(), ctx.region.bbox)
+                    if e[0] not in done
+                ]
+                for i in range(0, len(events), REPAIR_CHUNK):
+                    chunk = events[i : i + REPAIR_CHUNK]
+                    pairs = fetch_events(key, chunk, client=client, workers=workers)
+                    set_event_ids(conn, key, pairs)
+                    conn.executemany(
+                        "INSERT INTO repair_events VALUES (?, ?, ?, now()::TIMESTAMP)",
+                        [(key, d, name) for name, _ in chunk],
+                    )
+                    ctx.log(
+                        f"repairs {key[:8]} {d}: {min(i + REPAIR_CHUNK, len(events))}/"
+                        f"{len(events)} events"
                     )
             out[key] = redate_from_event_ids(
-                store.conn, key, entry.event_id_date, entry.placeholder_dates
+                conn, key, entry.event_id_date, entry.placeholder_dates
             )
     return {"redated": out}
 
