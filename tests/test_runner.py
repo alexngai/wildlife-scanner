@@ -114,3 +114,69 @@ def test_region_pack_inherits_curated_files():
     assert c.region.inherits == "california"
     assert c.statuses_path().parts[-2:] == ("california", "statuses.yaml")
     assert any(e.event_id_date for e in c.registry().datasets.values())  # shared registry
+
+
+def test_live_job_pulls_registry_live_datasets_from_gbif(tmp_path):
+    from wildlife_radar.pipeline import runner
+    from wildlife_radar.storage import ObservationStore
+    from wildlife_radar.synthetic import SyntheticWorld
+
+    registry = tmp_path / "datasets.yaml"
+    registry.write_text(
+        "datasets:\n"
+        "  whale-feed: {name: Live whale feed, live: true}\n"
+        "  archive: {name: Old survey}\n",
+        encoding="utf-8",
+    )
+    records = SyntheticWorld(observers=3, visits_per_observer=5).generate()
+
+    class Fake:
+        def __init__(self, items, fail=False):
+            self.items, self.fail, self.queries = items, fail, []
+
+        def fetch(self, query):
+            self.queries.append(query)
+            if self.fail:
+                raise RuntimeError("GBIF is down")
+            return iter(self.items)
+
+    c = ctx(tmp_path, now=datetime.now(UTC))
+    with ObservationStore(c.db) as store:
+        store.add(records[:1])
+    gbif = Fake(records[5:8])
+    c.params.update({"datasets": str(registry), "_inaturalist": Fake(records[1:3]), "_gbif": gbif})
+    jobs = {k: runner.JOBS[k] for k in ("snapshot", "live")}
+    out = {r["job"]: r for r in run("live", c, jobs=jobs)}["live"]["outcome"]
+    assert out["records"] == 2 and out["gbif_records"] == 3
+    assert gbif.queries[0].dataset_keys == ("whale-feed",)  # only datasets marked live
+    # A GBIF failure is recorded; the job (and publishing after it) carries on.
+    c.params["_gbif"] = Fake([], fail=True)
+    out = {r["job"]: r for r in run("live", c, jobs=jobs, force=("live",))}["live"]["outcome"]
+    assert "GBIF is down" in out["gbif_error"] and "gbif_cursor" in out
+
+
+def test_registry_live_datasets_are_live_in_training_views(tmp_path):
+    from wildlife_radar.baseline.builder import BaselineConfig, create_training_view
+    from wildlife_radar.baseline.effort import DatasetEntry, DatasetRegistry
+    from wildlife_radar.storage import ObservationStore
+    from wildlife_radar.synthetic import DEFAULT_SPECIES, SyntheticWorld
+
+    world = SyntheticWorld(
+        observers=5,
+        visits_per_observer=10,
+        survey_sites=((32.85, -117.27),),
+        survey_species=DEFAULT_SPECIES[:1],
+    )
+    st = ObservationStore()
+    st.add(world.generate())
+    bbox = world.bbox
+    counts = {}
+    for live in (False, True):
+        registry = DatasetRegistry(
+            datasets={world.survey_dataset: DatasetEntry(effort_class="dive_survey", live=live)}
+        )
+        create_training_view(st.conn, BaselineConfig(since_year=None), bbox, registry)
+        counts[live] = st.conn.execute(
+            "SELECT count(*) FILTER (WHERE live) FROM _obs WHERE effort_class = 'dive_survey'"
+        ).fetchone()[0]
+    assert counts[False] == 0 and counts[True] > 0
