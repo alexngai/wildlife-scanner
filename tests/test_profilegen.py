@@ -731,3 +731,88 @@ def test_renamed_species_merge_through_aliases():
     queries = BaselineQueries(conn, load_region("socal"), TierService(conn, "socal"))
     summary = queries.taxon_summary("vernalis-maritimus", datetime(2026, 5, 15).date())
     assert summary.taxon_id == "vernalis-litoralis"
+
+
+def test_extraction_calibration_against_measured_traits(tmp_path):
+    from wildlife_radar.profilegen.calibrate import (
+        load_accuracy,
+        report,
+        run_calibration,
+        save_report,
+    )
+
+    bird_article = Article(
+        title="Example bird",
+        revid=5,
+        text="The example bird (Avis imputata) is active by day. It lives in deserts.",
+    )
+
+    class Wiki:
+        def fetch(self, title):
+            return ARTICLE if title == "Example cat" else bird_article
+
+    class Resolver(IdentityResolver):
+        def __init__(self):
+            pass
+
+        def resolve_many(self, names):
+            return [
+                identity().model_copy(update={"wikipedia_title": "Example cat"}),
+                TaxonIdentity(
+                    query_name="Avis imputata",
+                    taxon_id="avis-imputata",
+                    accepted_name="Avis imputata",
+                    wikipedia_title="Example bird",
+                ),
+            ]
+
+    extractor = StaticExtractor(
+        {
+            "Example cat": {
+                "activity_pattern": {
+                    "stated": True,
+                    "value": "nocturnal",
+                    "evidence": "It is mostly nocturnal",
+                },
+                "habitats": {
+                    "stated": True,
+                    "value": ["oak_woodland", "chaparral"],
+                    "evidence": "It lives in oak woodland and chaparral.",
+                },
+            },
+            "Example bird": {
+                "activity_pattern": {
+                    "stated": True,
+                    "value": "diurnal",
+                    "evidence": "is active by day",
+                },
+                "habitats": {
+                    "stated": True,
+                    "value": ["desert"],
+                    "evidence": "It lives in deserts.",
+                },
+            },
+        }
+    )
+    scores, notes = run_calibration(
+        ["Felis exemplaris", "Avis imputata"],
+        resolver=Resolver(),
+        traits=TetrapodTraits(FIXTURES / "tetrapodtraits_sample.csv"),
+        wiki=Wiki(),
+        extractor=extractor,
+    )
+    # The bird's activity is imputed in the database, so only the cat's is compared.
+    assert scores["traits.activity_pattern"].n == 1
+    assert scores["traits.activity_pattern"].accuracy == 1.0
+    habitats = scores["traits.habitats"]
+    assert habitats.n == 2 and habitats.accuracy == 0.5  # cat right, bird wrong
+    assert habitats.examples[0]["taxon"] == "avis-imputata"
+    data = report(scores, threshold=0.9, min_n=1)
+    assert data["fields"]["traits.activity_pattern"]["decision"] == "auto-accept"
+    assert data["fields"]["traits.habitats"]["decision"].startswith("review")
+    path = save_report(data, tmp_path / "accuracy.json")
+    assert load_accuracy(path) == {"activity_pattern": 1.0, "habitats": 0.5}
+    # Calibrated accuracy becomes the confidence of extracted values.
+    result = extractor.extract(ARTICLE, NAMES, EXTRACTION_FIELDS)
+    cands, _ = extraction_candidates(result, ARTICLE, NAMES, accuracy=load_accuracy(path))
+    assert {c.field: c.provenance.confidence for c in cands}["traits.habitats"] == 0.5

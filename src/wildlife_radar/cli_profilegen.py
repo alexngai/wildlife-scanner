@@ -51,10 +51,12 @@ def cmd_generate(args: argparse.Namespace) -> int:
             gen.region_id = region.id
             gen.bbox = region.bbox
     if args.extract:
+        from wildlife_radar.profilegen.calibrate import load_accuracy
         from wildlife_radar.profilegen.extract import ClaudeExtractor
 
         gen.wiki = WikipediaClient(cache_dir=out_dir.parent / "cache" / "wikipedia")
         gen.extractor = ClaudeExtractor(model=args.model)
+        gen.accuracy = load_accuracy()
     try:
         reports = gen.run(_names(args))
     finally:
@@ -186,6 +188,30 @@ def cmd_crosswalk(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_calibrate(args: argparse.Namespace) -> int:
+    """Run extraction on species with measured trait values and score per-field accuracy."""
+    from wildlife_radar.profilegen.calibrate import report, run_calibration, save_report
+    from wildlife_radar.profilegen.draft import DEFAULT_DRAFT_DIR
+    from wildlife_radar.profilegen.extract import ClaudeExtractor
+    from wildlife_radar.profilegen.identity import IdentityResolver
+    from wildlife_radar.profilegen.traits import TetrapodTraits
+    from wildlife_radar.profilegen.wikipedia import WikipediaClient
+
+    scores, notes = run_calibration(
+        _names(args),
+        resolver=IdentityResolver(),
+        traits=TetrapodTraits(args.traits),
+        wiki=WikipediaClient(cache_dir=DEFAULT_DRAFT_DIR.parent / "cache" / "wikipedia"),
+        extractor=ClaudeExtractor(model=args.model),
+    )
+    data = report(scores, threshold=args.threshold, min_n=args.min_n)
+    data["notes"] = notes
+    path = save_report(data, Path(args.out) if args.out else None)
+    print(json.dumps({k: v for k, v in data.items() if k != "notes"}, indent=2))
+    print(f"saved {path}; {len(notes)} species skipped or with notes", file=sys.stderr)
+    return 0
+
+
 def register(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("profilegen", help="generate draft species profiles from metadata")
     actions = p.add_subparsers(dest="profilegen_action", required=True)
@@ -217,6 +243,18 @@ def register(sub: argparse._SubParsersAction) -> None:
     )
     a.add_argument("--model", help="extraction model id (or WILDLIFE_RADAR_EXTRACTION_MODEL)")
     a.set_defaults(func=cmd_generate)
+
+    a = actions.add_parser(
+        "calibrate", help="score LLM extraction against measured trait values (needs a key)"
+    )
+    a.add_argument("names", nargs="*")
+    a.add_argument("--names-file")
+    a.add_argument("--traits", required=True, help="TetrapodTraits CSV")
+    a.add_argument("--model", help="extraction model id (or WILDLIFE_RADAR_EXTRACTION_MODEL)")
+    a.add_argument("--threshold", type=float, default=0.9)
+    a.add_argument("--min-n", type=int, default=30, help="comparisons needed per field")
+    a.add_argument("--out", help="accuracy report (default: data/profiles/accuracy.json)")
+    a.set_defaults(func=cmd_calibrate)
 
     a = actions.add_parser("review", help="show a draft's review queue, conflicts and notes")
     a.add_argument("id")
