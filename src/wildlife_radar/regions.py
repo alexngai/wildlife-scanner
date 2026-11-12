@@ -5,6 +5,7 @@ A new region is a new pack under ``regions/<id>/region.yaml``; the core is untou
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import yaml
@@ -26,6 +27,19 @@ class TideStation(BaseModel):
     """Whether id/coordinates were checked against the NOAA metadata API."""
 
 
+class PipelineSettings(BaseModel):
+    """Per-region settings for the job graph (``wildlife-radar run``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    since_year: int | None = 2010
+    """Ignore records before this year in baselines."""
+    backtest_split: date | None = None
+    """Train before / test from this date; default: January 1 of the previous year."""
+    conditions_split: date | None = None
+    """Split for Level 1–2 backtests; default: January 1, two years back."""
+
+
 class Region(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -41,6 +55,7 @@ class Region(BaseModel):
     """The smallest mapped place; statuses for places inside it also apply (conservatively)."""
     tide_stations: list[TideStation] = Field(default_factory=list)
     places: list[Place] = Field(default_factory=list)
+    pipeline: PipelineSettings = Field(default_factory=PipelineSettings)
     notes: str | None = None
 
     @model_validator(mode="after")
