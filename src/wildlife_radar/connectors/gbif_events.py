@@ -36,7 +36,7 @@ def _params(dataset_key: str, event_date: str, bbox: BBox) -> dict:
 
 def _get(client: httpx.Client, params: dict, limiter: RateLimiter | None) -> dict:
     """Long paging runs meet transient resets and rate limits: retry with backoff."""
-    return get_json(client, SEARCH_URL, params, limiter, retries=5)
+    return get_json(client, SEARCH_URL, params, limiter, retries=8)
 
 
 def event_ids(

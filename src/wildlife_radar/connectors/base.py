@@ -7,6 +7,7 @@ No third-party data or keys are ever committed to this repository (see DATA_SOUR
 from __future__ import annotations
 
 import os
+import threading
 import time
 from collections.abc import Callable, Iterator
 from datetime import date, datetime
@@ -47,7 +48,8 @@ class ConnectorError(RuntimeError):
 
 
 class RateLimiter:
-    """Enforces a minimum interval between calls (per connector instance)."""
+    """Enforces a minimum interval between calls (per connector instance). Thread-safe: one
+    limiter shared by a pool of workers spaces all of their requests."""
 
     def __init__(
         self,
@@ -59,15 +61,17 @@ class RateLimiter:
         self._clock = clock
         self._sleep = sleep
         self._last: float | None = None
+        self._lock = threading.Lock()
 
     def wait(self) -> None:
-        now = self._clock()
-        if self._last is not None:
-            remaining = self.min_interval_s - (now - self._last)
-            if remaining > 0:
-                self._sleep(remaining)
-                now = self._clock()
-        self._last = now
+        with self._lock:
+            now = self._clock()
+            if self._last is not None:
+                remaining = self.min_interval_s - (now - self._last)
+                if remaining > 0:
+                    self._sleep(remaining)
+                    now = self._clock()
+            self._last = now
 
 
 def get_json(
@@ -89,6 +93,10 @@ def get_json(
         else:
             if resp.status_code == 429:
                 error = ConnectorError(f"rate limited by {url} (HTTP 429); slow down")
+                retry_after = resp.headers.get("Retry-After", "")
+                if retry_after.isdigit() and attempt < retries:
+                    time.sleep(min(300, int(retry_after)))  # the server's own wait
+                    continue
             elif resp.status_code >= 500:
                 error = ConnectorError(f"{url} returned HTTP {resp.status_code}")
             elif resp.status_code >= 400:

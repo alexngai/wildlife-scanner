@@ -160,8 +160,9 @@ def _repairs(ctx: JobContext) -> dict:
 
     Event ids come from the GBIF API (snapshots don't carry them), event by event, in chunks
     that are checkpointed in ``repair_events``: an interrupted run resumes where it stopped.
+    Requests share one rate limiter (default 4/s over 4 threads; GBIF rate-limits 8 threads).
     """
-    from wildlife_radar.connectors.base import make_client
+    from wildlife_radar.connectors.base import RateLimiter, make_client
     from wildlife_radar.connectors.gbif_events import event_ids, fetch_events
     from wildlife_radar.storage.repair import (
         missing_event_ids,
@@ -169,7 +170,9 @@ def _repairs(ctx: JobContext) -> dict:
         set_event_ids,
     )
 
-    workers = int(ctx.params.get("repair_workers") or 8)
+    # GBIF answers HTTP 429 to ~8 parallel paging threads: 4 threads sharing one limiter.
+    workers = int(ctx.params.get("repair_workers") or 4)
+    limiter = RateLimiter(float(ctx.params.get("repair_interval_s") or 0.25))
     out: dict = {}
     with ctx.store() as store:
         conn = store.conn
@@ -194,12 +197,14 @@ def _repairs(ctx: JobContext) -> dict:
                 }
                 events = [
                     e
-                    for e in event_ids(client, key, d.isoformat(), ctx.region.bbox)
+                    for e in event_ids(client, key, d.isoformat(), ctx.region.bbox, limiter)
                     if e[0] not in done
                 ]
                 for i in range(0, len(events), REPAIR_CHUNK):
                     chunk = events[i : i + REPAIR_CHUNK]
-                    pairs = fetch_events(key, chunk, client=client, workers=workers)
+                    pairs = fetch_events(
+                        key, chunk, client=client, limiter=limiter, workers=workers
+                    )
                     set_event_ids(conn, key, pairs)
                     conn.executemany(
                         "INSERT INTO repair_events VALUES (?, ?, ?, now()::TIMESTAMP)",
