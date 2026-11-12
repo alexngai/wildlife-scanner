@@ -164,6 +164,9 @@ def cmd_crosswalk(args: argparse.Namespace) -> int:
             save_identities(store.conn, idents)
             done += len(chunk)
             print(f"resolved {done}/{len(names)}", file=sys.stderr)
+        from wildlife_radar.storage.aliases import build_alias_table
+
+        aliases = build_alias_table(store.conn)
         summary = store.conn.execute(
             """
             SELECT count(*), count(*) FILTER (WHERE taxon_id IS NOT NULL),
@@ -172,17 +175,14 @@ def cmd_crosswalk(args: argparse.Namespace) -> int:
             FROM taxon_identity
             """
         ).fetchone()
-    print(
-        json.dumps(
-            dict(
-                zip(
-                    ["identities", "resolved", "inaturalist_verified", "wikidata"],
-                    summary,
-                    strict=True,
-                )
-            )
-        )
+    report = dict(
+        zip(["identities", "resolved", "inaturalist_verified", "wikidata"], summary, strict=True)
     )
+    print(json.dumps({**report, **aliases}))
+    if aliases["aliases"]:
+        print(
+            "note: rebuild the baseline to merge renamed species (build-baseline)", file=sys.stderr
+        )
     return 0
 
 

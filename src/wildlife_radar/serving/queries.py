@@ -35,6 +35,7 @@ from wildlife_radar.policy.egress import EgressFilter, allowed_in_place_first_sp
 from wildlife_radar.policy.statuses import TierService
 from wildlife_radar.policy.tiers import PolicyTier, rule_for
 from wildlife_radar.regions import Region
+from wildlife_radar.storage.aliases import alias_map
 from wildlife_radar.storage.observations import week_of
 
 LEVEL0_LABEL = (
@@ -298,6 +299,7 @@ class BaselineQueries:
                     "passes": passes,
                 }
         self._licenses = self._load_licenses(conn)
+        self._aliases = alias_map(conn)
 
     # ------------------------------------------------------------------ helpers
     def _load_licenses(self, conn: duckdb.DuckDBPyConnection) -> dict[str, LicenseInfo]:
@@ -341,6 +343,10 @@ class BaselineQueries:
             attribution=sorted({a for i in infos for a in i.attribution}),
         )
 
+    def _canon(self, taxon_id: str) -> str:
+        """Another name of a merged concept resolves to its canonical id."""
+        return self._aliases.get(taxon_id, taxon_id)
+
     def _tier(self, taxon_id: str, on: date) -> PolicyTier:
         if taxon_id not in self._taxa:
             raise NotAvailable(taxon_id)
@@ -368,6 +374,7 @@ class BaselineQueries:
         raise NotAvailable(taxon_id)
 
     def taxon_summary(self, taxon_id: str, on: date) -> TaxonSummary:
+        taxon_id = self._canon(taxon_id)
         tier = self._tier(taxon_id, on)
         info = self._taxa[taxon_id]
         primary = info.egroups[0][0]
@@ -431,6 +438,7 @@ class BaselineQueries:
         return out
 
     def species_map(self, taxon_id: str, on: date, method: str | None = None) -> SpeciesMap:
+        taxon_id = self._canon(taxon_id)
         summary = self.taxon_summary(taxon_id, on)
         group_id = self._choose_group(taxon_id, method)
         tier = PolicyTier(summary.tier)
@@ -474,6 +482,7 @@ class BaselineQueries:
     def calendar(
         self, taxon_id: str, lat: float, lon: float, year: int, method: str | None = None
     ) -> Calendar:
+        taxon_id = self._canon(taxon_id)
         if not self.region.contains(lat, lon):
             raise ValueError("location is outside the region")
         summary = self.taxon_summary(taxon_id, date(year, 7, 1))
