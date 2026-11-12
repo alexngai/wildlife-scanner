@@ -17,6 +17,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from wildlife_radar import __version__
 from wildlife_radar.baseline.effort import DatasetRegistry
 from wildlife_radar.connectors import ALL_SOURCES
+from wildlife_radar.pipeline.publish import current_bundle
 from wildlife_radar.policy.statuses import TierService
 from wildlife_radar.profiles import ProfileLibrary
 from wildlife_radar.regions import load_region, region_dir
@@ -48,18 +49,55 @@ def _life_list(value: str | None) -> set[str]:
     return {v.strip() for v in (value or "").split(",") if v.strip()}
 
 
+class _Services:
+    """Everything the endpoints query, opened read-only from one database or bundle file."""
+
+    def __init__(self, db_path: Path, region, profiles, now: datetime | None) -> None:
+        self.db_path = db_path
+        self.conn = duckdb.connect(str(db_path), read_only=True)
+        tiers = TierService(self.conn, region.id, profiles=profiles, now=now)
+        self.queries = BaselineQueries(self.conn, region, tiers, profiles=profiles)
+        self.forecasts = ForecastService(
+            self.queries,
+            {s.station_id: (s.lat, s.lon) for s in region.tide_stations},
+            registry=DatasetRegistry.load(region_dir(region.id) / "datasets.yaml"),
+        )
+
+
 def create_app(
-    db_path: str | Path,
+    db_path: str | Path | None = None,
     region_id: str = "socal",
     profiles_dir: str | Path | None = None,
     source_url: str | None = None,
     now: datetime | None = None,
+    bundle_dir: str | Path | None = None,
 ) -> FastAPI:
+    """Serve a region from a database file, or from published bundles (``bundle_dir`` is the
+    publish root): the API then follows the region's ``CURRENT`` pointer and reopens when a new
+    version is published."""
     region = load_region(region_id)
     profiles = ProfileLibrary(profiles_dir) if profiles_dir else ProfileLibrary()
-    conn = duckdb.connect(str(db_path), read_only=True)
-    tiers = TierService(conn, region.id, profiles=profiles, now=now)
-    queries = BaselineQueries(conn, region, tiers, profiles=profiles)
+    region_bundles = Path(bundle_dir) / f"region={region.id}" if bundle_dir else None
+
+    def resolve() -> Path:
+        if region_bundles is None:
+            return Path(db_path)  # type: ignore[arg-type]
+        path = current_bundle(region_bundles)
+        if path is None:
+            raise RuntimeError(f"no published bundle for region {region.id!r}")
+        return path
+
+    state = {"svc": _Services(resolve(), region, profiles, now)}
+
+    def svc() -> _Services:
+        if region_bundles is not None:
+            path = resolve()
+            if path != state["svc"].db_path:
+                old = state["svc"]
+                state["svc"] = _Services(path, region, profiles, now)
+                old.conn.close()
+        return state["svc"]
+
     source = source_url or os.environ.get(SOURCE_URL_ENV) or DEFAULT_SOURCE_URL
 
     app = FastAPI(
@@ -71,13 +109,7 @@ def create_app(
         ),
         license_info={"name": "AGPL-3.0-only", "identifier": "AGPL-3.0-only"},
     )
-    app.state.queries = queries
-    registry_path = region_dir(region.id) / "datasets.yaml"
-    forecasts = ForecastService(
-        queries,
-        {s.station_id: (s.lat, s.lon) for s in region.tide_stations},
-        registry=DatasetRegistry.load(registry_path),
-    )
+    app.state.services = svc
 
     @app.middleware("http")
     async def source_header(request: Request, call_next):
@@ -91,8 +123,8 @@ def create_app(
             "status": "ok",
             "version": __version__,
             "region": region.id,
-            "model_version": queries.model_version,
-            "built_at": queries.as_of.isoformat(),
+            "model_version": svc().queries.model_version,
+            "built_at": svc().queries.as_of.isoformat(),
         }
 
     @app.get("/source")
@@ -122,19 +154,19 @@ def create_app(
         limit: int = Query(50, ge=1, le=500),
         date: str | None = None,
     ):
-        return queries.list_taxa(_parse_date(date), q=q, group=group, limit=limit)
+        return svc().queries.list_taxa(_parse_date(date), q=q, group=group, limit=limit)
 
     @app.get("/taxa/{taxon_id}", response_model=TaxonSummary)
     def taxon(taxon_id: str, date: str | None = None):
         try:
-            return queries.taxon_summary(taxon_id, _parse_date(date))
+            return svc().queries.taxon_summary(taxon_id, _parse_date(date))
         except NotAvailable:
             raise HTTPException(status_code=404, detail=NOT_AVAILABLE) from None
 
     @app.get("/species/{taxon_id}/map", response_model=SpeciesMap)
     def species_map(taxon_id: str, date: str | None = None, method: str | None = None):
         try:
-            return queries.species_map(taxon_id, _parse_date(date), method=method)
+            return svc().queries.species_map(taxon_id, _parse_date(date), method=method)
         except NotAvailable:
             raise HTTPException(status_code=404, detail=NOT_AVAILABLE) from None
 
@@ -149,7 +181,7 @@ def create_app(
     ):
         lat, lon = _location(lat, lon, place_id)
         try:
-            return queries.calendar(
+            return svc().queries.calendar(
                 taxon_id, lat, lon, year or datetime.now(UTC).year, method=method
             )
         except NotAvailable:
@@ -169,7 +201,7 @@ def create_app(
         """Daily forecast at the highest gated level (0 baseline, 1 conditions, 2 nowcast)."""
         lat, lon = _location(lat, lon, place_id)
         try:
-            return forecasts.forecast(taxon_id, lat, lon, _parse_date(date), method=method)
+            return svc().forecasts.forecast(taxon_id, lat, lon, _parse_date(date), method=method)
         except NotAvailable:
             raise HTTPException(status_code=404, detail=NOT_AVAILABLE) from None
         except ValueError as exc:
@@ -206,7 +238,7 @@ def create_app(
         lat: float, lon: float, day: str | None, life_list: str | None, group: str | None
     ) -> PlaceLists:
         try:
-            return queries.place_lists(
+            return svc().queries.place_lists(
                 lat, lon, _parse_date(day), _life_list(life_list), group=group
             )
         except ValueError as exc:

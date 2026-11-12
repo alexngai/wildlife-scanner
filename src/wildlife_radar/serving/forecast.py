@@ -140,6 +140,20 @@ class ForecastService:
 
     def _nowcast(self, taxon_id: str, group_id: str, c1: str, on: date) -> tuple[float, float]:
         start = on - timedelta(days=self.nowcast_days)
+        tables = {r[0] for r in self.conn.execute("SHOW TABLES").fetchall()}
+        if "recent_effort" in tables:
+            # Published bundles carry aggregates (no raw records), already delayed by policy.
+            k = self.conn.execute(
+                "SELECT coalesce(sum(k), 0) FROM recent_detections WHERE taxon_id = ? "
+                "AND group_id = ? AND c1 = ? AND day >= ? AND day < ?",
+                [taxon_id, group_id, c1, start, on],
+            ).fetchone()[0]
+            n = self.conn.execute(
+                "SELECT coalesce(sum(n), 0) FROM recent_effort WHERE group_id = ? AND c1 = ? "
+                "AND day >= ? AND day < ?",
+                [group_id, c1, start, on],
+            ).fetchone()[0]
+            return float(k), float(n)
         create_training_view(
             self.conn,
             self.config,
