@@ -187,6 +187,11 @@ def create_training_view(
     surveys = ", ".join(f"'{c}'" for c in SURVEY_CLASSES)
     after_n = naive_utc(after) if after else None
     before_n = naive_utc(before) if before else None
+    # Datasets with a live feed (iNaturalist's GBIF copy, registry entries marked live).
+    keys = {INATURALIST_RG_DATASET, *(registry.live_keys() if registry else [])}
+    if any("'" in k for k in keys):
+        raise ValueError("invalid dataset key")
+    live_keys = ", ".join(f"'{k}'" for k in sorted(keys))
     conn.execute(
         f"""
         CREATE OR REPLACE TEMP TABLE {name} AS
@@ -223,7 +228,7 @@ def create_training_view(
                 AS detected,
             -- Sources with a live feed: nowcast inputs come only from these, in training and
             -- in serving alike (data-platform.md §4).
-            (b.source_id = 'inaturalist' OR b.dataset_key = '{INATURALIST_RG_DATASET}') AS live
+            (b.source_id = 'inaturalist' OR b.dataset_key IN ({live_keys})) AS live
         FROM base b LEFT JOIN tg USING (taxon_id)
         """,
         [

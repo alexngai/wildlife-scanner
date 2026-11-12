@@ -115,6 +115,8 @@ class ObservationQuery(BaseModel):
     end: date | None = None
     updated_since: datetime | None = None
     limit: int | None = Field(default=None, gt=0)
+    dataset_keys: tuple[str, ...] = ()
+    """Only these datasets (sources that support it, e.g. GBIF)."""
 
     @model_validator(mode="after")
     def _checks(self) -> ObservationQuery:

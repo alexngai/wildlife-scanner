@@ -250,38 +250,67 @@ LIVE_MAX_RECORDS = 20_000
 
 
 def _live(ctx: JobContext) -> dict:
-    """Recent iNaturalist records for the region (docs/design/data-platform.md §4).
+    """Recent records for the region (docs/design/data-platform.md §4).
 
-    Records updated since the previous run's cursor (with an hour of overlap), observed within
-    the last ``LIVE_WINDOW_DAYS`` days; keyset-paged at ≤1 request/s and capped per run, so a
-    backlog is caught up over several runs. Copies of records already ingested from snapshots
-    replace them (same iNaturalist id).
+    - **iNaturalist:** records updated since the previous run's cursor (with an hour of
+      overlap), observed within the last ``LIVE_WINDOW_DAYS`` days; keyset-paged at ≤1
+      request/s and capped per run, so a backlog is caught up over several runs.
+    - **GBIF datasets marked ``live`` in the dataset registry** (e.g. Happywhale): records
+      GBIF (re)interpreted since its own cursor (a day of overlap: GBIF filters by date).
+      A GBIF failure is recorded and retried next run; it doesn't fail the job.
+
+    Copies of records already ingested from snapshots replace them (same record id).
     """
     from wildlife_radar.connectors.base import ObservationQuery
+    from wildlife_radar.connectors.gbif import GBIFConnector
     from wildlife_radar.connectors.inaturalist import INaturalistConnector
 
     previous = latest(ctx.lake, ctx.region.id, "live")
-    cursor = (
-        datetime.fromisoformat(previous["outputs"]["cursor"])
-        if previous and previous.get("status") == "complete"
-        else ctx.now - timedelta(days=3)
-    )
+    ok = bool(previous and previous.get("status") == "complete")
+    prev_out = (previous or {}).get("outputs") or {}
+    cursor = datetime.fromisoformat(prev_out["cursor"]) if ok else ctx.now - timedelta(days=3)
     started = utcnow()
+    window_start = (ctx.now - timedelta(days=LIVE_WINDOW_DAYS)).date()
     query = ObservationQuery(
         bbox=ctx.region.bbox,
-        start=(ctx.now - timedelta(days=LIVE_WINDOW_DAYS)).date(),
+        start=window_start,
         updated_since=cursor - timedelta(hours=1),
         limit=LIVE_MAX_RECORDS,
     )
+    inat = ctx.params.get("_inaturalist") or INaturalistConnector()
     with ctx.store() as store:
-        n = store.add(INaturalistConnector().fetch(query))
+        n = store.add(inat.fetch(query))
     capped = n >= LIVE_MAX_RECORDS
-    return {
+    out: dict = {
         "records": n,
         # When capped, keep the old cursor so the next run continues the backlog.
         "cursor": (cursor if capped else started).isoformat(),
         "capped": capped,
     }
+    live_keys = ctx.registry().live_keys()
+    if live_keys:
+        gbif_cursor = (
+            datetime.fromisoformat(prev_out["gbif_cursor"])
+            if ok and prev_out.get("gbif_cursor")
+            else ctx.now - timedelta(days=LIVE_WINDOW_DAYS)
+        )
+        gquery = ObservationQuery(
+            bbox=ctx.region.bbox,
+            start=window_start,
+            updated_since=gbif_cursor - timedelta(days=1),
+            limit=LIVE_MAX_RECORDS,
+            dataset_keys=tuple(live_keys),
+        )
+        gbif = ctx.params.get("_gbif") or GBIFConnector()
+        try:
+            with ctx.store() as store:
+                g = store.add(gbif.fetch(gquery))
+            out["gbif_records"] = g
+            out["gbif_cursor"] = (gbif_cursor if g >= LIVE_MAX_RECORDS else started).isoformat()
+        except Exception as exc:
+            out["gbif_error"] = f"{type(exc).__name__}: {exc}"
+            out["gbif_cursor"] = gbif_cursor.isoformat()
+    return out
 
 
 def _baseline(ctx: JobContext) -> dict:

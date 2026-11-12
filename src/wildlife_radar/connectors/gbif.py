@@ -267,6 +267,8 @@ class GBIFConnector:
         if query.updated_since:
             since = ensure_utc(query.updated_since).date().isoformat()
             params["lastInterpreted"] = f"{since},*"
+        if query.dataset_keys:
+            params["datasetKey"] = list(query.dataset_keys)  # repeated parameter
         return params
 
     def fetch(self, query: ObservationQuery) -> Iterator[Observation]:
