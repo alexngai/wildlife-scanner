@@ -8,7 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 DEFAULT_DB = "data/wildlife-radar.duckdb"
 
@@ -201,7 +201,8 @@ def cmd_build_tiers(args: argparse.Namespace) -> int:
             providers.append(
                 CachedStatusProvider(
                     store.conn,
-                    InatTaxonStatusProvider(
+                    max_age=timedelta(0) if args.refresh_statuses else timedelta(days=90),
+                    inner=InatTaxonStatusProvider(
                         region.inat_place_scopes, innermost_place=region.inat_innermost_place
                     ),
                 )
@@ -225,6 +226,27 @@ def cmd_build_tiers(args: argparse.Namespace) -> int:
     if args.offline:
         print("note: offline mode — taxa without a completed status lookup fail closed (COARSE)")
     return 0
+
+
+def cmd_audit_tiers(args: argparse.Namespace) -> int:
+    import yaml
+
+    from wildlife_radar.policy.audit import audit_tiers, summarize
+    from wildlife_radar.storage import ObservationStore
+
+    region = _region(args)
+    statuses = _statuses_path(args, region)
+    curated = []
+    if statuses:
+        doc = yaml.safe_load(statuses.read_text(encoding="utf-8")) or {}
+        curated = [e["taxon_id"] for e in doc.get("statuses", [])]
+    with ObservationStore(args.db) as store:
+        findings = audit_tiers(store.conn, region.id, curated)
+    report = summarize(findings)
+    report["findings"] = report["findings"][: args.show]
+    report["curated_statuses"] = str(statuses) if statuses else None
+    print(json.dumps(report, indent=2))
+    return 1 if report["counts"].get("high") else 0
 
 
 def _queries(args: argparse.Namespace):
@@ -377,7 +399,14 @@ def register(sub: argparse._SubParsersAction) -> None:
     common(p)
     p.add_argument("--offline", action="store_true", help="skip network status lookups")
     p.add_argument("--statuses", help="curated statuses YAML (default: the region pack's)")
+    p.add_argument("--refresh-statuses", action="store_true", help="ignore cached status lookups")
     p.set_defaults(func=cmd_build_tiers)
+
+    p = sub.add_parser("audit-tiers", help="check tiers against every status signal (gate)")
+    common(p)
+    p.add_argument("--statuses", help="curated statuses YAML (default: the region pack's)")
+    p.add_argument("--show", type=int, default=40, help="findings to print")
+    p.set_defaults(func=cmd_audit_tiers)
 
     p = sub.add_parser("query", help="query the baseline (policy-enforced)")
     common(p)

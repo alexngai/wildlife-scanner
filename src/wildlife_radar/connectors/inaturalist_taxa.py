@@ -60,6 +60,7 @@ def parse_taxon_statuses(
     statuses: list[ConservationStatus] = []
     geoprivacies: list[str | None] = []
     ignored: list[str] = []
+    unmapped: list[str] = []
     for cs in taxon.get("conservation_statuses") or []:
         place = cs.get("place")
         scope = status_scope(place, place_scopes, innermost_place)
@@ -69,6 +70,8 @@ def parse_taxon_statuses(
         geoprivacies.append(cs.get("geoprivacy"))
         code = IUCN_EQUIVALENTS.get(cs.get("iucn"))
         if code is None:
+            # Applies here but has no IUCN equivalent: kept visible for the tier audit.
+            unmapped.append(f"{cs.get('authority')}: {cs.get('status')} ({scope})")
             continue
         statuses.append(
             ConservationStatus(
@@ -83,6 +86,7 @@ def parse_taxon_statuses(
         geoprivacy=most_severe_geoprivacy(geoprivacies),
         source="inaturalist",
         ignored=tuple(ignored),
+        unmapped=tuple(unmapped),
     )
 
 

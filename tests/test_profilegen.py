@@ -682,3 +682,52 @@ def test_inat_search_and_wikidata_synonyms():
     assert "Vetus genus" in ident.synonyms  # original combination / synonym from Wikidata
     assert ident.ids["inaturalist"] == "7" and ident.verified["inaturalist"]
     assert "vetus-genus" in ident.alias_ids and "alius-genus" in ident.alias_ids
+
+
+def test_renamed_species_merge_through_aliases():
+    import json as _json
+
+    from wildlife_radar.policy.statuses import TierService, observed_geoprivacy
+    from wildlife_radar.regions import load_region
+    from wildlife_radar.serving import BaselineQueries
+    from wildlife_radar.storage.aliases import build_alias_table
+
+    world = SyntheticWorld()
+    store = ObservationStore()
+    store.add(world.generate())
+    conn = store.conn
+    # A fifth of the coastal species' records arrive under an older name, one of them obscured.
+    conn.execute(
+        """
+        UPDATE observations SET taxon_id = 'vernalis-maritimus', taxon_name = 'Vernalis maritimus'
+        WHERE taxon_id = 'vernalis-litoralis' AND hash(obs_id) % 5 = 0
+        """
+    )
+    conn.execute(
+        "UPDATE observations SET taxon_geoprivacy = 'obscured' WHERE obs_id = "
+        "(SELECT min(obs_id) FROM observations WHERE taxon_id = 'vernalis-maritimus')"
+    )
+    conn.execute(
+        "CREATE TABLE taxon_identity (query_name VARCHAR PRIMARY KEY, taxon_id VARCHAR, "
+        "record JSON, fetched_at TIMESTAMP)"
+    )
+    for name in ("Vernalis litoralis", "Vernalis maritimus"):
+        record = {"ids": {"inaturalist": "77"}, "verified": {"inaturalist": True}}
+        conn.execute(
+            "INSERT INTO taxon_identity VALUES (?, ?, ?, NULL)",
+            [name, name.lower().replace(" ", "-"), _json.dumps(record)],
+        )
+    assert build_alias_table(conn) == {"concepts_merged": 1, "aliases": 1}
+    build_baseline(conn, region_id="socal", bbox=world.bbox)
+    ids = {r[0] for r in conn.execute("SELECT taxon_id FROM prior_taxa").fetchall()}
+    assert "vernalis-litoralis" in ids and "vernalis-maritimus" not in ids
+    # The alias's obscured record protects the merged concept.
+    assert observed_geoprivacy(conn)["vernalis-litoralis"] == "obscured"
+    build_tier_table_args = {"region_id": "socal", "scopes": ["global"]}
+    from wildlife_radar.policy.statuses import StaticStatusProvider, build_tier_table
+
+    decisions = build_tier_table(conn, providers=[StaticStatusProvider()], **build_tier_table_args)
+    assert decisions["vernalis-litoralis"].tier >= 2
+    queries = BaselineQueries(conn, load_region("socal"), TierService(conn, "socal"))
+    summary = queries.taxon_summary("vernalis-maritimus", datetime(2026, 5, 15).date())
+    assert summary.taxon_id == "vernalis-litoralis"

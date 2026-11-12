@@ -33,6 +33,7 @@ from wildlife_radar.policy.assign import (
     assign_tier,
 )
 from wildlife_radar.policy.tiers import PolicyTier
+from wildlife_radar.storage.aliases import alias_map, ensure_alias_table
 
 TIERS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS tiers (
@@ -73,6 +74,9 @@ class StatusLookup(BaseModel):
     geoprivacy: str | None = None
     source: str
     ignored: tuple[str, ...] = ()
+    """Statuses for places that don't contain the region (not applied)."""
+    unmapped: tuple[str, ...] = ()
+    """Statuses that apply here but have no IUCN equivalent (not applied; audited)."""
 
 
 class StatusProvider(Protocol):
@@ -179,10 +183,13 @@ class CachedStatusProvider:
 
 
 def observed_geoprivacy(conn: duckdb.DuckDBPyConnection) -> dict[str, str | None]:
+    """Most severe taxon geoprivacy seen in records, per canonical taxon (aliases merged)."""
+    ensure_alias_table(conn)
     rows = conn.execute(
         """
-        SELECT taxon_id, list(DISTINCT taxon_geoprivacy) FROM observations
-        WHERE taxon_id IS NOT NULL AND taxon_geoprivacy IS NOT NULL GROUP BY taxon_id
+        SELECT coalesce(al.taxon_id, o.taxon_id) AS taxon_id, list(DISTINCT o.taxon_geoprivacy)
+        FROM observations o LEFT JOIN taxon_alias al ON al.alias_id = o.taxon_id
+        WHERE o.taxon_id IS NOT NULL AND o.taxon_geoprivacy IS NOT NULL GROUP BY 1
         """
     ).fetchall()
     return {taxon_id: most_severe_geoprivacy(values) for taxon_id, values in rows}
@@ -298,6 +305,10 @@ class TierService:
             ).fetchall()
         }
         self._profile_ids = set(profiles.ids(kind="species")) if profiles else set()
+        # A profile written under another name of the concept still applies.
+        self._aliases: dict[str, list[str]] = {}
+        for alias, canonical in alias_map(conn).items():
+            self._aliases.setdefault(canonical, []).append(alias)
         self._cache: dict[tuple[str, date], PolicyTier] = {}
 
     def auto(self, taxon_id: str | None) -> PolicyTier:
@@ -310,11 +321,15 @@ class TierService:
             return PolicyTier.COARSE
         key = (taxon_id, on)
         if key not in self._cache:
-            tier = self.auto(taxon_id)
-            if taxon_id in self._profile_ids:
-                profile = self.profiles.resolve(taxon_id)
-                tier = profile.effective_tier(
-                    tier, region=self.region_id, on=on, now=self.now or utcnow()
-                ).tier
+            auto = self.auto(taxon_id)
+            tier = auto
+            for pid in [taxon_id, *self._aliases.get(taxon_id, [])]:
+                if pid in self._profile_ids:
+                    profile = self.profiles.resolve(pid)
+                    effective = profile.effective_tier(
+                        auto, region=self.region_id, on=on, now=self.now or utcnow()
+                    ).tier
+                    # Several profiles for one concept: the most protective wins.
+                    tier = effective if pid == taxon_id else max(tier, effective)
             self._cache[key] = tier
         return self._cache[key]
