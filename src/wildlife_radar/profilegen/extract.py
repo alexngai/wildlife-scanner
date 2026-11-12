@@ -413,8 +413,14 @@ def extraction_candidates(
     article: Article,
     names: list[str],
     common_name: str | None = None,
+    accuracy: dict[str, float] | None = None,
 ) -> tuple[list[Candidate], list[Verified]]:
-    """Verify raw extractions; accepted ones become rank-EXTRACTED candidates."""
+    """Verify raw extractions; accepted ones become rank-EXTRACTED candidates.
+
+    ``accuracy`` (from ``profilegen calibrate``) sets each field's confidence from measured
+    agreement with curated trait values; otherwise a fixed low prior is used.
+    """
+    accuracy = accuracy or {}
     if not article_is_about(article, names, common_name):
         return [], [
             Verified(field=e.field, value=e.value, accepted=False, reason="article not about taxon")
@@ -430,7 +436,7 @@ def extraction_candidates(
             provenance=Provenance(
                 source=article.citation,
                 method="extracted",
-                confidence=0.6 if v.names_taxon else 0.5,
+                confidence=accuracy.get(v.field, 0.6 if v.names_taxon else 0.5),
                 evidence=f"{article.url} chars {v.start}-{v.end} (whitespace-normalized)",
                 license=article.license,
                 retrieved=article.retrieved,

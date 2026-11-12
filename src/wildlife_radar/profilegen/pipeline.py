@@ -67,6 +67,8 @@ class Generator:
     out_dir: Path = DEFAULT_DRAFT_DIR
     curated_dir: Path = DEFAULT_PROFILES_DIR / "species"
     now: datetime | None = None
+    accuracy: dict[str, float] = field(default_factory=dict)
+    """Per-field extraction accuracy from ``profilegen calibrate`` (confidence of values)."""
 
     def candidates(self, ident: TaxonIdentity, report: GenerationReport) -> list[Candidate]:
         out: list[Candidate] = []
@@ -88,7 +90,7 @@ class Generator:
                     if result.error:
                         report.notes.append(f"extraction: {result.error}")
                     cands, checks = extraction_candidates(
-                        result, article, ident.names, ident.common_name
+                        result, article, ident.names, ident.common_name, self.accuracy
                     )
                     out += cands
                     report.rejected += [f"{c.field}: {c.reason}" for c in checks if not c.accepted]
