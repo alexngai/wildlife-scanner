@@ -356,6 +356,43 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_run(args: argparse.Namespace) -> int:
+    """Run the job graph up to a target, skipping jobs whose inputs haven't changed."""
+    from wildlife_radar.pipeline.runner import JOBS, context, run
+
+    if args.target == "list":
+        for job in JOBS.values():
+            deps = ", ".join(job.deps) or "-"
+            age = job.max_age
+            cadence = (
+                ""
+                if age is None
+                else f"every {age.days}d"
+                if age.days
+                else f"every {age.seconds // 3600}h"
+            )
+            print(f"{job.name:<11} needs {deps:<36} {cadence:<10} {job.description}")
+        return 0
+    params = {
+        k: v
+        for k, v in {
+            "statuses": args.statuses,
+            "datasets": args.datasets,
+            "allow_findings": args.allow_findings,
+        }.items()
+        if v
+    }
+    ctx = context(args.region, args.db, args.lake, params)
+    ctx.log = lambda msg: print(msg, file=sys.stderr)
+    force = tuple(f.strip() for f in (args.force or "").split(",") if f.strip())
+    results = run(args.target, ctx, force=force, dry_run=args.dry_run)
+    print(json.dumps(results, indent=2, default=str))
+    failed = [
+        r for r in results if isinstance(r.get("outcome"), str) or r["reason"].startswith("blocked")
+    ]
+    return 1 if failed else 0
+
+
 def cmd_publish(args: argparse.Namespace) -> int:
     """Write a policy-filtered serving bundle (gated on the tier audit) and make it current."""
     from pathlib import Path
@@ -537,6 +574,17 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--port", type=int, default=8000)
     p.add_argument("--bundle-dir", help="serve published bundles from this root (follows CURRENT)")
     p.set_defaults(func=cmd_serve)
+
+    p = sub.add_parser("run", help="run the job graph up to a target (only stale jobs)")
+    common(p)
+    p.add_argument("target", help="job to bring up to date (e.g. publish), or 'list'")
+    p.add_argument("--lake", default="data/lake", help="lake root (manifests, publish)")
+    p.add_argument("--force", help="comma-separated jobs to rerun regardless")
+    p.add_argument("--dry-run", action="store_true", help="show the plan only")
+    p.add_argument("--statuses", help="curated statuses YAML (default: the region pack's)")
+    p.add_argument("--datasets", help="dataset registry YAML (default: the region pack's)")
+    p.add_argument("--allow-findings", action="store_true", help="publish despite high findings")
+    p.set_defaults(func=cmd_run)
 
     p = sub.add_parser("publish", help="write a policy-filtered serving bundle (audit-gated)")
     common(p)
