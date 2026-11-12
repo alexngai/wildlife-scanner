@@ -364,13 +364,14 @@ def cmd_run(args: argparse.Namespace) -> int:
         for job in JOBS.values():
             deps = ", ".join(job.deps) or "-"
             age = job.max_age
-            cadence = (
-                ""
-                if age is None
-                else f"every {age.days}d"
-                if age.days
-                else f"every {age.seconds // 3600}h"
-            )
+            if age is None:
+                cadence = ""
+            elif age.days:
+                cadence = f"every {age.days}d"
+            elif age.seconds >= 3600:
+                cadence = f"every {age.seconds // 3600}h"
+            else:
+                cadence = f"every {age.seconds // 60}m"
             print(f"{job.name:<11} needs {deps:<36} {cadence:<10} {job.description}")
         return 0
     params = {

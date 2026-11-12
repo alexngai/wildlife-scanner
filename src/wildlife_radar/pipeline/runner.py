@@ -180,6 +180,45 @@ def _signals(ctx: JobContext) -> dict:
     return {"daily_values": n}
 
 
+LIVE_WINDOW_DAYS = 60
+LIVE_MAX_RECORDS = 20_000
+
+
+def _live(ctx: JobContext) -> dict:
+    """Recent iNaturalist records for the region (docs/design/data-platform.md §4).
+
+    Records updated since the previous run's cursor (with an hour of overlap), observed within
+    the last ``LIVE_WINDOW_DAYS`` days; keyset-paged at ≤1 request/s and capped per run, so a
+    backlog is caught up over several runs. Copies of records already ingested from snapshots
+    replace them (same iNaturalist id).
+    """
+    from wildlife_radar.connectors.base import ObservationQuery
+    from wildlife_radar.connectors.inaturalist import INaturalistConnector
+
+    previous = latest(ctx.lake, ctx.region.id, "live")
+    cursor = (
+        datetime.fromisoformat(previous["outputs"]["cursor"])
+        if previous and previous.get("status") == "complete"
+        else ctx.now - timedelta(days=3)
+    )
+    started = utcnow()
+    query = ObservationQuery(
+        bbox=ctx.region.bbox,
+        start=(ctx.now - timedelta(days=LIVE_WINDOW_DAYS)).date(),
+        updated_since=cursor - timedelta(hours=1),
+        limit=LIVE_MAX_RECORDS,
+    )
+    with ctx.store() as store:
+        n = store.add(INaturalistConnector().fetch(query))
+    capped = n >= LIVE_MAX_RECORDS
+    return {
+        "records": n,
+        # When capped, keep the old cursor so the next run continues the backlog.
+        "cursor": (cursor if capped else started).isoformat(),
+        "capped": capped,
+    }
+
+
 def _baseline(ctx: JobContext) -> dict:
     from wildlife_radar.baseline import build_baseline
 
@@ -309,13 +348,14 @@ JOBS: dict[str, Job] = {
         Job("crosswalk", ("snapshot",), _crosswalk, timedelta(days=30), "identities, new names"),
         Job("aliases", ("crosswalk", "repairs"), _aliases, None, "merge renamed species"),
         Job("signals", (), _signals, timedelta(hours=20), "daily station signals (NOAA)"),
+        Job("live", ("snapshot",), _live, timedelta(minutes=30), "recent iNaturalist records"),
         Job("baseline", ("aliases", "repairs"), _baseline, None, "Level-0 statistics"),
         Job("backtest", ("baseline",), _backtest, None, "Level-0 gates"),
         Job("tiers", ("baseline", "crosswalk"), _tiers, timedelta(days=30), "statuses → tiers"),
         Job("conditions", ("baseline",), _conditions, timedelta(days=30), "Levels 1–2, scorecard"),
         Job(
             "publish",
-            ("tiers", "backtest", "conditions", "signals"),
+            ("tiers", "backtest", "conditions", "signals", "live"),
             _publish,
             None,
             "audit-gated serving bundle",

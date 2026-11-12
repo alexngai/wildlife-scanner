@@ -79,3 +79,29 @@ def test_failure_stops_and_reruns_next_time(tmp_path):
     calls.clear()
     run("top", c, jobs=make_jobs(calls))
     assert calls == ["b", "top"]  # finished jobs are not repeated
+
+
+def test_live_job_advances_its_cursor(tmp_path, monkeypatch):
+    from wildlife_radar.connectors import inaturalist
+    from wildlife_radar.pipeline import runner
+    from wildlife_radar.storage import ObservationStore
+    from wildlife_radar.synthetic import SyntheticWorld
+
+    queries = []
+
+    def fake_fetch(self, query):
+        queries.append(query)
+        return iter(SyntheticWorld(observers=5, visits_per_observer=10).generate()[:5])
+
+    monkeypatch.setattr(inaturalist.INaturalistConnector, "fetch", fake_fetch)
+    c = ctx(tmp_path, now=datetime.now(UTC))
+    with ObservationStore(c.db) as store:
+        store.add(SyntheticWorld(observers=5, visits_per_observer=10).generate()[20:21])
+    jobs = {k: runner.JOBS[k] for k in ("snapshot", "live")}
+    first = {r["job"]: r for r in run("live", c, jobs=jobs)}
+    assert first["live"]["outcome"]["records"] == 5
+    assert queries[0].bbox == c.region.bbox and queries[0].updated_since is not None
+    cursor = latest(c.lake, "socal", "live")["outputs"]["cursor"]
+    # The next run (forced: within its 30-minute cadence) asks only for newer updates.
+    run("live", c, jobs=jobs, force=("live",))
+    assert queries[1].updated_since == datetime.fromisoformat(cursor) - timedelta(hours=1)
