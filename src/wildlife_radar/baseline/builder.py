@@ -217,7 +217,7 @@ def create_training_view(
             b.source_id, b.license_id, b.outcome, b.count, b.visit_key, b.effort_class,
             coalesce(tg.taxon_group, b.group_id) AS taxon_group,
             coalesce(tg.taxon_group, b.group_id) || ':' || b.effort_class AS egroup,
-            b.cell_r{R} AS c, b.cell_r{P1} AS c1, b.cell_r{P2} AS c2, b.week,
+            b.cell_r{R} AS c, b.cell_r{P1} AS c1, b.cell_r{P2} AS c2, b.week, b.local_date,
             (b.outcome IN ('detected', 'presence_only') OR (b.outcome = 'count' AND b.count > 0))
                 AS detected
         FROM base b LEFT JOIN tg USING (taxon_id)

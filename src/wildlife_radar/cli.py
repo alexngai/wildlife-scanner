@@ -187,11 +187,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("sources", help="list connector sources and their terms")
     p.set_defaults(func=_cmd_sources)
 
+    from wildlife_radar.cli_conditions import register as register_conditions
     from wildlife_radar.cli_pipeline import register
     from wildlife_radar.cli_profilegen import register as register_profilegen
 
     register(sub)
     register_profilegen(sub)
+    register_conditions(sub)
     return parser
 
 
