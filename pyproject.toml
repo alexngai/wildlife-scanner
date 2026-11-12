@@ -21,12 +21,16 @@ dependencies = [
 [project.optional-dependencies]
 # LLM extraction for profile generation (docs/design/framework.md §4.3).
 llm = ["anthropic>=2.8"]
+deploy = [
+    "boto3>=1.35",
+]
 
 [project.scripts]
 wildlife-radar = "wildlife_radar.cli:main"
 
 [dependency-groups]
 dev = [
+    "moto[s3]>=5.0",
     "pytest>=8.0",
     "ruff>=0.6",
 ]
