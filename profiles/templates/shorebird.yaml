@@ -25,6 +25,14 @@ signals:
     role: availability
     shape: categorical
     strength: moderate
+  tide_daily_low:
+    # Daily stand-in while records carry dates only: days with lower low tides expose more
+    # mudflat for foraging (UNVERIFIED; tested by the hypothesis scorecard).
+    signal: tide.daily_low_m
+    role: availability
+    direction: "-"
+    strength: weak
+    hypothesis: true
 
 nowcast:
   enabled: true

@@ -274,10 +274,10 @@ def cmd_repair_dates(args: argparse.Namespace) -> int:
 
 
 def cmd_audit_tiers(args: argparse.Namespace) -> int:
+    import duckdb
     import yaml
 
     from wildlife_radar.policy.audit import audit_tiers, summarize
-    from wildlife_radar.storage import ObservationStore
 
     region = _region(args)
     statuses = _statuses_path(args, region)
@@ -285,8 +285,11 @@ def cmd_audit_tiers(args: argparse.Namespace) -> int:
     if statuses:
         doc = yaml.safe_load(statuses.read_text(encoding="utf-8")) or {}
         curated = [e["taxon_id"] for e in doc.get("statuses", [])]
-    with ObservationStore(args.db) as store:
-        findings = audit_tiers(store.conn, region.id, curated)
+    conn = duckdb.connect(args.db, read_only=True)
+    try:
+        findings = audit_tiers(conn, region.id, curated)
+    finally:
+        conn.close()
     report = summarize(findings)
     report["findings"] = report["findings"][: args.show]
     report["curated_statuses"] = str(statuses) if statuses else None
