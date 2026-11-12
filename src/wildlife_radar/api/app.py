@@ -290,6 +290,65 @@ def create_app(
         except NotAvailable:
             raise HTTPException(status_code=404, detail=NOT_AVAILABLE) from None
 
+    @app.get("/species/{taxon_id}/timing")
+    def timing(taxon_id: str, region: str | None = None) -> dict:
+        """When in the day (and tide) a species is recorded, relative to its group.
+
+        Index > 1: recorded relatively more often then than other species of its group. Mixes
+        activity with detectability; open and generalized taxa only."""
+        target = for_region(region)
+        try:
+            summary = target.queries.taxon_summary(taxon_id, _parse_date(None))
+        except NotAvailable:
+            raise HTTPException(status_code=404, detail=NOT_AVAILABLE) from None
+        tables = {r[0] for r in target.conn.execute("SHOW TABLES").fetchall()}
+        if "timed_index" not in tables:
+            raise HTTPException(status_code=404, detail=NOT_AVAILABLE)
+        rows = (
+            target.conn.cursor()
+            .execute(
+                "SELECT signal, category, n_taxon, n_effort, idx, ci_lo, ci_hi FROM timed_index "
+                "WHERE region_id = ? AND taxon_id = ? ORDER BY signal",
+                [target.queries.region.id, summary.taxon_id],
+            )
+            .fetchall()
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail=NOT_AVAILABLE)
+        signals: dict[str, list] = {}
+        for signal, cat, nt, ne, idx, lo, hi in rows:
+            signals.setdefault(signal, []).append(
+                {
+                    "category": cat,
+                    "records": nt,
+                    "group_records": ne,
+                    "index": None if idx is None else round(idx, 3),
+                    "ci": None if lo is None else [round(lo, 3), round(hi, 3)],
+                }
+            )
+        verdicts = (
+            target.conn.cursor()
+            .execute(
+                "SELECT term, signal, expected, peak, verdict FROM timed_scorecard "
+                "WHERE region_id = ? AND taxon_id = ?",
+                [target.queries.region.id, summary.taxon_id],
+            )
+            .fetchall()
+        )
+        return {
+            "taxon": summary.model_dump(mode="json"),
+            "signals": signals,
+            "hypotheses": [
+                dict(zip(("term", "signal", "expected", "peak", "verdict"), v, strict=True))
+                for v in verdicts
+            ],
+            "note": (
+                "Index > 1 means the species is recorded relatively more often in that period "
+                "than others of its group (iNaturalist records with times). It reflects "
+                "activity and detectability together."
+            ),
+        }
+
     @app.get("/species/{taxon_id}/calendar", response_model=Calendar)
     def calendar(
         taxon_id: str,

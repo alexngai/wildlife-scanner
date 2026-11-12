@@ -11,7 +11,7 @@ For the next working session. Start here, then read the files it points to.
   - Phase 3: daily condition signals, Level 1–2 models with gates, hypothesis scorecard, recent-sightings forecasts for every OPEN species;
   - the data platform's first steps: a job graph, audit-gated policy-filtered bundles, a live iNaturalist ingest, and an API that serves bundles.
 - **Results so far:** `docs/research/08`, `09`, `10` (real San Diego data). Read 10 first.
-- **Test suite:** `uv run pytest` (≈240 tests, ~90 s); `uv run ruff check .`; `uv run ruff format --check .`.
+- **Test suite:** `uv run pytest` (≈245 tests, ~100 s); `uv run ruff check .`; `uv run ruff format --check .`.
 
 ## 2. Standing decisions and constraints (from the project owner)
 
@@ -98,6 +98,11 @@ Cloudflare; hook them up later), with the housekeeping quick fixes; then a secon
    - marbled godwit: higher daily lows → more records;
    - mark contradicted directions for review.
 5. **Timed records** (iNaturalist API keeps observation times): diel priors, tide stage, hours after sunset (white seabass profile). The GBIF snapshot has dates only.
+   *First step done 2026-11-12:* the `timed` job builds time-of-day and tide-stage indices
+   for profiled species from iNaturalist hourly counts (`conditions/timed.py`; no records
+   downloaded), judges the profiles' intra-day claims (`timed_scorecard`), publishes them for
+   open and generalized taxa only, and serves `/species/{id}/timing`. Next: real-data results
+   and folding the indices into daily forecasts as availability terms.
 6. **More live sources for nowcasts:** an eBird feed (partnership), and the GBIF API for frequently publishing datasets. Nowcast features must come only from live sources, in training and serving alike.
 7. **Policy questions for the owner:**
    - Could OPEN's 24 h delay be shorter for common species?

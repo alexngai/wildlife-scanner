@@ -357,6 +357,134 @@ def _tiers(ctx: JobContext) -> dict:
     }
 
 
+def _timed(ctx: JobContext) -> dict:
+    """Time-of-day and tide-stage indices for profiled species (conditions/timed.py).
+
+    Errors are recorded per taxon rather than failing the job: publishing depends on it, and
+    an iNaturalist outage must not hold back live data.
+    """
+    from wildlife_radar.conditions import timed
+    from wildlife_radar.connectors.inat_histogram import GROUP_TAXA, InatHistogram
+    from wildlife_radar.connectors.inaturalist_taxa import (
+        RECORDS_SCHEMA,
+        InatTaxonStatusProvider,
+    )
+    from wildlife_radar.connectors.noaa_coops import CoopsTideConnector
+    from wildlife_radar.policy.statuses import TaxonInfo
+    from wildlife_radar.profiles import ProfileLibrary
+
+    hist = ctx.params.get("_histogram") or InatHistogram()
+    lib = ProfileLibrary()
+    start = date(ctx.region.pipeline.since_year or 2010, 1, 1)
+    end = ctx.now.date() - timedelta(days=1)
+    out: dict = {"taxa": {}, "errors": {}}
+    with ctx.store() as store:
+        conn = store.conn
+        conn.execute(timed.TIMED_SCHEMA)
+        present = dict(
+            conn.execute(
+                "SELECT taxon_id, any_value(taxon_group) FROM prior_taxa WHERE region_id = ? "
+                "GROUP BY 1",
+                [ctx.region.id],
+            ).fetchall()
+        )
+        taxa = [t for t in lib.ids(kind="species") if t in present]
+        # Where the sun and tides are evaluated: the primary tide station, else the centre.
+        lon_min, lat_min, lon_max, lat_max = ctx.region.bbox
+        lat, lon = (lat_min + lat_max) / 2, (lon_min + lon_max) / 2
+        hilo: list = []
+        station = ctx.region.tide_stations[0] if ctx.region.tide_stations else None
+        if station is not None:
+            lat, lon = station.lat, station.lon
+            hilo = timed.load_hilo(conn, station.station_id)
+            have = {t.year for t, _, _ in hilo}
+            tides = ctx.params.get("_tides") or CoopsTideConnector()
+            for year in range(start.year, end.year + 1):
+                if year in have and year != end.year:
+                    continue
+                try:
+                    values = tides.predictions(
+                        station.station_id,
+                        date(year, 1, 1),
+                        min(date(year, 12, 31), end + timedelta(days=2)),
+                        interval="hilo",
+                    )
+                except Exception as exc:  # tide indices are skipped for that year
+                    out["errors"][f"tides:{year}"] = str(exc)
+                    continue
+                timed.store_hilo(
+                    conn,
+                    station.station_id,
+                    [
+                        (v.valid_time, v.attrs.get("type"), v.value)
+                        for v in values
+                        if v.value is not None
+                    ],
+                )
+            hilo = timed.load_hilo(conn, station.station_id)
+        signals = timed.HourSignals(lat, lon, hilo)
+        edges = signals.height_edges()
+        conn.execute(RECORDS_SCHEMA)  # iNaturalist ids the tiers job already resolved
+        known = dict(
+            conn.execute(
+                "SELECT taxon_id, inat_id FROM inat_taxon_records WHERE inat_id IS NOT NULL"
+            ).fetchall()
+        )
+        resolver = InatTaxonStatusProvider({})
+        effort_cache: dict[str, dict] = {}
+        for taxon_id in taxa:
+            profile = lib.resolve(taxon_id)
+            try:
+                inat_id = known.get(taxon_id) or resolver._resolve_id(
+                    TaxonInfo(taxon_id=taxon_id, scientific_name=profile.scientific_name)
+                )
+                group = present[taxon_id]
+                if inat_id is None or group not in GROUP_TAXA:
+                    out["errors"][taxon_id] = "no iNaturalist id or effort group"
+                    continue
+                counts = hist.hourly([inat_id], ctx.region.bbox, start, end)
+                if group not in effort_cache:
+                    effort_cache[group] = hist.hourly(
+                        GROUP_TAXA[group], ctx.region.bbox, start, end
+                    )
+                effort = effort_cache[group]
+            except Exception as exc:
+                out["errors"][taxon_id] = f"{type(exc).__name__}: {exc}"
+                continue
+            indices: dict[str, list] = {}
+            for signal in (
+                "astro.diel_phase",
+                "astro.hours_since_sunset",
+                "tide.stage",
+                "tide.height_m",
+            ):
+                if signal.startswith("tide.") and not hilo:
+                    continue
+                indices[signal] = timed.category_index(
+                    counts,
+                    effort,
+                    lambda t, s=signal: signals.category(s, t, edges),
+                    timed.TIMED_SIGNALS[signal],
+                    signals.offset,
+                )
+            verdicts = []
+            for name, spec in profile.signals.items():
+                sig = spec.signal or name
+                if sig not in timed.TIMED_SIGNALS:
+                    continue
+                rows = indices.get("astro.diel_phase" if sig == "astro.sun_altitude_deg" else sig)
+                if rows:
+                    trait = (profile.traits or {}).get("activity_pattern")
+                    verdicts.append(timed.judge(name, spec, sig, rows, trait))
+            n = sum(counts.values())
+            timed.persist(conn, ctx.region.id, taxon_id, indices, verdicts, n, ctx.now)
+            out["taxa"][taxon_id] = {
+                "records": n,
+                "verdicts": {v.term: v.verdict for v in verdicts},
+            }
+    return out
+
+
 def _conditions(ctx: JobContext) -> dict:
     from wildlife_radar.conditions import terms_from_profile
     from wildlife_radar.conditions.levels import run_conditions
@@ -466,6 +594,13 @@ JOBS: dict[str, Job] = {
         ),
         Job("conditions", ("baseline",), _conditions, timedelta(days=30), "Levels 1–2, scorecard"),
         Job(
+            "timed",
+            ("baseline", "tiers"),
+            _timed,
+            timedelta(days=30),
+            "time-of-day and tide indices (iNaturalist hourly counts)",
+        ),
+        Job(
             "nowcast",
             ("baseline", "tiers", "conditions"),
             _nowcast,
@@ -474,7 +609,7 @@ JOBS: dict[str, Job] = {
         ),
         Job(
             "publish",
-            ("tiers", "backtest", "conditions", "nowcast", "signals", "live"),
+            ("tiers", "backtest", "conditions", "nowcast", "signals", "live", "timed"),
             _publish,
             None,
             "audit-gated serving bundle",
