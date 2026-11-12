@@ -335,25 +335,30 @@ def test_redate_from_event_ids_and_fetch_partitions():
     key = "synthetic-dive-survey"
     assert missing_event_ids(conn, key, [date(2024, 11, 30)]) == 40
 
-    # The search API pages records; the box is split until each piece is under the cap.
+    # Events are listed with a facet query, then each event's records are paged.
+    event_of = {
+        r.source_record_id: f"SITE_{true_dates[r.source_record_id]:%Y%m%d}_swath" for r in records
+    }
+
     def api(request: httpx.Request) -> httpx.Response:
         params = request.url.params
-        if params["limit"] == "0":
-            lat_lo, lat_hi = map(float, params["decimalLatitude"].split(","))
-            inside = [r for r in records if lat_lo <= r.footprint.lat <= lat_hi]
-            return httpx.Response(200, json={"count": len(inside)})
-        lat_lo, lat_hi = map(float, params["decimalLatitude"].split(","))
-        inside = [r for r in records if lat_lo <= r.footprint.lat <= lat_hi]
+        if params.get("facet") == "eventId":
+            counts: dict[str, int] = {}
+            for event in event_of.values():
+                counts[event.lower()] = counts.get(event.lower(), 0) + 1
+            names = sorted(counts)[int(params["facetOffset"]) :][: int(params["facetLimit"])]
+            return httpx.Response(
+                200,
+                json={"facets": [{"counts": [{"name": n, "count": counts[n]} for n in names]}]},
+            )
+        members = [k for k, e in event_of.items() if e.lower() == params["eventId"]]
         offset, limit = int(params["offset"]), int(params["limit"])
         return httpx.Response(
             200,
             json={
                 "results": [
-                    {
-                        "key": int(r.source_record_id),
-                        "eventID": f"SITE_{true_dates[r.source_record_id]:%Y%m%d}_swath",
-                    }
-                    for r in inside[offset : offset + limit]
+                    {"key": int(k), "eventID": event_of[k]}
+                    for k in members[offset : offset + limit]
                 ]
             },
         )

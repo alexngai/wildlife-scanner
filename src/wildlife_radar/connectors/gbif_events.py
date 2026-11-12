@@ -5,8 +5,8 @@ date survives only in ``eventID`` (``SAN_MATEO_KELP_20201008_OUTER_2_swath``). S
 before ``eventid`` was kept in the store lack it, so this pages the occurrence search API for
 the affected records and returns ``(gbifID, eventID)`` pairs.
 
-The search API stops paging at 100,000 records, so the bounding box is split recursively until
-each piece is below that.
+Records are fetched event by event (events are listed with a facet query), which keeps page
+offsets shallow: the search API is slow at deep offsets and stops at 100,000.
 """
 
 from __future__ import annotations
@@ -21,7 +21,6 @@ from wildlife_radar.connectors.base import ConnectorError, RateLimiter, get_json
 
 SEARCH_URL = "https://api.gbif.org/v1/occurrence/search"
 PAGE = 300
-MAX_OFFSET = 100_000
 
 BBox = tuple[float, float, float, float]
 
@@ -48,39 +47,33 @@ def _get(client: httpx.Client, params: dict, limiter: RateLimiter | None, attemp
     raise AssertionError("unreachable")
 
 
-def _count(client: httpx.Client, params: dict, limiter: RateLimiter | None) -> int:
-    return int(_get(client, {**params, "limit": 0}, limiter).get("count", 0))
-
-
-def partitions(
+def event_ids(
     client: httpx.Client,
     dataset_key: str,
     event_date: str,
     bbox: BBox,
     limiter: RateLimiter | None = None,
-    depth: int = 0,
-) -> list[tuple[dict, int]]:
-    """``(params, count)`` pieces of ``bbox``, each small enough to page through."""
-    params = _params(dataset_key, event_date, bbox)
-    n = _count(client, params, limiter)
-    if n == 0:
-        return []
-    if n < MAX_OFFSET - PAGE or depth >= 12:
-        return [(params, n)]
-    lon_min, lat_min, lon_max, lat_max = bbox
-    lon_mid, lat_mid = (lon_min + lon_max) / 2, (lat_min + lat_max) / 2
-    # Range filters are inclusive; nudge the upper edges so no record is counted twice.
-    eps = 1e-7
-    quads = [
-        (lon_min, lat_min, lon_mid - eps, lat_mid - eps),
-        (lon_mid, lat_min, lon_max, lat_mid - eps),
-        (lon_min, lat_mid, lon_mid - eps, lat_max),
-        (lon_mid, lat_mid, lon_max, lat_max),
-    ]
-    out: list[tuple[dict, int]] = []
-    for quad in quads:
-        out += partitions(client, dataset_key, event_date, quad, limiter, depth + 1)
-    return out
+) -> list[tuple[str, int]]:
+    """``(eventID, records)`` for the dataset's records on ``event_date`` inside ``bbox``."""
+    out: list[tuple[str, int]] = []
+    offset = 0
+    while True:
+        payload = _get(
+            client,
+            {
+                **_params(dataset_key, event_date, bbox),
+                "limit": 0,
+                "facet": "eventId",
+                "facetLimit": 1000,
+                "facetOffset": offset,
+            },
+            limiter,
+        )
+        counts = (payload.get("facets") or [{}])[0].get("counts") or []
+        out += [(c["name"], int(c["count"])) for c in counts]
+        if len(counts) < 1000:
+            return out
+        offset += 1000
 
 
 def fetch_event_ids(
@@ -92,14 +85,22 @@ def fetch_event_ids(
     limiter: RateLimiter | None = None,
     workers: int = 4,
 ) -> Iterator[tuple[str, str]]:
-    """Yield ``(gbifID, eventID)`` for records of ``dataset_key`` dated ``event_date``."""
-    client = client or make_client(timeout=60)
-    pieces = partitions(client, dataset_key, event_date, bbox, limiter)
-    pages = [(params, offset) for params, n in pieces for offset in range(0, n, PAGE)]
+    """Yield ``(gbifID, eventID)`` for records of ``dataset_key`` dated ``event_date``.
 
-    def page(job: tuple[dict, int]) -> list[tuple[str, str]]:
-        params, offset = job
-        payload = _get(client, {**params, "limit": PAGE, "offset": offset}, limiter)
+    Deep offsets in the occurrence search are slow (tens of seconds per page), so records are
+    fetched per event: list the events (a facet), then page each event's few hundred records.
+    """
+    client = client or make_client(timeout=60)
+    events = event_ids(client, dataset_key, event_date, bbox, limiter)
+    pages = [(name, offset) for name, n in events for offset in range(0, n, PAGE)]
+
+    def page(job: tuple[str, int]) -> list[tuple[str, str]]:
+        name, offset = job
+        payload = _get(
+            client,
+            {"datasetKey": dataset_key, "eventId": name, "limit": PAGE, "offset": offset},
+            limiter,
+        )
         return [
             (str(r["key"]), r["eventID"])
             for r in payload.get("results") or []
