@@ -10,8 +10,8 @@ For the next working session. Start here, then read the files it points to.
   - Phases 0–2;
   - Phase 3: daily condition signals, Level 1–2 models with gates, hypothesis scorecard, recent-sightings forecasts for every OPEN species;
   - the data platform's first steps: a job graph, audit-gated policy-filtered bundles, a live iNaturalist ingest, and an API that serves bundles.
-- **Results so far:** `docs/research/08`, `09`, `10` (real San Diego data). Read 10 first.
-- **Test suite:** `uv run pytest` (≈247 tests, ~100 s); `uv run ruff check .`; `uv run ruff format --check .`.
+- **Results so far:** `docs/research/08`, `09`, `10` (real San Diego data) and `11` (Monterey Bay, the second region). Read 10 and 11 first.
+- **Test suite:** `uv run pytest` (≈252 tests, ~110 s); `uv run ruff check .`; `uv run ruff format --check .`.
 
 ## 2. Standing decisions and constraints (from the project owner)
 
@@ -41,7 +41,7 @@ For the next working session. Start here, then read the files it points to.
   The GBIF snapshot bucket (`gbif-open-data-us-east-1.s3.us-east-1.amazonaws.com`) was reachable too.
 - **No secrets are configured.** Two things are pending from the owner: a contact User-Agent (Wikipedia requires one) and an Anthropic API key (for LLM extraction).
 
-## 4. Rebuilding the San Diego store
+## 4. Rebuilding a region's store (San Diego; Monterey Bay is the same with `--region montereybay --db data/mb.duckdb`)
 
 Data doesn't survive between sessions. To rebuild it (about 1.5 h, mostly downloads):
 
@@ -91,6 +91,10 @@ Cloudflare; hook them up later), with the housekeeping quick fixes; then a secon
    - **Later:** a multi-region API, splitting the live tables out of the bundle, measuring
      static sizes on real data, and syncing the other lake layers.
 2. **A second region** to prove multi-region (e.g. Northern California or the Pacific Northwest region pack). Then move identities and the status cache to a **global reference store** shared by regions; they are per store today.
+   *Done 2026-11-12* (`docs/research/11`): Monterey Bay published end to end; shared
+   reference store (`lake/ref`); multi-region API and worker. Open: kelp-survey repairs
+   continue daily (3,741 events left, GBIF rate limits); static map format and build speed
+   (5.3 GB, ~2.5 h first build).
 3. **LLM extraction live run + calibration** (`profilegen generate --extract`, `profilegen calibrate`). Blocked on the User-Agent contact and API key (§3). Score per-field accuracy against TetrapodTraits before trusting any extracted field.
 4. **Profile revisions from the scorecard** (`docs/research/10` §1). *Done 2026-11-12: direction
    claims withdrawn for both, and the scorecard flags them (`scorecard --review`).*
@@ -112,6 +116,9 @@ Cloudflare; hook them up later), with the housekeeping quick fixes; then a secon
    - Could OPEN's 24 h delay be shorter for common species?
    - CITES Appendix II maps to COARSE (strict; would hide e.g. hummingbirds if iNaturalist reported CITES statuses).
    - Review the medium audit findings ("threatened elsewhere").
+   - Humpback whales are COARSE in Monterey Bay (DPS listings, iNaturalist obscuring), so
+     Happywhale humpback sightings never reach users. A whale-watching exception would be the
+     owner's call (`docs/research/11` §5).
 8. **Housekeeping:**
    - Report the kelp-forest dataset's placeholder dates to its publisher (GBIF dataset `154d6192…`, ~21 M records dated 2023-11-30).
    - ~~Cache `SignalLookup` in the forecast service~~ (done: once per service and signal set).
@@ -127,6 +134,8 @@ Cloudflare; hook them up later), with the housekeeping quick fixes; then a secon
   - GBIF's backbone mapped honey mesquite to screwbean, so match against the **Catalogue of Life** (what snapshots use).
   - Wikidata synonym links are sometimes wrong. They may raise protection, but never verify ids or merge taxa.
   - Follow an inactive iNaturalist concept only if its own name matches.
+- **GBIF rate-limits long paging by volume** (HTTP 429 after ~1,000 pages even at 4/s). Budget and checkpoint any long GBIF job; never assume one run finishes.
+- **Background tool commands stop after 2 h.** Start long pipeline runs detached (`nohup … &`) and follow the log.
 - **Check every policy result end to end on real data.** The audit caught OPEN listed species three times: skipped curated statuses, a renamed species, and fresh records with obscured geoprivacy. `publish` is gated on it; keep it that way.
 - **Gates need a fair reference.** Compare Level 1 with a *recalibrated* Level 0, require a practical effect (≥0.5%), and train only on features that exist at serving time.
 - **Survey data quirks:** placeholder dates, absences recorded only for some taxa, campaign dates that aren't seasonality. `annotate-datasets` reports date spikes.
