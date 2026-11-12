@@ -15,10 +15,12 @@ import duckdb
 from fastapi import FastAPI, HTTPException, Query, Request
 
 from wildlife_radar import __version__
+from wildlife_radar.baseline.effort import DatasetRegistry
 from wildlife_radar.connectors import ALL_SOURCES
 from wildlife_radar.policy.statuses import TierService
 from wildlife_radar.profiles import ProfileLibrary
-from wildlife_radar.regions import load_region
+from wildlife_radar.regions import load_region, region_dir
+from wildlife_radar.serving.forecast import Forecast, ForecastService
 from wildlife_radar.serving.queries import (
     BaselineQueries,
     Calendar,
@@ -70,6 +72,12 @@ def create_app(
         license_info={"name": "AGPL-3.0-only", "identifier": "AGPL-3.0-only"},
     )
     app.state.queries = queries
+    registry_path = region_dir(region.id) / "datasets.yaml"
+    forecasts = ForecastService(
+        queries,
+        {s.station_id: (s.lat, s.lon) for s in region.tide_stations},
+        registry=DatasetRegistry.load(registry_path),
+    )
 
     @app.middleware("http")
     async def source_header(request: Request, call_next):
@@ -144,6 +152,24 @@ def create_app(
             return queries.calendar(
                 taxon_id, lat, lon, year or datetime.now(UTC).year, method=method
             )
+        except NotAvailable:
+            raise HTTPException(status_code=404, detail=NOT_AVAILABLE) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+
+    @app.get("/species/{taxon_id}/forecast", response_model=Forecast)
+    def forecast(
+        taxon_id: str,
+        lat: float | None = None,
+        lon: float | None = None,
+        place_id: str | None = None,
+        date: str | None = None,
+        method: str | None = None,
+    ):
+        """Daily forecast at the highest gated level (0 baseline, 1 conditions, 2 nowcast)."""
+        lat, lon = _location(lat, lon, place_id)
+        try:
+            return forecasts.forecast(taxon_id, lat, lon, _parse_date(date), method=method)
         except NotAvailable:
             raise HTTPException(status_code=404, detail=NOT_AVAILABLE) from None
         except ValueError as exc:

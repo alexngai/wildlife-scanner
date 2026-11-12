@@ -199,3 +199,48 @@ def test_moon_and_coops_parsing():
     conn = ObservationStore().conn
     ensure_schema(conn)
     assert store_rows(conn, temps) == 1
+
+
+def test_forecast_uses_gated_levels_and_explains(world):
+    from wildlife_radar.policy.statuses import StaticStatusProvider, TierService, build_tier_table
+    from wildlife_radar.regions import Region
+    from wildlife_radar.serving import BaselineQueries
+    from wildlife_radar.serving.forecast import ForecastService
+
+    conn = world.conn
+    sst_anomaly = TermSpec("sst_anomaly", "ocean.sst_anomaly_c", "linear", "moderate", True)
+    run_conditions(
+        conn,
+        region_id="cond",
+        bbox=BBOX,
+        split=SPLIT,
+        end=None,
+        specs={"piscis-calida": [sst_anomaly], "piscis-indifferens": [sst_anomaly]},
+        station_coords={"TEST1": SITE},
+        reps=50,
+    )
+    from wildlife_radar.baseline import build_baseline
+
+    build_baseline(conn, region_id="cond", bbox=BBOX)
+    build_tier_table(conn, region_id="cond", scopes=["global"], providers=[StaticStatusProvider()])
+    region = Region(id="cond", name="test", bbox=BBOX)
+    queries = BaselineQueries(conn, region, TierService(conn, "cond"))
+    service = ForecastService(queries, {"TEST1": SITE})
+    sst = dict(
+        conn.execute(
+            "SELECT day, value FROM signal_daily WHERE signal_id = 'ocean.sst_c'"
+        ).fetchall()
+    )
+    # A warm-anomaly summer day vs a cool one in the same week of a year.
+    days = [date(2024, 7, d) for d in range(1, 29)]
+    warm = max(days, key=lambda d: sst[d])
+    cool = min(days, key=lambda d: sst[d])
+    hot = service.forecast("piscis-calida", *SITE, warm)
+    cold = service.forecast("piscis-calida", *SITE, cool)
+    assert hot.level >= 1 and hot.drivers[0].term == "sst_anomaly"
+    assert hot.drivers[0].contribution > 0 > cold.drivers[0].contribution
+    assert hot.p > hot.p_level0 and cold.p < cold.p_level0
+    # No model passed its gate: Level 0, labeled.
+    flat = service.forecast("piscis-indifferens", *SITE, warm)
+    assert flat.level == 0 and flat.p == flat.p_level0
+    assert any("gate" in n for n in flat.notes)
