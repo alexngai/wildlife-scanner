@@ -11,7 +11,7 @@ primary_region = "lax"
   # WILDLIFE_RADAR_SOURCE_URL = "https://github.com/<you>/wildlife-radar"  (AGPL §13)
 
 [processes]
-  app = "wildlife-radar serve --region sandiego --host 0.0.0.0 --port 8080 --cache-dir /tmp/bundles --refresh-seconds 60"
+  app = "wildlife-radar serve --region sandiego,montereybay --host 0.0.0.0 --port 8080 --cache-dir /tmp/bundles --refresh-seconds 60"
 
 [http_service]
   internal_port = 8080

@@ -19,7 +19,7 @@ from pathlib import Path
 
 from wildlife_radar.core.time import utcnow
 from wildlife_radar.pipeline.runner import Job, JobContext, run
-from wildlife_radar.pipeline.sync import KEEP_VERSIONS, prune_local, push_publish
+from wildlife_radar.pipeline.sync import KEEP_VERSIONS, prune_local, push_publish, sync_ref
 from wildlife_radar.storage.objects import ObjectStore
 
 
@@ -37,12 +37,25 @@ def tick(
     *,
     keep: int = KEEP_VERSIONS,
     jobs: dict[str, Job] | None = None,
+    lake_store: ObjectStore | None = None,
 ) -> dict:
     """One scheduled pass: run stale jobs up to ``publish``, push, prune. Never raises for a
     job failure (the next tick retries it); push errors are reported the same way."""
     started = utcnow()
+    ref_sync: dict = {}
+    if lake_store is not None:
+        try:  # identities and raw records other workers fetched
+            ref_sync["before"] = sync_ref(lake_store, ctx.lake / "ref")
+        except Exception as exc:
+            ref_sync["error"] = f"{type(exc).__name__}: {exc}"
     results = run("publish", ctx, jobs=jobs)
+    if lake_store is not None:
+        try:
+            ref_sync["after"] = sync_ref(lake_store, ctx.lake / "ref")
+        except Exception as exc:
+            ref_sync["error"] = f"{type(exc).__name__}: {exc}"
     out: dict = {
+        "region": ctx.region.id,
         "started": started.isoformat(),
         "ran": [r["job"] for r in results if "outcome" in r],
         "failed": failed(results),
@@ -54,6 +67,8 @@ def tick(
         except Exception as exc:  # network errors: retry next tick
             out["push_error"] = f"{type(exc).__name__}: {exc}"
     out["pruned_local"] = prune_local(publish_root, ctx.region.id, keep)
+    if ref_sync:
+        out["ref_sync"] = ref_sync
     out["seconds"] = round((utcnow() - started).total_seconds(), 1)
     errors = {r["job"]: r["outcome"] for r in results if isinstance(r.get("outcome"), str)}
     if errors:
@@ -70,21 +85,23 @@ def _status(lake: Path, region_id: str, out: dict) -> None:
 
 
 def loop(
-    make_context: Callable[[], JobContext],
+    make_contexts: Callable[[], list[JobContext]],
     every: timedelta,
     store: ObjectStore | None = None,
     *,
+    lake_store: ObjectStore | None = None,
     ticks: int | None = None,
     sleep: Callable[[float], None] = time.sleep,
     log: Callable[[str], None] = print,
 ) -> None:
-    """Tick every ``every`` (measured start to start; a long tick starts the next at once)."""
+    """Tick every ``every`` (start to start; a long tick starts the next at once). Each tick
+    runs the regions in turn: they share the machine, its volume and the reference store."""
     n = 0
     while ticks is None or n < ticks:
         start = time.monotonic()
-        ctx = make_context()  # fresh ``now`` for staleness checks
-        out = tick(ctx, store)
-        log(json.dumps({k: out[k] for k in ("started", "ran", "failed", "seconds")}))
+        for ctx in make_contexts():  # fresh ``now`` for staleness checks
+            out = tick(ctx, store, lake_store=lake_store)
+            log(json.dumps({k: out[k] for k in ("region", "started", "ran", "failed", "seconds")}))
         n += 1
         if ticks is not None and n >= ticks:
             return

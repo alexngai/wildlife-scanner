@@ -1,4 +1,4 @@
-# Dataset registry for the socal region pack: how each dataset observes.
+# Dataset registry for California region packs: how each dataset observes.
 #
 # Overrides automatic effort-class assignment (eBird → checklist; GBIF SAMPLING_EVENT or
 # datasets recording absences → survey; machine observations → sensor; otherwise casual).

@@ -133,7 +133,7 @@ Data goes in `data/`, which git ignores:
    uv run wildlife-radar audit-tiers --region socal
    ```
 
-Data repairs: `repair-dates` re-dates records a dataset stamped with a placeholder date, using the date in their event ids (see `regions/socal/datasets.yaml`).
+Data repairs: `repair-dates` re-dates records a dataset stamped with a placeholder date, using the date in their event ids (see `regions/california/datasets.yaml`).
 
 ### Running it as a pipeline
 

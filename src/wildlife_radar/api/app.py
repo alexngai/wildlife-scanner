@@ -11,6 +11,7 @@ Browsers may call the API from the origins listed in ``WILDLIFE_RADAR_CORS_ORIGI
 from __future__ import annotations
 
 import os
+import threading
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -75,39 +76,106 @@ class _Services:
         )
 
 
+class _RegionHandle:
+    """One served region: its bundle (or database), opened lazily, following ``CURRENT``."""
+
+    def __init__(self, region, profiles, now, db_path, bundle_dir) -> None:
+        self.region = region
+        self.profiles = profiles
+        self.now = now
+        self.db_path = Path(db_path) if db_path else None
+        self.bundles = Path(bundle_dir) / f"region={region.id}" if bundle_dir else None
+        self._svc: _Services | None = None
+        self._lock = threading.Lock()
+
+    def resolve(self) -> Path:
+        if self.bundles is None:
+            return self.db_path  # type: ignore[return-value]
+        path = current_bundle(self.bundles)
+        if path is None:
+            raise NotPublished(self.region.id)
+        return path
+
+    def svc(self) -> _Services:
+        path = self.resolve()
+        with self._lock:
+            if self._svc is None or self._svc.db_path != path:
+                old, self._svc = self._svc, _Services(path, self.region, self.profiles, self.now)
+                if old is not None:
+                    old.conn.close()
+            return self._svc
+
+
+class NotPublished(RuntimeError):
+    pass
+
+
+def _area(region) -> float:
+    lon_min, lat_min, lon_max, lat_max = region.bbox
+    return (lon_max - lon_min) * (lat_max - lat_min)
+
+
 def create_app(
     db_path: str | Path | None = None,
-    region_id: str = "socal",
+    region_id: str | list[str] = "socal",
     profiles_dir: str | Path | None = None,
     source_url: str | None = None,
     now: datetime | None = None,
     bundle_dir: str | Path | None = None,
 ) -> FastAPI:
-    """Serve a region from a database file, or from published bundles (``bundle_dir`` is the
-    publish root): the API then follows the region's ``CURRENT`` pointer and reopens when a new
-    version is published."""
-    region = load_region(region_id)
+    """Serve one or more regions from published bundles (``bundle_dir`` is the publish root;
+    each region follows its ``CURRENT`` pointer and reopens when a new version is published),
+    or a single region from a database file.
+
+    With several regions, point and place requests go to the smallest region containing the
+    point (or the place's region); taxon-level requests name a ``region``."""
+    ids = [region_id] if isinstance(region_id, str) else list(region_id)
+    if db_path is not None and len(ids) > 1:
+        raise ValueError("a database file serves one region; use bundles for several")
     profiles = ProfileLibrary(profiles_dir) if profiles_dir else ProfileLibrary()
-    region_bundles = Path(bundle_dir) / f"region={region.id}" if bundle_dir else None
-
-    def resolve() -> Path:
-        if region_bundles is None:
-            return Path(db_path)  # type: ignore[arg-type]
-        path = current_bundle(region_bundles)
-        if path is None:
-            raise RuntimeError(f"no published bundle for region {region.id!r}")
-        return path
-
-    state = {"svc": _Services(resolve(), region, profiles, now)}
+    handles = {
+        r.id: _RegionHandle(r, profiles, now, db_path, bundle_dir)
+        for r in (load_region(i) for i in ids)
+    }
+    place_regions: dict[str, str] = {}
+    for h in handles.values():
+        for p in h.region.places:
+            if p.place_id in place_regions:
+                raise ValueError(f"place id {p.place_id!r} is in two served regions")
+            place_regions[p.place_id] = h.region.id
+    by_size = sorted(handles.values(), key=lambda h: _area(h.region))
+    first = next(iter(handles.values()))
+    if len(handles) == 1:
+        first.svc()  # fail fast, as before, when the only region has nothing to serve
 
     def svc() -> _Services:
-        if region_bundles is not None:
-            path = resolve()
-            if path != state["svc"].db_path:
-                old = state["svc"]
-                state["svc"] = _Services(path, region, profiles, now)
-                old.conn.close()
-        return state["svc"]
+        """The first served region (kept for single-region callers)."""
+        return first.svc()
+
+    def _open(h: _RegionHandle) -> _Services:
+        try:
+            return h.svc()
+        except NotPublished:
+            raise HTTPException(
+                status_code=503, detail=f"region {h.region.id} has no published data yet"
+            ) from None
+
+    def for_region(region: str | None) -> _Services:
+        if region is None:
+            if len(handles) > 1:
+                raise HTTPException(
+                    status_code=400, detail=f"give region (one of {', '.join(handles)})"
+                )
+            return _open(first)
+        if region not in handles:
+            raise HTTPException(status_code=404, detail="unknown region")
+        return _open(handles[region])
+
+    def for_point(lat: float, lon: float) -> _Services:
+        for h in by_size:
+            if h.region.contains(lat, lon):
+                return _open(h)
+        raise HTTPException(status_code=400, detail="location is outside the served regions")
 
     source = source_url or os.environ.get(SOURCE_URL_ENV) or DEFAULT_SOURCE_URL
 
@@ -121,6 +189,7 @@ def create_app(
         license_info={"name": "AGPL-3.0-only", "identifier": "AGPL-3.0-only"},
     )
     app.state.services = svc
+    app.state.regions = handles
     origins = [o.strip() for o in os.environ.get(CORS_ENV, "").split(",") if o.strip()]
     if origins:
         from fastapi.middleware.cors import CORSMiddleware
@@ -140,14 +209,33 @@ def create_app(
 
     @app.get("/health")
     def health() -> dict:
-        return {
-            "status": "ok",
-            "version": __version__,
-            "region": region.id,
-            "model_version": svc().queries.model_version,
-            "built_at": svc().queries.as_of.isoformat(),
-            "bundle": svc().db_path.parent.name,
-        }
+        regions = []
+        for h in handles.values():
+            try:
+                s = h.svc()
+            except NotPublished:
+                regions.append({"region": h.region.id, "status": "not published"})
+                continue
+            regions.append(
+                {
+                    "region": h.region.id,
+                    "status": "ok",
+                    "model_version": s.queries.model_version,
+                    "built_at": s.queries.as_of.isoformat(),
+                    "bundle": s.db_path.parent.name,
+                }
+            )
+        out = {"status": "ok", "version": __version__, "regions": regions}
+        if len(regions) == 1:
+            out.update(regions[0])  # single-region fields at the top level, as before
+        return out
+
+    @app.get("/regions")
+    def regions() -> list[dict]:
+        return [
+            {"region": h.region.id, "name": h.region.name, "bbox": list(h.region.bbox)}
+            for h in handles.values()
+        ]
 
     @app.get("/source")
     def source_info() -> dict:
@@ -175,20 +263,30 @@ def create_app(
         group: str | None = None,
         limit: int = Query(50, ge=1, le=500),
         date: str | None = None,
+        region: str | None = None,
     ):
-        return svc().queries.list_taxa(_parse_date(date), q=q, group=group, limit=limit)
+        return for_region(region).queries.list_taxa(
+            _parse_date(date), q=q, group=group, limit=limit
+        )
 
     @app.get("/taxa/{taxon_id}", response_model=TaxonSummary)
-    def taxon(taxon_id: str, date: str | None = None):
+    def taxon(taxon_id: str, date: str | None = None, region: str | None = None):
         try:
-            return svc().queries.taxon_summary(taxon_id, _parse_date(date))
+            return for_region(region).queries.taxon_summary(taxon_id, _parse_date(date))
         except NotAvailable:
             raise HTTPException(status_code=404, detail=NOT_AVAILABLE) from None
 
     @app.get("/species/{taxon_id}/map", response_model=SpeciesMap)
-    def species_map(taxon_id: str, date: str | None = None, method: str | None = None):
+    def species_map(
+        taxon_id: str,
+        date: str | None = None,
+        method: str | None = None,
+        region: str | None = None,
+    ):
         try:
-            return svc().queries.species_map(taxon_id, _parse_date(date), method=method)
+            return for_region(region).queries.species_map(
+                taxon_id, _parse_date(date), method=method
+            )
         except NotAvailable:
             raise HTTPException(status_code=404, detail=NOT_AVAILABLE) from None
 
@@ -201,9 +299,9 @@ def create_app(
         year: int | None = None,
         method: str | None = None,
     ):
-        lat, lon = _location(lat, lon, place_id)
+        lat, lon, target = _location(lat, lon, place_id)
         try:
-            return svc().queries.calendar(
+            return target.queries.calendar(
                 taxon_id, lat, lon, year or datetime.now(UTC).year, method=method
             )
         except NotAvailable:
@@ -221,9 +319,9 @@ def create_app(
         method: str | None = None,
     ):
         """Daily forecast at the highest gated level (0 baseline, 1 conditions, 2 nowcast)."""
-        lat, lon = _location(lat, lon, place_id)
+        lat, lon, target = _location(lat, lon, place_id)
         try:
-            return svc().forecasts.forecast(taxon_id, lat, lon, _parse_date(date), method=method)
+            return target.forecasts.forecast(taxon_id, lat, lon, _parse_date(date), method=method)
         except NotAvailable:
             raise HTTPException(status_code=404, detail=NOT_AVAILABLE) from None
         except ValueError as exc:
@@ -232,24 +330,32 @@ def create_app(
     @app.get("/nearby/recent", response_model=RecentActivity)
     def nearby_recent(lat: float, lon: float, date: str | None = None):
         """Recently reported species near a point, and which are picking up today."""
+        lat, lon, target = _location(lat, lon, None)
         try:
-            return recent_activity(svc().forecasts, lat, lon, _parse_date(date))
+            return recent_activity(target.forecasts, lat, lon, _parse_date(date))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
 
     @app.get("/places/{place_id}/recent", response_model=RecentActivity)
     def place_recent(place_id: str, date: str | None = None):
-        lat, lon = _location(None, None, place_id)
+        lat, lon, target = _location(None, None, place_id)
         try:
-            return recent_activity(svc().forecasts, lat, lon, _parse_date(date))
+            return recent_activity(target.forecasts, lat, lon, _parse_date(date))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
 
     @app.get("/places")
     def places() -> list[dict]:
         return [
-            {"place_id": p.place_id, "name": p.name, "kind": p.kind.value, "notes": p.notes}
-            for p in region.places
+            {
+                "place_id": p.place_id,
+                "name": p.name,
+                "kind": p.kind.value,
+                "notes": p.notes,
+                "region": h.region.id,
+            }
+            for h in handles.values()
+            for p in h.region.places
         ]
 
     @app.get("/places/{place_id}/lists", response_model=PlaceLists)
@@ -259,8 +365,7 @@ def create_app(
         life_list: str | None = None,
         group: str | None = None,
     ):
-        lat, lon = _location(None, None, place_id)
-        return _lists(lat, lon, date, life_list, group)
+        return _lists(*_location(None, None, place_id), date, life_list, group)
 
     @app.get("/nearby", response_model=PlaceLists)
     def nearby(
@@ -270,13 +375,18 @@ def create_app(
         life_list: str | None = None,
         group: str | None = None,
     ):
-        return _lists(lat, lon, date, life_list, group)
+        return _lists(*_location(lat, lon, None), date, life_list, group)
 
     def _lists(
-        lat: float, lon: float, day: str | None, life_list: str | None, group: str | None
+        lat: float,
+        lon: float,
+        target: _Services,
+        day: str | None,
+        life_list: str | None,
+        group: str | None,
     ) -> PlaceLists:
         try:
-            return svc().queries.place_lists(
+            return target.queries.place_lists(
                 lat, lon, _parse_date(day), _life_list(life_list), group=group
             )
         except ValueError as exc:
@@ -284,16 +394,17 @@ def create_app(
 
     def _location(
         lat: float | None, lon: float | None, place_id: str | None
-    ) -> tuple[float, float]:
+    ) -> tuple[float, float, _Services]:
+        """The point to answer for, and the region that answers: the place's own region, or
+        the smallest served region containing the point."""
         if place_id:
-            try:
-                place = region.place(place_id)
-            except KeyError:
-                raise HTTPException(status_code=404, detail="unknown place") from None
-            fp = place.footprint
-            return fp.lat, fp.lon  # region places are point footprints
+            if place_id not in place_regions:
+                raise HTTPException(status_code=404, detail="unknown place")
+            handle = handles[place_regions[place_id]]
+            fp = handle.region.place(place_id).footprint
+            return fp.lat, fp.lon, _open(handle)  # region places are point footprints
         if lat is None or lon is None:
             raise HTTPException(status_code=400, detail="give lat and lon, or place_id")
-        return lat, lon
+        return lat, lon, for_point(lat, lon)
 
     return app

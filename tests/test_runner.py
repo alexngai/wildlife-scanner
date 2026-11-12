@@ -111,6 +111,6 @@ def test_region_pack_inherits_curated_files():
     from wildlife_radar.pipeline.runner import context
 
     c = context("sandiego", "unused.duckdb", "unused-lake")
-    assert c.region.inherits == "socal"
-    assert c.statuses_path().parts[-2:] == ("socal", "statuses.yaml")
-    assert any(e.event_id_date for e in c.registry().datasets.values())  # socal registry
+    assert c.region.inherits == "california"
+    assert c.statuses_path().parts[-2:] == ("california", "statuses.yaml")
+    assert any(e.event_id_date for e in c.registry().datasets.values())  # shared registry

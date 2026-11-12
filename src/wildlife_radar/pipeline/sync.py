@@ -146,3 +146,18 @@ def pull_current(
     # Keep the previous version too: the API may still hold it open until its next request.
     prune_local(cache_root, region_id, keep)
     return remote
+
+
+def sync_ref(store: ObjectStore, ref_root: Path) -> dict:
+    """Two-way copy of the reference store's parts (immutable, uniquely named per writer):
+    download parts other workers wrote, upload this worker's new ones."""
+    remote = {k for k in store.list("ref/") if k.endswith(".parquet")}
+    parts = ref_root.rglob("part-*.parquet") if ref_root.exists() else []
+    local = {p.relative_to(ref_root.parent).as_posix(): p for p in parts}
+    pulled = sorted(remote - set(local))
+    for key in pulled:
+        store.get_file(key, ref_root.parent / key)
+    pushed = sorted(set(local) - remote)
+    for key in pushed:
+        store.put_file(key, local[key], cache_control="private, max-age=31536000, immutable")
+    return {"pulled": len(pulled), "pushed": len(pushed)}
