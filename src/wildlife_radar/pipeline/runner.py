@@ -271,7 +271,9 @@ def _crosswalk(ctx: JobContext) -> dict:
         statuses = ctx.statuses_path()
         if statuses:
             doc = yaml.safe_load(statuses.read_text(encoding="utf-8")) or {}
-            cached = {q for (q,) in store.conn.execute("SELECT query_name FROM taxon_identity")}
+            cached = {
+                q for (q,) in store.conn.execute("SELECT query_name FROM taxon_identity").fetchall()
+            }
             for e in doc.get("statuses", []):
                 name = e["taxon_id"].replace("-", " ").capitalize()
                 if name not in cached and name not in names:
