@@ -347,7 +347,56 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     from wildlife_radar.api import create_app
 
-    uvicorn.run(create_app(args.db, region_id=args.region), host=args.host, port=args.port)
+    app = (
+        create_app(bundle_dir=args.bundle_dir, region_id=args.region)
+        if args.bundle_dir
+        else create_app(args.db, region_id=args.region)
+    )
+    uvicorn.run(app, host=args.host, port=args.port)
+    return 0
+
+
+def cmd_publish(args: argparse.Namespace) -> int:
+    """Write a policy-filtered serving bundle (gated on the tier audit) and make it current."""
+    from pathlib import Path
+
+    import yaml
+
+    from wildlife_radar.pipeline.publish import PublishBlocked, publish_bundle
+    from wildlife_radar.storage import ObservationStore
+
+    region = _region(args)
+    statuses = _statuses_path(args, region)
+    curated = []
+    if statuses:
+        doc = yaml.safe_load(statuses.read_text(encoding="utf-8")) or {}
+        curated = [e["taxon_id"] for e in doc.get("statuses", [])]
+    with ObservationStore(args.db) as store:
+        try:
+            result = publish_bundle(
+                store.conn,
+                region,
+                Path(args.out),
+                curated_ids=curated,
+                registry=_registry(args),
+                allow_findings=args.allow_findings,
+            )
+        except PublishBlocked as exc:
+            print(f"error: publishing blocked: {exc}; run audit-tiers for details", file=sys.stderr)
+            return 1
+    print(
+        json.dumps(
+            {
+                "region": result.region_id,
+                "version": result.version,
+                "path": str(result.path),
+                "rows": result.rows,
+                "audit": result.findings,
+                "audit_overridden": result.overridden,
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -486,7 +535,18 @@ def register(sub: argparse._SubParsersAction) -> None:
     common(p)
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8000)
+    p.add_argument("--bundle-dir", help="serve published bundles from this root (follows CURRENT)")
     p.set_defaults(func=cmd_serve)
+
+    p = sub.add_parser("publish", help="write a policy-filtered serving bundle (audit-gated)")
+    common(p)
+    p.add_argument("--out", default="data/lake/publish", help="publish root")
+    p.add_argument("--statuses", help="curated statuses YAML (default: the region pack's)")
+    p.add_argument("--datasets", help="dataset registry YAML (default: region pack's)")
+    p.add_argument(
+        "--allow-findings", action="store_true", help="publish despite high audit findings"
+    )
+    p.set_defaults(func=cmd_publish)
 
     p = sub.add_parser("demo", help="build an offline demo database from synthetic data")
     common(p)
