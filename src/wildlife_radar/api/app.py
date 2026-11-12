@@ -21,7 +21,12 @@ from wildlife_radar.pipeline.publish import current_bundle
 from wildlife_radar.policy.statuses import TierService
 from wildlife_radar.profiles import ProfileLibrary
 from wildlife_radar.regions import load_region, region_dir
-from wildlife_radar.serving.forecast import Forecast, ForecastService
+from wildlife_radar.serving.forecast import (
+    Forecast,
+    ForecastService,
+    RecentActivity,
+    recent_activity,
+)
 from wildlife_radar.serving.queries import (
     BaselineQueries,
     Calendar,
@@ -204,6 +209,22 @@ def create_app(
             return svc().forecasts.forecast(taxon_id, lat, lon, _parse_date(date), method=method)
         except NotAvailable:
             raise HTTPException(status_code=404, detail=NOT_AVAILABLE) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+
+    @app.get("/nearby/recent", response_model=RecentActivity)
+    def nearby_recent(lat: float, lon: float, date: str | None = None):
+        """Recently reported species near a point, and which are picking up today."""
+        try:
+            return recent_activity(svc().forecasts, lat, lon, _parse_date(date))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+
+    @app.get("/places/{place_id}/recent", response_model=RecentActivity)
+    def place_recent(place_id: str, date: str | None = None):
+        lat, lon = _location(None, None, place_id)
+        try:
+            return recent_activity(svc().forecasts, lat, lon, _parse_date(date))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
 
