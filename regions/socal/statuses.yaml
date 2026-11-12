@@ -77,3 +77,17 @@ statuses:
     scope: us
     population: East Pacific DPS
     source: USFWS/NOAA
+  - taxon_id: ovis-canadensis
+    authority: ESA
+    code: E
+    scope: us
+    population: Peninsular bighorn sheep DPS (Peninsular Ranges, San Diego/Riverside/Imperial)
+    source: USFWS listing 1998 (ECOS); found by the tier audit (observed obscured geoprivacy)
+    verify: DPS boundaries vs region places
+  - taxon_id: ovis-canadensis
+    authority: CESA
+    code: T
+    scope: us-ca
+    population: Peninsular bighorn sheep
+    source: CESA listing 1971 (rare), reclassified threatened 1984
+    verify: current CDFW listing status
