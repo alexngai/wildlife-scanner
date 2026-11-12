@@ -125,6 +125,8 @@ Data goes in `data/`, which git ignores:
 
    The scorecard reports, for each condition term, whether it improves held-out predictions (supported, contradicted or inconclusive). `serve` then answers `/species/{id}/forecast?place_id=…&date=…` at the highest level that passed its gate, with each term's contribution.
 
+   The `nowcast` job (part of `run publish`) fits recent-sightings forecasts for the best-sampled openly mapped species, with no profile needed. `/places/{id}/recent` and `/nearby/recent` list what has been reported nearby in the last two weeks, and which species those reports make more likely today. They use live sources only (iNaturalist) and respect the publication delays.
+
 7. Before publishing, check the tiers against every status signal in the store. The command exits non-zero on high-severity findings:
 
    ```bash
