@@ -84,11 +84,15 @@ CREATE TABLE IF NOT EXISTS observations (
     observer_hash VARCHAR,
     dataset_key VARCHAR,
     ingested_at TIMESTAMP,
-    basis_of_record VARCHAR
+    basis_of_record VARCHAR,
+    event_id VARCHAR
 )
 """
 #: Columns added after the first schema version (appended, so column order stays stable).
-MIGRATIONS = ("ALTER TABLE observations ADD COLUMN IF NOT EXISTS basis_of_record VARCHAR",)
+MIGRATIONS = (
+    "ALTER TABLE observations ADD COLUMN IF NOT EXISTS basis_of_record VARCHAR",
+    "ALTER TABLE observations ADD COLUMN IF NOT EXISTS event_id VARCHAR",
+)
 COLUMNS = [
     "dedupe_key",
     "obs_id",
@@ -124,6 +128,7 @@ COLUMNS = [
     "dataset_key",
     "ingested_at",
     "basis_of_record",
+    "event_id",
 ]
 
 
@@ -238,6 +243,7 @@ def observation_row(obs: Observation) -> tuple:
         dataset,
         naive_utc(obs.ingested_at),
         obs.extras.get("basis_of_record"),
+        obs.extras.get("event_id"),
     )
 
 

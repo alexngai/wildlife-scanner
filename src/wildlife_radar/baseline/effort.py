@@ -93,6 +93,9 @@ class DatasetEntry(BaseModel):
     placeholder_dates: list[date] = Field(default_factory=list)
     """Dates the publisher stamped on records whose real date is unknown (e.g. a release
     date); records on these dates are dropped. ``date_spikes`` finds candidates."""
+    event_id_date: str | None = None
+    """Regex whose first group is the real ``YYYYMMDD`` date inside ``eventID``; records on
+    placeholder dates are re-dated from it by ``repair-dates`` (and then kept)."""
     name: str | None = None
     reason: str | None = None
 

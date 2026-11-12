@@ -204,6 +204,7 @@ def parse_dwc_record(
             "dataset_key": rec.get("datasetKey"),
             "occurrence_id": rec.get("occurrenceID"),
             "basis_of_record": basis or None,
+            "event_id": rec.get("eventID") or None,
             "issues": list(rec.get("issues") or rec.get("issue") or []),
             "license_raw": rec.get("license"),
             "group": target_group(rec.get("kingdom"), rec.get("phylum"), rec.get("class")),

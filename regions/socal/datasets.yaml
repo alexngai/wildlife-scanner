@@ -9,10 +9,12 @@ datasets:
   154d6192-bea0-4bcb-ab58-1c573081591d:
     name: Monitoring and Evaluation of Kelp Forest Ecosystems in the MLPA MPA Network
     effort_class: dive_survey
-    # ~250k records (mostly absences) carry eventDate 2023-11-30 while their eventID holds the
-    # real survey date (e.g. SAN_MATEO_KELP_20201008_OUTER_2_swath). Found in the 2025-11
-    # snapshot; recovering the dates from eventID needs a re-extract with that column.
+    # ~21M of the dataset's 32M records (250k in San Diego, mostly absences) carry eventDate
+    # 2023-11-30 while their eventID holds the real survey date
+    # (e.g. SAN_MATEO_KELP_20201008_OUTER_2_swath). `repair-dates` re-dates them from eventID;
+    # records it can't re-date stay excluded.
     placeholder_dates: [2023-11-30]
+    event_id_date: '_(\d{8})_'
   4ef2bed0-d40f-49c9-bb64-c46a301a5a72:
     name: Reef Check California — rocky reef fishes, invertebrates and algae
     effort_class: dive_survey
