@@ -239,3 +239,28 @@ def test_repairs_resume_after_an_interruption(tmp_path, monkeypatch):
     with ObservationStore(c.db) as store:
         days = store.conn.execute("SELECT DISTINCT local_date FROM observations").fetchall()
     assert sorted(d for (d,) in days) == [date(2020, 1, 1), date(2020, 1, 2), date(2020, 1, 3)]
+
+
+def test_crosswalk_also_resolves_curated_status_names(tmp_path, monkeypatch):
+    from wildlife_radar.pipeline import runner
+    from wildlife_radar.profilegen import identity
+    from wildlife_radar.storage import ObservationStore
+
+    statuses = tmp_path / "statuses.yaml"
+    statuses.write_text(
+        "statuses:\n  - {taxon_id: euphydryas-editha, authority: ESA, code: E, scope: us-ca}\n",
+        encoding="utf-8",
+    )
+    asked: list[str] = []
+    monkeypatch.setattr(
+        identity.IdentityResolver,
+        "resolve_many",
+        lambda self, names, **kw: asked.extend(names) or [],
+    )
+    c = ctx(tmp_path)
+    c.params["statuses"] = str(statuses)
+    with ObservationStore(c.db):
+        pass
+    out = run("crosswalk", c, jobs={"crosswalk": Job("crosswalk", (), runner._crosswalk)})[0]
+    assert isinstance(out["outcome"], dict), out["outcome"]
+    assert "Euphydryas editha" in asked
