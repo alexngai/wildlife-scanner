@@ -1,4 +1,5 @@
-# Curated, supplementary conservation statuses for the socal region pack.
+# Curated, supplementary conservation statuses for California region packs (inherited by
+# socal, sandiego and montereybay; each entry applies only where its scope does).
 #
 # This file can only RAISE protection: it is merged with automatic status lookups and never
 # counts as a complete lookup by itself (fail closed). Entries name the population a status

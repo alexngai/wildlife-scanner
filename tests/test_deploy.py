@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import warnings
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -183,3 +183,51 @@ def test_api_serves_a_bundle_pulled_from_the_bucket(tmp_path, monkeypatch):
     assert r.json() and r.headers["access-control-allow-origin"] == "https://app.example.org"
     other = client.get("/taxa", headers={"Origin": "https://elsewhere.example"})
     assert "access-control-allow-origin" not in other.headers
+
+
+def test_ref_parts_travel_between_workers(tmp_path):
+    from wildlife_radar.pipeline.sync import sync_ref
+
+    lake_bucket = LocalStore(tmp_path / "lake-bucket")
+    a, b = tmp_path / "a" / "ref", tmp_path / "b" / "ref"
+    for root, writer in ((a, "socal"), (b, "montereybay")):
+        (root / "taxon_identity").mkdir(parents=True)
+        (root / "taxon_identity" / f"part-{writer}-1.parquet").write_bytes(writer.encode())
+    assert sync_ref(lake_bucket, a) == {"pulled": 0, "pushed": 1}
+    assert sync_ref(lake_bucket, b) == {"pulled": 1, "pushed": 1}
+    assert sync_ref(lake_bucket, a) == {"pulled": 1, "pushed": 0}
+    assert sorted(p.name for p in a.rglob("*.parquet")) == sorted(
+        p.name for p in b.rglob("*.parquet")
+    )
+
+
+def test_worker_loop_ticks_every_region(tmp_path):
+    from wildlife_radar.pipeline import worker
+
+    seen = []
+
+    def make_contexts():
+        out = []
+        for region in ("socal", "montereybay"):
+            c = _ctx(tmp_path)
+            c.region = load_region(region)
+            out.append(c)
+        return out
+
+    def fake_tick(ctx, store, **_kw):
+        seen.append(ctx.region.id)
+        return {"region": ctx.region.id, "started": "", "ran": [], "failed": [], "seconds": 0}
+
+    original = worker.tick
+    worker.tick = fake_tick
+    try:
+        worker.loop(
+            make_contexts,
+            timedelta(minutes=30),
+            ticks=2,
+            sleep=lambda _s: None,
+            log=lambda _m: None,
+        )
+    finally:
+        worker.tick = original
+    assert seen == ["socal", "montereybay", "socal", "montereybay"]

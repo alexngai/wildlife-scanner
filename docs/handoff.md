@@ -11,7 +11,7 @@ For the next working session. Start here, then read the files it points to.
   - Phase 3: daily condition signals, Level 1–2 models with gates, hypothesis scorecard, recent-sightings forecasts for every OPEN species;
   - the data platform's first steps: a job graph, audit-gated policy-filtered bundles, a live iNaturalist ingest, and an API that serves bundles.
 - **Results so far:** `docs/research/08`, `09`, `10` (real San Diego data). Read 10 first.
-- **Test suite:** `uv run pytest` (≈231 tests, ~90 s); `uv run ruff check .`; `uv run ruff format --check .`.
+- **Test suite:** `uv run pytest` (≈239 tests, ~90 s); `uv run ruff check .`; `uv run ruff format --check .`.
 
 ## 2. Standing decisions and constraints (from the project owner)
 
@@ -53,7 +53,7 @@ uv run wildlife-radar serve --region sandiego --bundle-dir data/lake/publish
 - `--ingest-snapshots` makes the `snapshot` job find the newest complete monthly GBIF snapshot, extract the region with HTTPS range requests and ingest it (~45 min for San Diego; staging goes under `data/lake/raw/` and is deleted afterwards unless `--keep-staging`). Pin a snapshot with `--snapshot-date 2026-11-01`. The step-by-step scripts in `tools/` still work.
 - The job rechecks weekly. When no newer snapshot exists it reports `unchanged` and keeps its version, so nothing downstream reruns. Records deleted upstream stay until a full rebuild.
 
-- `regions/sandiego/` inherits SoCal's curated statuses and dataset registry. The registry carries the kelp-survey date fix, so it must be used.
+- `regions/sandiego/` (like `socal` and `montereybay`) inherits the `california` pack's curated statuses and dataset registry. The registry carries the kelp-survey date fix, so it must be used.
 - The first `run publish` takes ~45 min:
   - crosswalk ~12 min (9.7k names)
   - re-dating ~10 min

@@ -7,8 +7,8 @@ it is younger than its cadence (``max_age``). ``run`` walks the graph to the tar
 only stale jobs; a failed job leaves no complete manifest, so it runs again next time.
 
 Jobs operate on the region's work store (a DuckDB file); serving reads only published bundles,
-so builds never block the API. Global reference jobs (identity, statuses) are per region for
-now and will move to a shared store with the lake (data-platform.md §8).
+so builds never block the API. Identities and raw iNaturalist taxon records are shared by all
+regions through the reference store (``lake/ref``, storage/refstore.py).
 """
 
 from __future__ import annotations
@@ -43,6 +43,12 @@ class JobContext:
         from wildlife_radar.storage import ObservationStore
 
         return ObservationStore(self.db)
+
+    def ref(self):
+        """The global reference store shared by all regions (``lake/ref``)."""
+        from wildlife_radar.storage.refstore import RefStore
+
+        return RefStore(self.lake / "ref", writer=self.region.id)
 
     def registry(self):
         from wildlife_radar.baseline.effort import DatasetRegistry
@@ -176,8 +182,12 @@ def _crosswalk(ctx: JobContext) -> dict:
         save_identities,
     )
 
+    started = utcnow()
+    ref = ctx.ref()
     with ctx.store() as store:
         store.conn.execute(IDENTITY_SCHEMA)
+        # Identities other regions already resolved (shared reference store).
+        imported = ref.import_into(store.conn, "taxon_identity")
         # Species-level names with enough records to get a baseline; only names not yet cached.
         names = [
             n
@@ -196,7 +206,8 @@ def _crosswalk(ctx: JobContext) -> dict:
                 store.conn, resolver.resolve_many(names[start : start + 200], gbif="fallback")
             )
             ctx.log(f"crosswalk: {min(start + 200, len(names))}/{len(names)}")
-    return {"new_names": len(names)}
+        part = ref.export_from(store.conn, "taxon_identity", started)
+    return {"new_names": len(names), "from_ref": imported, "ref_part": part and part.name}
 
 
 def _aliases(ctx: JobContext) -> dict:
@@ -303,7 +314,7 @@ def _backtest(ctx: JobContext) -> dict:
 
 
 def _tiers(ctx: JobContext) -> dict:
-    from wildlife_radar.connectors.inaturalist_taxa import InatTaxonStatusProvider
+    from wildlife_radar.connectors.inaturalist_taxa import InatTaxonStatusProvider, RecordCache
     from wildlife_radar.policy.statuses import (
         CachedStatusProvider,
         RegionStatusFile,
@@ -316,23 +327,34 @@ def _tiers(ctx: JobContext) -> dict:
         providers.append(RegionStatusFile(statuses))
     else:
         ctx.log("warning: no curated statuses file; state-listed populations won't be raised")
+    started = utcnow()
+    ref = ctx.ref()
     with ctx.store() as store:
+        # Raw iNaturalist records other regions fetched are reused; parsing stays per region.
+        imported = ref.import_into(store.conn, "inat_taxon_records")
         providers.append(
             CachedStatusProvider(
                 store.conn,
                 InatTaxonStatusProvider(
                     ctx.region.inat_place_scopes,
                     innermost_place=ctx.region.inat_innermost_place,
+                    records=RecordCache(store.conn),
                 ),
             )
         )
         decisions = build_tier_table(
             store.conn, region_id=ctx.region.id, scopes=ctx.region.scopes, providers=providers
         )
+        part = ref.export_from(store.conn, "inat_taxon_records", started)
     counts: dict[str, int] = {}
     for d in decisions.values():
         counts[d.tier.name] = counts.get(d.tier.name, 0) + 1
-    return {"tiers": counts, "curated_statuses": str(statuses) if statuses else None}
+    return {
+        "tiers": counts,
+        "curated_statuses": str(statuses) if statuses else None,
+        "records_from_ref": imported,
+        "ref_part": part and part.name,
+    }
 
 
 def _conditions(ctx: JobContext) -> dict:

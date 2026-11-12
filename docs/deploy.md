@@ -18,9 +18,9 @@ a mocked S3 API. Design background: [`design/data-platform.md`](design/data-plat
 
 | Part | Command | Where |
 |---|---|---|
-| Worker | `wildlife-radar worker --region R --db /data/R.duckdb --lake /data/lake --ingest-snapshots --every 30` | fly.io app with a volume (`deploy/fly.worker.toml`) |
+| Worker | `wildlife-radar worker --region R1,R2 --db '/data/{region}.duckdb' --lake /data/lake --ingest-snapshots --every 30` | fly.io app with a volume (`deploy/fly.worker.toml`) |
 | Publish bucket | `region=<id>/version=<v>/{serving.duckdb, manifest.json}` and `region=<id>/CURRENT` | Cloudflare R2 |
-| API | `wildlife-radar serve --region R --cache-dir /tmp/bundles` with `WILDLIFE_RADAR_PUBLISH_URL` set | fly.io app, auto-stop (`deploy/fly.api.toml`) |
+| API | `wildlife-radar serve --region R1,R2 --cache-dir /tmp/bundles` with `WILDLIFE_RADAR_PUBLISH_URL` set | fly.io app, auto-stop (`deploy/fly.api.toml`) |
 | Static products | `version=<v>/static/{index,taxa}.json`, `static/maps/…`, `static/places/…` | same bucket, served by R2's public domain / CDN |
 
 - **The worker** ticks every 30 minutes. Each tick runs only stale jobs (`Job.max_age`):
@@ -60,6 +60,24 @@ search index. Only files whose inputs changed (a new baseline, a tier change) ar
 and uploaded. The bucket needs public read access (an R2 custom domain or `r2.dev`) for these
 paths. Everything published is already policy-filtered. `--no-static` skips them.
 
+## Several regions
+
+- **One worker, several regions:** each tick runs the regions in turn. They share the volume and
+  the **reference store** (`lake/ref`: name identities and raw iNaturalist taxon records), so a
+  new region reuses what the others already resolved. Status lookups are still parsed and
+  cached per region, because which statuses apply depends on the region's places.
+- **Workers on several machines:** set `WILDLIFE_RADAR_LAKE_URL` (or `--lake-url`) to a
+  **private** bucket. Each tick then copies new reference parts both ways. The parts are
+  immutable and uniquely named, so workers never conflict.
+- **One API, several regions:** `serve --region a,b` opens each region's bundle on first use.
+  - Point and place requests go to the smallest region that contains the point, or to the
+    place's own region.
+  - Taxon requests (`/taxa`, `/species/{id}/map`) take `region=`, which is required when more
+    than one region is served.
+  - `/regions` lists the regions, and `/health` reports each one.
+  - A region with nothing published yet answers 503.
+  - Two served regions may not share a place id.
+
 ## Configuration
 
 | Variable | Used by | Value |
@@ -70,6 +88,7 @@ paths. Everything published is already policy-filtered. `--no-static` skips them
 | `AWS_REGION` | worker, API | `auto` (R2) |
 | `WILDLIFE_RADAR_CORS_ORIGINS` | API | the frontend's origin(s), comma-separated; none by default |
 | `WILDLIFE_RADAR_SOURCE_URL` | API | link to the running source (AGPL §13) |
+| `WILDLIFE_RADAR_LAKE_URL` | worker | private bucket for the shared reference store (only with several worker machines) |
 | `WILDLIFE_RADAR_USER_AGENT` | worker | operator contact for outside APIs (optional; never the owner's personal details in the repo) |
 
 Credentials only ever go in fly secrets (`fly secrets set …`), never in `fly.toml` or the
@@ -134,9 +153,8 @@ command as `app`.
   gzipped). Common San Diego species cover many more cells. Measure and, if needed, split maps
   by month or quantize probabilities. PMTiles was skipped: H3 cells render directly in the
   browser.
-- **One API for several regions:** `serve` serves one region today. A second region means a
-  second process or app until the API routes requests by coordinates (data-platform.md §5).
-- **Raw, norm, ref and derived layers stay on the worker's volume.** Only `publish` is in R2. If the
+- **Raw, norm and derived layers stay on the worker's volume.** Only `publish` (and `ref`, with
+  a lake bucket) is in R2. If the
   volume is lost, the worker rebuilds from scratch (~1.5 h per region), and the API keeps
   serving the last version meanwhile.
 - **Every tick republishes the whole bundle**, even when only the live aggregates changed.

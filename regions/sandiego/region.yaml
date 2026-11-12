@@ -1,8 +1,8 @@
 # San Diego County: a sub-region of socal for quick real-data runs (docs/research/08–10).
-# Curated statuses and the dataset registry come from the socal pack (`inherits`).
+# Curated statuses and the dataset registry come from the california pack (`inherits`).
 id: sandiego
 name: San Diego County
-inherits: socal
+inherits: california
 bbox: [-117.62, 32.53, -116.08, 33.51]
 scopes: [global, us, us-ca, california, ca-southern-central-coast, socal]
 inat_place_scopes: {"1": us, "14": us-ca}

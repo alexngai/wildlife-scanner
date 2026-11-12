@@ -16,6 +16,8 @@ from wildlife_radar.regions import load_region
 
 PUBLISH_URL_ENV = "WILDLIFE_RADAR_PUBLISH_URL"
 """Object storage for published versions, e.g. ``s3://wildlife-radar-publish``."""
+LAKE_URL_ENV = "WILDLIFE_RADAR_LAKE_URL"
+"""Private object storage for shared lake layers (``ref``), e.g. ``s3://wildlife-radar-lake``."""
 
 DEFAULT_DB = "data/wildlife-radar.duckdb"
 
@@ -202,14 +204,21 @@ def cmd_build_tiers(args: argparse.Namespace) -> int:
     with ObservationStore(args.db) as store:
         providers = [RegionStatusFile(statuses)] if statuses else []
         if not args.offline:
-            from wildlife_radar.connectors.inaturalist_taxa import InatTaxonStatusProvider
+            from wildlife_radar.connectors.inaturalist_taxa import (
+                InatTaxonStatusProvider,
+                RecordCache,
+            )
 
+            # A refresh bypasses both the parsed lookups and the raw records.
+            max_age = timedelta(0) if args.refresh_statuses else timedelta(days=90)
             providers.append(
                 CachedStatusProvider(
                     store.conn,
-                    max_age=timedelta(0) if args.refresh_statuses else timedelta(days=90),
+                    max_age=max_age,
                     inner=InatTaxonStatusProvider(
-                        region.inat_place_scopes, innermost_place=region.inat_innermost_place
+                        region.inat_place_scopes,
+                        innermost_place=region.inat_innermost_place,
+                        records=RecordCache(store.conn, max_age=max_age),
                     ),
                 )
             )
@@ -353,6 +362,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     from wildlife_radar.api import create_app
 
+    regions = [load_region(r.strip()).id for r in args.region.split(",") if r.strip()]
     bundle_dir = args.bundle_dir
     url = args.bundle_url
     if not url and not bundle_dir and not args.db_only:
@@ -367,23 +377,24 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
         store = open_store(url)
         bundle_dir = args.cache_dir
-        region_id = load_region(args.region).id
-        pull_current(store, region_id, Path(bundle_dir))
+        for region_id in regions:
+            pull_current(store, region_id, Path(bundle_dir))
 
         def refresh() -> None:
             while True:
                 time.sleep(args.refresh_seconds)
-                try:
-                    if version := pull_current(store, region_id, Path(bundle_dir)):
-                        print(f"bundle {version} ready", file=sys.stderr)
-                except Exception as exc:  # keep serving the current bundle
-                    print(f"bundle refresh failed: {exc}", file=sys.stderr)
+                for region_id in regions:
+                    try:
+                        if version := pull_current(store, region_id, Path(bundle_dir)):
+                            print(f"{region_id}: bundle {version} ready", file=sys.stderr)
+                    except Exception as exc:  # keep serving the current bundle
+                        print(f"{region_id}: bundle refresh failed: {exc}", file=sys.stderr)
 
         threading.Thread(target=refresh, daemon=True).start()
     app = (
-        create_app(bundle_dir=bundle_dir, region_id=args.region)
+        create_app(bundle_dir=bundle_dir, region_id=regions)
         if bundle_dir
-        else create_app(args.db, region_id=args.region)
+        else create_app(args.db, region_id=regions[0])
     )
     uvicorn.run(app, host=args.host, port=args.port)
     return 0
@@ -415,21 +426,30 @@ def cmd_worker(args: argparse.Namespace) -> int:
 
     url = args.publish_url or os.environ.get(PUBLISH_URL_ENV)
     store = open_store(url) if url else None
+    lake_url = args.lake_url or os.environ.get(LAKE_URL_ENV)
+    lake_store = open_store(lake_url) if lake_url else None
     params = _run_params(args)
+    regions = [r.strip() for r in args.region.split(",") if r.strip()]
+    if len(regions) > 1 and "{region}" not in args.db:
+        raise SystemExit("with several regions, --db needs a {region} placeholder")
 
-    def make_context():
-        ctx = context(args.region, args.db, args.lake, dict(params))
-        ctx.log = lambda msg: print(msg, file=sys.stderr, flush=True)
-        return ctx
+    def make_contexts():
+        out = []
+        for region in regions:
+            ctx = context(region, args.db.format(region=region), args.lake, dict(params))
+            ctx.log = lambda msg, r=region: print(f"[{r}] {msg}", file=sys.stderr, flush=True)
+            out.append(ctx)
+        return out
 
     if args.once:
-        out = worker.tick(make_context(), store)
-        print(json.dumps(out, indent=2, default=str))
-        return 1 if out["failed"] or "push_error" in out else 0
+        outs = [worker.tick(c, store, lake_store=lake_store) for c in make_contexts()]
+        print(json.dumps(outs, indent=2, default=str))
+        return 1 if any(o["failed"] or "push_error" in o for o in outs) else 0
     worker.loop(
-        make_context,
+        make_contexts,
         timedelta(minutes=args.every),
         store,
+        lake_store=lake_store,
         log=lambda m: print(m, flush=True),
     )
     return 0
@@ -700,6 +720,10 @@ def register(sub: argparse._SubParsersAction) -> None:
 
     p = sub.add_parser("worker", help="run the job graph on a schedule and push new versions")
     common(p)
+    p.add_argument(
+        "--lake-url",
+        help=f"private object storage to share the reference store through (${LAKE_URL_ENV})",
+    )
     p.add_argument("--lake", default="data/lake", help="lake root (manifests, publish)")
     p.add_argument("--every", type=int, default=30, help="minutes between ticks")
     p.add_argument("--once", action="store_true", help="run a single tick and exit")
