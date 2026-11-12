@@ -88,8 +88,8 @@ class ForecastService:
         self._models: dict[tuple[str, str], tuple[int, OffsetLogit]] = {}
         tables = {r[0] for r in self.conn.execute("SHOW TABLES").fetchall()}
         if {"conditions_gates", "conditions_models"} <= tables:
-            # Highest level whose gate passed, per taxon and effort group. Level 2 builds on
-            # Level 1, so it is used only if Level 1 passed too.
+            # Highest level whose gate passed, per taxon and effort group. A Level-2 model
+            # already includes Level 1's terms when (and only when) Level 1 passed.
             passed = {
                 (t, g, lv)
                 for t, g, lv in self.conn.execute(
@@ -103,7 +103,7 @@ class ForecastService:
                 "WHERE region_id = ?",
                 [queries.region.id],
             ).fetchall():
-                ok = (t, g, lv) in passed and (lv == 1 or (t, g, 1) in passed)
+                ok = (t, g, lv) in passed
                 if ok and lv > self._models.get((t, g), (0, None))[0]:
                     self._models[(t, g)] = (lv, _model(raw))
 
