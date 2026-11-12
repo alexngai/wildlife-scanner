@@ -159,10 +159,15 @@ def _repairs(ctx: JobContext) -> dict:
     """Re-date records a dataset stamped with a placeholder date, from their event ids.
 
     Event ids come from the GBIF API (snapshots don't carry them), event by event, in chunks
-    that are checkpointed in ``repair_events``: an interrupted run resumes where it stopped.
-    Requests share one rate limiter (default 4/s over 4 threads; GBIF rate-limits 8 threads).
+    checkpointed in ``repair_events``. Work is **budgeted**: a run stops after
+    ``repair_budget_s`` (default 30 min) or when GBIF rate-limits it, and completes with what
+    it has; records not yet re-dated stay excluded. The job reruns daily and continues where
+    it stopped; a run that makes no progress reports ``unchanged``, so nothing downstream
+    rebuilds. Requests share one rate limiter (default 4/s over 4 threads).
     """
-    from wildlife_radar.connectors.base import RateLimiter, make_client
+    import time
+
+    from wildlife_radar.connectors.base import ConnectorError, RateLimiter, make_client
     from wildlife_radar.connectors.gbif_events import event_ids, fetch_events
     from wildlife_radar.storage.repair import (
         missing_event_ids,
@@ -170,10 +175,11 @@ def _repairs(ctx: JobContext) -> dict:
         set_event_ids,
     )
 
-    # GBIF answers HTTP 429 to ~8 parallel paging threads: 4 threads sharing one limiter.
     workers = int(ctx.params.get("repair_workers") or 4)
     limiter = RateLimiter(float(ctx.params.get("repair_interval_s") or 0.25))
-    out: dict = {}
+    deadline = time.monotonic() + float(ctx.params.get("repair_budget_s") or 1800)
+    out: dict = {"redated": {}, "remaining_events": 0, "events_done": 0}
+    stopped: str | None = None
     with ctx.store() as store:
         conn = store.conn
         conn.execute(
@@ -195,29 +201,44 @@ def _repairs(ctx: JobContext) -> dict:
                         [key, d],
                     ).fetchall()
                 }
-                events = [
-                    e
-                    for e in event_ids(client, key, d.isoformat(), ctx.region.bbox, limiter)
-                    if e[0] not in done
-                ]
+                try:
+                    listed = event_ids(client, key, d.isoformat(), ctx.region.bbox, limiter)
+                except ConnectorError as exc:
+                    stopped = str(exc)
+                    break
+                events = [e for e in listed if e[0] not in done]
                 for i in range(0, len(events), REPAIR_CHUNK):
+                    if stopped or time.monotonic() > deadline:
+                        stopped = stopped or "time budget used"
+                        out["remaining_events"] += len(events) - i
+                        break
                     chunk = events[i : i + REPAIR_CHUNK]
-                    pairs = fetch_events(
-                        key, chunk, client=client, limiter=limiter, workers=workers
-                    )
+                    try:
+                        pairs = fetch_events(
+                            key, chunk, client=client, limiter=limiter, workers=workers
+                        )
+                    except ConnectorError as exc:  # e.g. HTTP 429: continue next run
+                        stopped = str(exc)
+                        out["remaining_events"] += len(events) - i
+                        break
                     set_event_ids(conn, key, pairs)
                     conn.executemany(
                         "INSERT INTO repair_events VALUES (?, ?, ?, now()::TIMESTAMP)",
                         [(key, d, name) for name, _ in chunk],
                     )
+                    out["events_done"] += len(chunk)
                     ctx.log(
                         f"repairs {key[:8]} {d}: {min(i + REPAIR_CHUNK, len(events))}/"
                         f"{len(events)} events"
                     )
-            out[key] = redate_from_event_ids(
+            out["redated"][key] = redate_from_event_ids(
                 conn, key, entry.event_id_date, entry.placeholder_dates
             )
-    return {"redated": out}
+    if stopped:
+        out["stopped"] = stopped
+    if not out["events_done"] and not any(out["redated"].values()):
+        out["unchanged"] = True
+    return out
 
 
 def _crosswalk(ctx: JobContext) -> dict:
@@ -650,7 +671,13 @@ JOBS: dict[str, Job] = {
     j.name: j
     for j in (
         Job("snapshot", (), _snapshot, timedelta(days=7), "GBIF snapshot ingest (monthly)"),
-        Job("repairs", ("snapshot",), _repairs, None, "re-date placeholder-dated records"),
+        Job(
+            "repairs",
+            ("snapshot",),
+            _repairs,
+            timedelta(days=1),
+            "re-date placeholder-dated records (budgeted, resumes daily)",
+        ),
         Job("crosswalk", ("snapshot",), _crosswalk, timedelta(days=30), "identities, new names"),
         Job("aliases", ("crosswalk", "repairs"), _aliases, None, "merge renamed species"),
         Job("signals", (), _signals, timedelta(hours=20), "daily station signals (NOAA)"),
