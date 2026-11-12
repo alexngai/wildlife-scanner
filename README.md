@@ -109,6 +109,30 @@ Data goes in `data/`, which git ignores:
 
    LLM extraction from Wikipedia (`--extract`) needs the `llm` extra (`uv sync --extra llm`), an Anthropic API key, an extraction model (`--model` or `WILDLIFE_RADAR_EXTRACTION_MODEL`), and a User-Agent with your contact details (Wikimedia policy). See [`profiles/README.md`](profiles/README.md) for review and promotion.
 
+6. Phase 3, conditions and live signals. Download daily station signals (NOAA CO-OPS water/air temperature, wind, tides), then fit Level 1 (conditions) and Level 2 (recent sightings) for species profiles. Each level must beat the one below in a backtest:
+
+   ```bash
+   uv run wildlife-radar fetch-signals --region socal --start 2010-01-01
+   ```
+
+   ```bash
+   uv run wildlife-radar fit-conditions --region socal --split 2023-01-01 --since-year 2010
+   ```
+
+   ```bash
+   uv run wildlife-radar scorecard --region socal
+   ```
+
+   The scorecard reports, for each condition term, whether it improves held-out predictions (supported, contradicted or inconclusive). `serve` then answers `/species/{id}/forecast?place_id=…&date=…` at the highest level that passed its gate, with each term's contribution.
+
+7. Before publishing, check the tiers against every status signal in the store. The command exits non-zero on high-severity findings:
+
+   ```bash
+   uv run wildlife-radar audit-tiers --region socal
+   ```
+
+Data repairs: `repair-dates` re-dates records a dataset stamped with a placeholder date, using the date in their event ids (see `regions/socal/datasets.yaml`).
+
 Other commands work without a database:
 
 ```bash
