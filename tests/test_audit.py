@@ -59,3 +59,50 @@ def test_audit_flags_under_protected_taxa():
     assert by_check[("curated_status_absent", "absentus-species")] == "info"
     assert findings[0].severity == "high"
     assert summarize(findings)["counts"]["high"] == 3
+
+
+def test_curated_status_reaches_a_renamed_taxon_through_its_resolved_name(tmp_path):
+    """A curated status keyed by an older name (Euphydryas → Occidryas) applies once that name
+    is resolved; a resolved name with no synonym in the region is merely absent."""
+    from wildlife_radar.policy.statuses import RegionStatusFile
+
+    store = store_with_tiers()
+    conn = store.conn
+    conn.execute(
+        "CREATE TABLE taxon_identity (query_name VARCHAR PRIMARY KEY, taxon_id VARCHAR, "
+        "record JSON, fetched_at TIMESTAMP)"
+    )
+    resolved = {
+        # The curated name, resolved, lists the region's name as a synonym.
+        "Oldgenus litoralis": {
+            "taxon_id": "oldgenus-litoralis",
+            "accepted_name": "Oldgenus litoralis",
+            "synonyms": ["Vernalis litoralis"],
+        },
+        # A curated taxon that lives elsewhere: resolved, but nothing of it here.
+        "Faraway species": {"taxon_id": "faraway-species", "synonyms": []},
+    }
+    for name, rec in resolved.items():
+        conn.execute(
+            "INSERT INTO taxon_identity VALUES (?, ?, ?, NULL)",
+            [name, rec["taxon_id"], json.dumps(rec)],
+        )
+    path = tmp_path / "statuses.yaml"
+    path.write_text(
+        "statuses:\n  - {taxon_id: oldgenus-litoralis, authority: ESA, code: E, scope: global}\n",
+        encoding="utf-8",
+    )
+    curated = RegionStatusFile(path)
+    decisions = build_tier_table(
+        conn,
+        region_id="socal",
+        scopes=["global"],
+        providers=[StaticStatusProvider(), curated],
+    )
+    assert decisions["vernalis-litoralis"].tier.name == "COARSE"  # the status reached it
+    findings = audit_tiers(
+        conn, "socal", curated_taxon_ids=["oldgenus-litoralis", "faraway-species"]
+    )
+    by_check = {(f.check, f.taxon_id): f.severity for f in findings}
+    assert ("curated_status_unmatched", "oldgenus-litoralis") not in by_check
+    assert by_check[("curated_status_absent", "faraway-species")] == "info"

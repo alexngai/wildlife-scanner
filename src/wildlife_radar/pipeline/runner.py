@@ -266,6 +266,16 @@ def _crosswalk(ctx: JobContext) -> dict:
             ).fetchall()
             if n
         ]
+        # Curated statuses' own names too, so a status keyed by an older name reaches the
+        # region's taxon through its synonyms (policy/statuses.py: concept_aliases).
+        statuses = ctx.statuses_path()
+        if statuses:
+            doc = yaml.safe_load(statuses.read_text(encoding="utf-8")) or {}
+            cached = {q for (q,) in store.conn.execute("SELECT query_name FROM taxon_identity")}
+            for e in doc.get("statuses", []):
+                name = e["taxon_id"].replace("-", " ").capitalize()
+                if name not in cached and name not in names:
+                    names.append(name)
         resolver = IdentityResolver()
         for start in range(0, len(names), 200):
             save_identities(
