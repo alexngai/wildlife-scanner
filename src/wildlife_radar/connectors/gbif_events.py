@@ -68,22 +68,16 @@ def event_ids(
         offset += 1000
 
 
-def fetch_event_ids(
+def fetch_events(
     dataset_key: str,
-    event_date: str,
-    bbox: BBox,
+    events: list[tuple[str, int]],
     *,
     client: httpx.Client | None = None,
     limiter: RateLimiter | None = None,
     workers: int = 4,
-) -> Iterator[tuple[str, str]]:
-    """Yield ``(gbifID, eventID)`` for records of ``dataset_key`` dated ``event_date``.
-
-    Deep offsets in the occurrence search are slow (tens of seconds per page), so records are
-    fetched per event: list the events (a facet), then page each event's few hundred records.
-    """
+) -> list[tuple[str, str]]:
+    """``(gbifID, eventID)`` for every record of the given ``(eventID, records)`` events."""
     client = client or make_client(timeout=60)
-    events = event_ids(client, dataset_key, event_date, bbox, limiter)
     pages = [(name, offset) for name, n in events for offset in range(0, n, PAGE)]
 
     def page(job: tuple[str, int]) -> list[tuple[str, str]]:
@@ -100,5 +94,23 @@ def fetch_event_ids(
         ]
 
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        for rows in pool.map(page, pages):
-            yield from rows
+        return [row for rows in pool.map(page, pages) for row in rows]
+
+
+def fetch_event_ids(
+    dataset_key: str,
+    event_date: str,
+    bbox: BBox,
+    *,
+    client: httpx.Client | None = None,
+    limiter: RateLimiter | None = None,
+    workers: int = 4,
+) -> Iterator[tuple[str, str]]:
+    """Yield ``(gbifID, eventID)`` for records of ``dataset_key`` dated ``event_date``.
+
+    Deep offsets in the occurrence search are slow (tens of seconds per page), so records are
+    fetched per event: list the events (a facet), then page each event's few hundred records.
+    """
+    client = client or make_client(timeout=60)
+    events = event_ids(client, dataset_key, event_date, bbox, limiter)
+    yield from fetch_events(dataset_key, events, client=client, limiter=limiter, workers=workers)
