@@ -34,8 +34,8 @@ def _concept(record: dict) -> str | None:
     ids = record.get("ids") or {}
     if ids.get("inaturalist") and (record.get("verified") or {}).get("inaturalist"):
         return f"inaturalist:{ids['inaturalist']}"
-    if ids.get("gbif"):
-        return f"gbif:{ids['gbif']}"
+    if ids.get("col"):
+        return f"col:{ids['col']}"
     return None
 
 

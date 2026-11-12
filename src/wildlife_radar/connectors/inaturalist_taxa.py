@@ -126,6 +126,7 @@ class InatTaxonStatusProvider:
             f"{BASE_URL}/taxa",
             {"q": taxon.scientific_name, "rank": "species", "is_active": "true", "per_page": 10},
             self.limiter,
+            retries=4,
         )
         name = taxon.scientific_name.lower()
         # Exact name, or a synonym iNaturalist files under its current name (matched_term).
@@ -155,7 +156,7 @@ class InatTaxonStatusProvider:
             chunk = ids[i : i + BATCH]
             try:
                 payload = get_json(
-                    self.client, f"{BASE_URL}/taxa/{','.join(chunk)}", {}, self.limiter
+                    self.client, f"{BASE_URL}/taxa/{','.join(chunk)}", {}, self.limiter, retries=4
                 )
             except ConnectorError:
                 for inat_id in chunk:

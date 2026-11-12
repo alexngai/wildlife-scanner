@@ -63,25 +63,29 @@ def prov(source="s", method="import", confidence=0.9, license="CC-BY-4.0"):
 def mock_services(request: httpx.Request) -> httpx.Response:
     url = str(request.url)
     if "species/match" in url:
-        assert request.url.params["name"] == "Felis antiqua"
+        assert request.url.params["scientificName"] == "Felis antiqua"
         return httpx.Response(
             200,
             json={
-                "usageKey": 11,
-                "acceptedUsageKey": 10,
-                "canonicalName": "Felis antiqua",
-                "rank": "SPECIES",
-                "status": "SYNONYM",
-                "matchType": "EXACT",
-                "confidence": 99,
-                "kingdom": "Animalia",
-                "phylum": "Chordata",
-                "class": "Mammalia",
-                "order": "Carnivora",
-                "family": "Felidae",
-                "genus": "Felis",
-                "species": "Felis exemplaris",
-                "speciesKey": 10,
+                "usage": {
+                    "key": "OLD1",
+                    "canonicalName": "Felis antiqua",
+                    "rank": "SPECIES",
+                    "status": "SYNONYM",
+                },
+                "acceptedUsage": {
+                    "key": "C10",
+                    "canonicalName": "Felis exemplaris",
+                    "rank": "SPECIES",
+                },
+                "synonym": True,
+                "classification": [
+                    {"rank": "KINGDOM", "name": "Animalia"},
+                    {"rank": "PHYLUM", "name": "Chordata"},
+                    {"rank": "CLASS", "name": "Mammalia"},
+                    {"rank": "ORDER", "name": "Carnivora"},
+                ],
+                "diagnostics": {"matchType": "EXACT", "confidence": 99},
             },
         )
     if "sparql" in url:
@@ -137,7 +141,8 @@ def test_identity_resolution_with_crosswalk_and_taxon_moves():
     assert ident.taxon_id == "felis-exemplaris"
     assert ident.accepted_name == "Felis exemplaris"
     assert "Felis antiqua" in ident.synonyms  # the queried synonym
-    assert ident.ids["gbif"] == "10" and ident.ids["ncbi"] == "77"
+    assert ident.ids["col"] == "C10" and ident.ids["gbif"] == "10"
+    assert ident.ids["ncbi"] == "77"
     # Wikidata pointed at an inactive iNaturalist concept: follow it to the current one.
     assert ident.ids["inaturalist"] == "501" and ident.verified["inaturalist"]
     assert "Leopardus exemplaris" in ident.synonyms

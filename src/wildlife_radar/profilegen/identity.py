@@ -33,7 +33,11 @@ from wildlife_radar.core.taxa import species_id_from_name, target_group
 from wildlife_radar.core.time import utcnow
 from wildlife_radar.storage.observations import naive_utc
 
-GBIF_MATCH_URL = "https://api.gbif.org/v1/species/match"
+GBIF_MATCH_URL = "https://api.gbif.org/v2/species/match"
+#: Catalogue of Life on GBIF: the taxonomy GBIF snapshots interpret names with, so names are
+#: matched against the same concepts the observation store uses. (The older GBIF backbone
+#: maps some names to different species, e.g. Neltuma odorata → Prosopis pubescens.)
+COL_CHECKLIST = "7ddf754f-d193-4cc9-b351-99906754a03b"
 WIKIDATA_SPARQL_URL = "https://query.wikidata.org/sparql"
 INAT_TAXA_URL = "https://api.inaturalist.org/v1/taxa"
 
@@ -189,34 +193,44 @@ class IdentityResolver:
 
     # -- GBIF -----------------------------------------------------------------------------
     def gbif_match(self, name: str) -> TaxonIdentity:
+        """Match a name against the Catalogue of Life (GBIF species match API v2)."""
         ident = TaxonIdentity(query_name=name)
         try:
-            m = get_json(self.client, GBIF_MATCH_URL, {"name": name, "strict": "true"}, None)
+            m = get_json(
+                self.client,
+                GBIF_MATCH_URL,
+                {"scientificName": name, "checklistKey": COL_CHECKLIST},
+                None,
+                retries=3,
+            )
         except ConnectorError as exc:
-            ident.notes.append(f"GBIF match failed: {exc}")
+            ident.notes.append(f"name match failed: {exc}")
             return ident
-        match_type = m.get("matchType", "NONE")
-        ident.gbif_match = f"{match_type}/{m.get('confidence', 0)}"
-        if match_type in ("NONE", "HIGHERRANK") or not m.get("rank"):
-            ident.notes.append(f"no species-level GBIF match ({match_type})")
+        diag = m.get("diagnostics") or {}
+        match_type = diag.get("matchType", "NONE")
+        ident.gbif_match = f"{match_type}/{diag.get('confidence', 0)}"
+        usage = m.get("usage") or {}
+        if match_type in ("NONE", "HIGHERRANK") or not usage.get("rank"):
+            ident.notes.append(f"no species-level match in the Catalogue of Life ({match_type})")
             return ident
-        status = (m.get("status") or "").upper()
+        status = (usage.get("status") or "").upper()
         synonym = bool(m.get("synonym")) or "SYNONYM" in status or status == "MISAPPLIED"
         if status == "DOUBTFUL":
-            ident.notes.append("GBIF marks this name as doubtful")
-        accepted = m.get("species") if synonym else m.get("canonicalName")
-        if synonym and m.get("canonicalName"):
-            ident.synonyms.append(m["canonicalName"])
-            ident.synonym_sources[m["canonicalName"]] = "gbif"
-        ident.accepted_name = accepted or m.get("canonicalName")
-        ident.rank = (m.get("rank") or "").lower() or None
-        for field in ("kingdom", "phylum", "order", "family", "genus"):
-            setattr(ident, field, m.get(field))
-        ident.class_ = m.get("class")
-        key = m.get("acceptedUsageKey") if synonym else m.get("usageKey")
-        key = m.get("speciesKey") or key
-        if key:
-            ident.ids["gbif"] = str(key)
+            ident.notes.append("the Catalogue of Life marks this name as doubtful")
+        accepted = (m.get("acceptedUsage") or {}) if synonym else usage
+        if synonym and usage.get("canonicalName"):
+            ident.synonyms.append(usage["canonicalName"])
+            ident.synonym_sources[usage["canonicalName"]] = "gbif"
+        ident.accepted_name = accepted.get("canonicalName") or usage.get("canonicalName")
+        ident.rank = (accepted.get("rank") or usage.get("rank") or "").lower() or None
+        ranks = {
+            (c.get("rank") or "").lower(): c.get("name") for c in m.get("classification") or []
+        }
+        ident.kingdom, ident.phylum = ranks.get("kingdom"), ranks.get("phylum")
+        ident.class_, ident.order = ranks.get("class"), ranks.get("order")
+        ident.family, ident.genus = ranks.get("family"), ranks.get("genus")
+        if accepted.get("key"):
+            ident.ids["col"] = str(accepted["key"])
         ident.taxon_id = species_id_from_name(ident.accepted_name, ident.rank)
         if ident.taxon_id is None:
             ident.notes.append(f"rank {ident.rank!r} is above species")
@@ -239,10 +253,10 @@ class IdentityResolver:
 
     @staticmethod
     def crosswalk_query(values: Sequence[str], by: str) -> str:
-        """SPARQL for items whose taxon name (``by="name"``) or GBIF key (``by="gbif"``) is in
-        ``values``. Multi-valued properties come back as ``|``-joined lists."""
+        """SPARQL for items whose taxon name (``by="name"``) or Catalogue of Life id
+        (``by="col"``) is in ``values``. Multi-valued properties come back as ``|``-joined lists."""
         literals = " ".join(json.dumps(v) for v in values)
-        key_prop = "wdt:P225" if by == "name" else "wdt:P846"
+        key_prop = "wdt:P225" if by == "name" else "wdt:P10585"
         selects = " ".join(
             f'(GROUP_CONCAT(DISTINCT ?{k}; separator="|") AS ?{k}s)' for k in WIKIDATA_PROPERTIES
         )
@@ -293,8 +307,8 @@ GROUP BY ?key ?item ?name
             values = [v for v in (row.get(f"{scheme}s") or "").split("|") if v]
             if not values:
                 continue
-            if scheme == "gbif" and "gbif" in ident.ids and ident.ids["gbif"] not in values:
-                ident.notes.append(f"Wikidata GBIF ids {values} differ from match {ident.ids}")
+            if scheme == "col" and "col" in ident.ids and ident.ids["col"] not in values:
+                ident.notes.append(f"Wikidata COL ids {values} differ from match {ident.ids}")
                 continue
             if len(values) > 1:
                 ident.notes.append(f"several {scheme} ids on Wikidata: {values}")
@@ -323,7 +337,9 @@ GROUP BY ?key ?item ?name
         found: dict[str, dict] = {}
         for start in range(0, len(ids), 30):
             chunk = ids[start : start + 30]
-            payload = get_json(self.client, f"{INAT_TAXA_URL}/{','.join(chunk)}", {}, self.limiter)
+            payload = get_json(
+                self.client, f"{INAT_TAXA_URL}/{','.join(chunk)}", {}, self.limiter, retries=4
+            )
             found.update({str(r.get("id")): r for r in payload.get("results") or []})
         return found
 
@@ -448,17 +464,17 @@ GROUP BY ?key ?item ?name
             by_name = self.wikidata_rows(sorted({i.accepted_name for i in todo}), "name")
             for ident in todo:
                 self.apply_wikidata(ident, by_name.get(ident.accepted_name, []))
-            missing = [i for i in resolved if i.wikidata is None and "gbif" in i.ids]
+            missing = [i for i in resolved if i.wikidata is None and "col" in i.ids]
             if missing:
-                by_key = self.wikidata_rows([i.ids["gbif"] for i in missing], "gbif")
+                by_key = self.wikidata_rows([i.ids["col"] for i in missing], "col")
                 for ident in missing:
-                    self.apply_wikidata(ident, by_key.get(ident.ids["gbif"], []))
+                    self.apply_wikidata(ident, by_key.get(ident.ids["col"], []))
         except ConnectorError as exc:
             for ident in resolved:
                 ident.notes.append(f"Wikidata crosswalk failed: {exc}")
         for ident in resolved:
-            if "gbif" in ident.ids:
-                ident.verified.setdefault("gbif", True)
+            if "col" in ident.ids:
+                ident.verified.setdefault("col", True)
         if self.verify_inat:
             self.search_inat(resolved)
             self.verify_inat_ids(resolved)

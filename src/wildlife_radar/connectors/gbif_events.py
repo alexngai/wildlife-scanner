@@ -11,13 +11,12 @@ offsets shallow: the search API is slow at deep offsets and stops at 100,000.
 
 from __future__ import annotations
 
-import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 
-from wildlife_radar.connectors.base import ConnectorError, RateLimiter, get_json, make_client
+from wildlife_radar.connectors.base import RateLimiter, get_json, make_client
 
 SEARCH_URL = "https://api.gbif.org/v1/occurrence/search"
 PAGE = 300
@@ -35,16 +34,9 @@ def _params(dataset_key: str, event_date: str, bbox: BBox) -> dict:
     }
 
 
-def _get(client: httpx.Client, params: dict, limiter: RateLimiter | None, attempts: int = 6):
-    """GET with retries: long paging runs meet transient resets and rate limits."""
-    for attempt in range(attempts):
-        try:
-            return get_json(client, SEARCH_URL, params, limiter)
-        except ConnectorError:
-            if attempt == attempts - 1:
-                raise
-            time.sleep(min(60, 2 ** (attempt + 1)))
-    raise AssertionError("unreachable")
+def _get(client: httpx.Client, params: dict, limiter: RateLimiter | None) -> dict:
+    """Long paging runs meet transient resets and rate limits: retry with backoff."""
+    return get_json(client, SEARCH_URL, params, limiter, retries=5)
 
 
 def event_ids(
