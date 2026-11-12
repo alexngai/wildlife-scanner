@@ -11,7 +11,7 @@ For the next working session. Start here, then read the files it points to.
   - Phase 3: daily condition signals, Level 1–2 models with gates, hypothesis scorecard, recent-sightings forecasts for every OPEN species;
   - the data platform's first steps: a job graph, audit-gated policy-filtered bundles, a live iNaturalist ingest, and an API that serves bundles.
 - **Results so far:** `docs/research/08`, `09`, `10` (real San Diego data). Read 10 first.
-- **Test suite:** `uv run pytest` (≈214 tests, ~80 s); `uv run ruff check .`; `uv run ruff format --check .`.
+- **Test suite:** `uv run pytest` (≈218 tests, ~80 s); `uv run ruff check .`; `uv run ruff format --check .`.
 
 ## 2. Standing decisions and constraints (from the project owner)
 
@@ -46,12 +46,12 @@ For the next working session. Start here, then read the files it points to.
 Data doesn't survive between sessions. To rebuild it (about 1.5 h, mostly downloads):
 
 ```bash
-uv run python tools/list_parts.py 2026-11-01 data/parts.json
-uv run python tools/extract_region.py data/parts.json data/staging/ data/work/ -117.62 32.53 -116.08 33.51 10
-uv run python tools/ingest_parallel.py data/sd.duckdb data/staging/ -117.62 32.53 -116.08 33.51 4
-uv run wildlife-radar run publish --region sandiego --db data/sd.duckdb --lake data/lake
+uv run wildlife-radar run publish --region sandiego --db data/sd.duckdb --lake data/lake --ingest-snapshots
 uv run wildlife-radar serve --region sandiego --bundle-dir data/lake/publish
 ```
+
+- `--ingest-snapshots` makes the `snapshot` job find the newest complete monthly GBIF snapshot, extract the region with HTTPS range requests and ingest it (~45 min for San Diego; staging goes under `data/lake/raw/` and is deleted afterwards unless `--keep-staging`). Pin a snapshot with `--snapshot-date 2026-11-01`. The step-by-step scripts in `tools/` still work.
+- The job rechecks weekly. When no newer snapshot exists it reports `unchanged` and keeps its version, so nothing downstream reruns. Records deleted upstream stay until a full rebuild.
 
 - `regions/sandiego/` inherits SoCal's curated statuses and dataset registry. The registry carries the kelp-survey date fix, so it must be used.
 - The first `run publish` takes ~45 min:
@@ -67,13 +67,18 @@ uv run wildlife-radar serve --region sandiego --bundle-dir data/lake/publish
 
 ## 5. Open threads (suggested order)
 
+**Owner's order (2026-11-12):** Deployment code locally first (accounts exist on fly.io and
+Cloudflare; hook them up later), with the housekeeping quick fixes; then a second region; then
+4, 5, 6. LLM extraction (3) is deferred. Policy questions (7) are with the owner.
+
 1. **Deployment** (`docs/design/data-platform.md` §5, §8 steps 3–5):
    - lake on Cloudflare R2 (raw/norm/ref/derived/publish);
    - the API container on fly.io, auto-stopping, loading `publish/<region>/CURRENT`;
    - schedule `run publish` every 30 min (live), signals daily, full rebuild monthly;
    - static products for the TypeScript app: PMTiles maps, place lists, calendars, a name-search index.
 
-   Ask the owner about accounts and credentials before creating anything external.
+   The owner has fly.io and Cloudflare accounts. Build and test locally (storage paths,
+   deploy config, static products); don't create services or ask for keys until they say so.
 2. **A second region** to prove multi-region (e.g. Northern California or the Pacific Northwest region pack). Then move identities and the status cache to a **global reference store** shared by regions; they are per store today.
 3. **LLM extraction live run + calibration** (`profilegen generate --extract`, `profilegen calibrate`). Blocked on the User-Agent contact and API key (§3). Score per-field accuracy against TetrapodTraits before trusting any extracted field.
 4. **Profile revisions from the scorecard** (`docs/research/10` §1):
@@ -88,8 +93,8 @@ uv run wildlife-radar serve --region sandiego --bundle-dir data/lake/publish
    - Review the medium audit findings ("threatened elsewhere").
 8. **Housekeeping:**
    - Report the kelp-forest dataset's placeholder dates to its publisher (GBIF dataset `154d6192…`, ~21 M records dated 2023-11-30).
-   - Cache `SignalLookup` in the forecast service; it reloads signals per request.
-   - The `snapshot` job only registers an existing ingest; automate monthly ingests.
+   - ~~Cache `SignalLookup` in the forecast service~~ (done: once per service and signal set).
+   - ~~Automate monthly ingests~~ (done: `run … --ingest-snapshots`; see §4).
    - 35 names are unresolved and 67 taxa fail their status lookups (fail closed to COARSE; mostly plants and insects).
 
 ## 6. Lessons that cost time (don't relearn them)

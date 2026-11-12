@@ -379,6 +379,10 @@ def cmd_run(args: argparse.Namespace) -> int:
             "statuses": args.statuses,
             "datasets": args.datasets,
             "allow_findings": args.allow_findings,
+            "ingest_snapshots": args.ingest_snapshots,
+            "snapshot_date": args.snapshot_date,
+            "snapshot_workers": args.snapshot_workers,
+            "keep_staging": args.keep_staging,
         }.items()
         if v
     }
@@ -584,6 +588,14 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--statuses", help="curated statuses YAML (default: the region pack's)")
     p.add_argument("--datasets", help="dataset registry YAML (default: the region pack's)")
     p.add_argument("--allow-findings", action="store_true", help="publish despite high findings")
+    p.add_argument(
+        "--ingest-snapshots",
+        action="store_true",
+        help="snapshot job: ingest the newest monthly GBIF snapshot when one is newer (network)",
+    )
+    p.add_argument("--snapshot-date", help="with --ingest-snapshots: this snapshot, not the newest")
+    p.add_argument("--snapshot-workers", type=int, help="download threads (default 10)")
+    p.add_argument("--keep-staging", action="store_true", help="keep staged snapshot rows")
     p.set_defaults(func=cmd_run)
 
     p = sub.add_parser("publish", help="write a policy-filtered serving bundle (audit-gated)")

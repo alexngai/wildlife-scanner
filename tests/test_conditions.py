@@ -240,6 +240,11 @@ def test_forecast_uses_gated_levels_and_explains(world):
     assert hot.level >= 1 and hot.drivers[0].term == "sst_anomaly"
     assert hot.drivers[0].contribution > 0 > cold.drivers[0].contribution
     assert hot.p > hot.p_level0 and cold.p < cold.p_level0
+    # Signals are loaded once per service, not per request.
+    assert len(service._lookups) == 1
+    loaded = next(iter(service._lookups.values()))
+    service.forecast("piscis-calida", *SITE, cool)
+    assert next(iter(service._lookups.values())) is loaded
     # No model passed its gate: Level 0, labeled.
     flat = service.forecast("piscis-indifferens", *SITE, warm)
     assert flat.level == 0 and flat.p == flat.p_level0

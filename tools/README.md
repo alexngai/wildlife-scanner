@@ -1,6 +1,9 @@
 # Operator tools
 
-Standalone scripts for bulk data work. They are not part of the package API.
+Standalone scripts for bulk data work. The range-request extractor now lives in the package
+(`wildlife_radar.connectors.gbif_snapshot_remote`), and the `snapshot` job runs all of it with
+`wildlife-radar run <target> --ingest-snapshots`. These scripts are thin wrappers for running
+the steps one at a time.
 
 ## Extracting a region from a GBIF snapshot without DuckDB's `httpfs`
 
@@ -9,7 +12,6 @@ The normal path is `wildlife-radar ingest-snapshot --snapshot-date …`. It read
 | Script | What it does |
 |---|---|
 | `list_parts.py` | Lists a snapshot's parts (`[key, size]`) from the public S3 bucket over HTTPS, for `extract_region.py`. |
-| `footer.py` | Builds a sparse local Parquet file holding only a remote part's footer, so DuckDB can read its metadata. |
 | `extract_region.py` | For each snapshot part: fetches the footer, then only the lat/lon column chunks, and tests the bounding box. If any rows match, it fetches the remaining needed columns and writes the matching rows to a small local staging Parquet. It is resumable: `.done` markers mark finished parts. |
 | `ingest_parallel.py` | Parses staged rows with the package's own parser across N processes and bulk-loads them into an `ObservationStore`. |
 

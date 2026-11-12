@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -87,11 +88,61 @@ class Job:
 
 
 def _snapshot(ctx: JobContext) -> dict:
+    """Register the store's GBIF snapshot ingest; with ``ingest_snapshots``, first ingest the
+    newest complete monthly snapshot if it is newer than the last one ingested.
+
+    Reports ``unchanged`` when nothing new arrived, so downstream jobs keep their inputs and a
+    weekly check costs one bucket listing, not a rebuild. Records deleted upstream stay in the
+    store until a full rebuild (takedowns are handled then).
+    """
+    prev = latest(ctx.lake, ctx.region.id, "snapshot")
+    prev_out = (prev or {}).get("outputs") or {}
+    prev_ok = bool(prev and prev.get("status") == "complete")
+    ingested = prev_out.get("snapshot_date")
+    out: dict = {}
+    if ctx.params.get("ingest_snapshots"):
+        from wildlife_radar.connectors import gbif_snapshot_remote as remote
+
+        available = ctx.params.get("snapshot_date") or remote.latest_snapshot()
+        if available is None:
+            raise RuntimeError("no complete GBIF snapshot found")
+        if ingested is None or available > ingested:
+            ctx.log(f"ingesting GBIF snapshot {available} (previous: {ingested or 'none'})")
+            work = (
+                ctx.lake / "raw" / "gbif-snapshot" / f"date={available}" / f"region={ctx.region.id}"
+            )
+            staging, scratch = work / "staging", work / "work"
+            parts = remote.list_parts(available)
+            workers = int(ctx.params.get("snapshot_workers") or 10)
+            out["extract"] = remote.extract_region(
+                parts, staging, scratch, ctx.region.bbox, workers, log=ctx.log
+            )
+            out["ingest"] = remote.ingest_staged(
+                ctx.db, staging, ctx.region.bbox, max(1, workers // 2), log=ctx.log
+            )
+            ingested = available
+            if not ctx.params.get("keep_staging"):
+                shutil.rmtree(work, ignore_errors=True)
+        else:
+            out["checked"] = available
     with ctx.store() as store:
-        n = store.conn.execute("SELECT count(*) FROM observations").fetchone()[0]
+        n, last = store.conn.execute(
+            "SELECT count(*), max(ingested_at) FILTER (WHERE source_id = 'gbif') FROM observations"
+        ).fetchone()
     if not n:
-        raise RuntimeError("the store has no observations: run ingest-snapshot first")
-    return {"observations": n, "note": "registered existing ingest"}
+        raise RuntimeError(
+            "the store has no observations: run ingest-snapshot or pass --ingest-snapshots"
+        )
+    # The newest GBIF ingest time identifies the ingest; live iNaturalist records don't move it.
+    last_ingest = last.isoformat() if last else None
+    out.update({"observations": n, "snapshot_date": ingested, "last_ingest": last_ingest})
+    if (
+        prev_ok
+        and last_ingest == prev_out.get("last_ingest")
+        and ingested == prev_out.get("snapshot_date")
+    ):
+        out["unchanged"] = True
+    return out
 
 
 def _repairs(ctx: JobContext) -> dict:
@@ -370,7 +421,7 @@ def _publish(ctx: JobContext) -> dict:
 JOBS: dict[str, Job] = {
     j.name: j
     for j in (
-        Job("snapshot", (), _snapshot, None, "registered observation ingest (ingest-snapshot)"),
+        Job("snapshot", (), _snapshot, timedelta(days=7), "GBIF snapshot ingest (monthly)"),
         Job("repairs", ("snapshot",), _repairs, None, "re-date placeholder-dated records"),
         Job("crosswalk", ("snapshot",), _crosswalk, timedelta(days=30), "identities, new names"),
         Job("aliases", ("crosswalk", "repairs"), _aliases, None, "merge renamed species"),
@@ -422,7 +473,8 @@ def _record(lake: Path, region_id: str, manifest: dict) -> None:
     folder = _manifest_dir(lake, region_id, manifest["job"])
     folder.mkdir(parents=True, exist_ok=True)
     body = json.dumps(manifest, indent=2, default=str)
-    (folder / f"{manifest['version']}.json").write_text(body, encoding="utf-8")
+    run_id = manifest.get("run", manifest["version"])
+    (folder / f"{run_id}.json").write_text(body, encoding="utf-8")
     tmp = folder / ".latest.tmp"
     tmp.write_text(body, encoding="utf-8")
     os.replace(tmp, folder / "latest.json")
@@ -503,6 +555,7 @@ def run(
         manifest = {
             "job": name,
             "region": ctx.region.id,
+            "run": version,
             "version": version,
             "inputs": inputs,
             "created_at": utcnow().isoformat(),
@@ -511,6 +564,15 @@ def run(
         try:
             manifest["outputs"] = jobs[name].run(ctx)
             manifest["status"] = "complete"
+            prev = latest(ctx.lake, ctx.region.id, name)
+            if (
+                manifest["outputs"].get("unchanged")
+                and prev
+                and prev.get("status") == "complete"
+                and prev.get("inputs") == inputs
+            ):
+                # Nothing new: keep the previous version so downstream jobs stay up to date.
+                manifest["version"] = prev["version"]
         except Exception as exc:
             manifest["status"] = "failed"
             manifest["error"] = f"{type(exc).__name__}: {exc}"

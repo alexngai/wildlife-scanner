@@ -119,7 +119,12 @@ class ForecastService:
         self.nowcast_days = nowcast_days
         self.stations = station_coords
         self._models: dict[tuple[str, str], tuple[int, OffsetLogit]] = {}
+        # A service reads one immutable store (the API builds a new service when a new bundle
+        # is published), so signal lookups are loaded once per set of signals and reused.
+        self._lookups: dict[tuple[str, ...], SignalLookup] = {}
+        self._store_stations = None
         tables = {r[0] for r in self.conn.execute("SHOW TABLES").fetchall()}
+        self._tables = tables
         if {"conditions_gates", "conditions_models"} <= tables:
             # Highest level whose gate passed, per taxon and effort group. A Level-2 model
             # already includes Level 1's terms when (and only when) Level 1 passed.
@@ -151,14 +156,18 @@ class ForecastService:
                 return est[0].p, cell, level, level != level0
         raise NotAvailable(taxon_id)
 
+    def _lookup(self, signals: tuple[str, ...]) -> SignalLookup:
+        if signals not in self._lookups:
+            if self._store_stations is None:
+                self._store_stations = stations_in_store(self.conn, self.stations)
+            self._lookups[signals] = SignalLookup(
+                self.conn, self._store_stations, list(signals), normals_before=None
+            )
+        return self._lookups[signals]
+
     def _signals(self, model: OffsetLogit, cell: str, on: date, notes: list[str]) -> dict:
         terms = [t for t in model.terms if not t.signal.startswith("nowcast.")]
-        lookup = SignalLookup(
-            self.conn,
-            stations_in_store(self.conn, self.stations),
-            sorted({t.signal for t in terms}),
-            normals_before=None,
-        )
+        lookup = self._lookup(tuple(sorted({t.signal for t in terms})))
         values = {}
         for t in terms:
             value = lookup.value(cell, on, t.signal)
@@ -173,8 +182,7 @@ class ForecastService:
 
     def _nowcast(self, taxon_id: str, group_id: str, c1: str, on: date) -> tuple[float, float]:
         start = on - timedelta(days=self.nowcast_days)
-        tables = {r[0] for r in self.conn.execute("SHOW TABLES").fetchall()}
-        if "recent_effort" in tables:
+        if "recent_effort" in self._tables:
             # Published bundles carry aggregates (no raw records), already delayed by policy.
             k = self.conn.execute(
                 "SELECT coalesce(sum(k), 0) FROM recent_detections WHERE taxon_id = ? "
