@@ -155,6 +155,10 @@ later: a tombstone list applied at publish.
 
 ## 8. Build order
 
+Status: steps 1 and 2 are implemented (`wildlife-radar run`, `publish`, `serve --bundle-dir`,
+the `live` job). The lake is still a local folder plus one DuckDB work store per region. Global
+reference data (identity, statuses) is still kept per region.
+
 1. **Pipeline core:**
    - versioned outputs with manifests
    - `wildlife-radar run <target>` with up-to-date checks

@@ -133,6 +133,26 @@ Data goes in `data/`, which git ignores:
 
 Data repairs: `repair-dates` re-dates records a dataset stamped with a placeholder date, using the date in their event ids (see `regions/socal/datasets.yaml`).
 
+### Running it as a pipeline
+
+After the first snapshot ingest, the steps above form a job graph ([`docs/design/data-platform.md`](docs/design/data-platform.md)). `run` brings a target up to date and skips every job whose inputs haven't changed. Each job records a manifest under `data/lake/manifests/`:
+
+```bash
+uv run wildlife-radar run list
+```
+
+```bash
+uv run wildlife-radar run publish --region socal
+```
+
+`publish` writes a policy-filtered, read-only serving bundle per region, and only if the tier audit has no high-severity findings. The API serves the current bundle and switches to new ones as they are published, so rebuilds never block it:
+
+```bash
+uv run wildlife-radar serve --region socal --bundle-dir data/lake/publish
+```
+
+Scheduled every 30 minutes, `run publish` refreshes recent iNaturalist records (the `live` job) and republishes. Signals refresh daily, and baselines, tiers and condition models monthly.
+
 Other commands work without a database:
 
 ```bash
