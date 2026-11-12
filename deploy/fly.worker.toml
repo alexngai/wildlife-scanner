@@ -1,0 +1,25 @@
+# The scheduled worker (docs/deploy.md): runs the job graph every 30 minutes and pushes each
+# audited version to R2. It owns the region's work store on a volume. From the repository root:
+#   fly deploy --config deploy/fly.worker.toml --dockerfile deploy/Dockerfile
+# Secrets (R2 read-write token): AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_ENDPOINT_URL_S3.
+# Optional: WILDLIFE_RADAR_USER_AGENT with an operator contact.
+app = "wildlife-radar-worker"   # choose your own app name
+primary_region = "lax"
+
+[env]
+  AWS_REGION = "auto"
+  WILDLIFE_RADAR_PUBLISH_URL = "s3://wildlife-radar-publish"
+
+[processes]
+  worker = "wildlife-radar worker --region sandiego --db /data/sandiego.duckdb --lake /data/lake --ingest-snapshots --every 30"
+
+[[mounts]]
+  source = "worker_data"
+  destination = "/data"
+  initial_size = "40gb"
+  processes = ["worker"]
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "4gb"
+  processes = ["worker"]

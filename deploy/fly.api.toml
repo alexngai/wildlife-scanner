@@ -1,0 +1,33 @@
+# The read-only API (docs/deploy.md). From the repository root:
+#   fly deploy --config deploy/fly.api.toml --dockerfile deploy/Dockerfile
+# Secrets (R2 read-only token): AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_ENDPOINT_URL_S3.
+app = "wildlife-radar-api"      # choose your own app name
+primary_region = "lax"
+
+[env]
+  AWS_REGION = "auto"
+  WILDLIFE_RADAR_PUBLISH_URL = "s3://wildlife-radar-publish"
+  # WILDLIFE_RADAR_CORS_ORIGINS = "https://<your frontend>.pages.dev"
+  # WILDLIFE_RADAR_SOURCE_URL = "https://github.com/<you>/wildlife-radar"  (AGPL §13)
+
+[processes]
+  app = "wildlife-radar serve --region sandiego --host 0.0.0.0 --port 8080 --cache-dir /tmp/bundles --refresh-seconds 60"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [[http_service.checks]]
+    grace_period = "60s"   # a cold start downloads the current bundle first
+    interval = "30s"
+    method = "GET"
+    path = "/health"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

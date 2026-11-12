@@ -3,6 +3,9 @@
 Everything returned has passed the policy layer. The service is AGPL-3.0: every response carries
 a link to the corresponding source (AGPL §13) in the ``X-Source-Code`` header, and ``/source``
 describes it. Set ``WILDLIFE_RADAR_SOURCE_URL`` when running a modified version.
+
+Browsers may call the API from the origins listed in ``WILDLIFE_RADAR_CORS_ORIGINS``
+(comma-separated, e.g. the frontend's Cloudflare Pages domain); none by default.
 """
 
 from __future__ import annotations
@@ -37,6 +40,7 @@ from wildlife_radar.serving.queries import (
 )
 
 SOURCE_URL_ENV = "WILDLIFE_RADAR_SOURCE_URL"
+CORS_ENV = "WILDLIFE_RADAR_CORS_ORIGINS"
 DEFAULT_SOURCE_URL = "https://github.com/alexngai/wildlife-radar"
 NOT_AVAILABLE = "Not available: unknown taxon, sensitive taxon, or no data for this request."
 
@@ -117,6 +121,16 @@ def create_app(
         license_info={"name": "AGPL-3.0-only", "identifier": "AGPL-3.0-only"},
     )
     app.state.services = svc
+    origins = [o.strip() for o in os.environ.get(CORS_ENV, "").split(",") if o.strip()]
+    if origins:
+        from fastapi.middleware.cors import CORSMiddleware
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_methods=["GET"],
+            expose_headers=["X-Source-Code"],
+        )
 
     @app.middleware("http")
     async def source_header(request: Request, call_next):
@@ -132,6 +146,7 @@ def create_app(
             "region": region.id,
             "model_version": svc().queries.model_version,
             "built_at": svc().queries.as_of.isoformat(),
+            "bundle": svc().db_path.parent.name,
         }
 
     @app.get("/source")

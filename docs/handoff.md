@@ -11,7 +11,7 @@ For the next working session. Start here, then read the files it points to.
   - Phase 3: daily condition signals, Level 1–2 models with gates, hypothesis scorecard, recent-sightings forecasts for every OPEN species;
   - the data platform's first steps: a job graph, audit-gated policy-filtered bundles, a live iNaturalist ingest, and an API that serves bundles.
 - **Results so far:** `docs/research/08`, `09`, `10` (real San Diego data). Read 10 first.
-- **Test suite:** `uv run pytest` (≈218 tests, ~80 s); `uv run ruff check .`; `uv run ruff format --check .`.
+- **Test suite:** `uv run pytest` (≈228 tests, ~80 s); `uv run ruff check .`; `uv run ruff format --check .`.
 
 ## 2. Standing decisions and constraints (from the project owner)
 
@@ -77,8 +77,15 @@ Cloudflare; hook them up later), with the housekeeping quick fixes; then a secon
    - schedule `run publish` every 30 min (live), signals daily, full rebuild monthly;
    - static products for the TypeScript app: PMTiles maps, place lists, calendars, a name-search index.
 
-   The owner has fly.io and Cloudflare accounts. Build and test locally (storage paths,
-   deploy config, static products); don't create services or ask for keys until they say so.
+   The owner has fly.io and Cloudflare accounts. Build and test locally; don't create services
+   or ask for keys until they say so.
+   - **Done locally** ([`deploy.md`](deploy.md)): an object-store layer (folder or S3/R2),
+     `worker` (scheduled ticks, audit-gated push, pruning), `push-publish`,
+     `serve --bundle-url` (mirrors `CURRENT`), opt-in CORS, `deploy/Dockerfile` (builds and
+     serves a bundle from a folder bucket, checked end to end), fly configs for the API and
+     the worker.
+   - **Next:** static products. Later: a multi-region API, splitting the live tables out of the
+     bundle, and syncing the other lake layers.
 2. **A second region** to prove multi-region (e.g. Northern California or the Pacific Northwest region pack). Then move identities and the status cache to a **global reference store** shared by regions; they are per store today.
 3. **LLM extraction live run + calibration** (`profilegen generate --extract`, `profilegen calibrate`). Blocked on the User-Agent contact and API key (§3). Score per-field accuracy against TetrapodTraits before trusting any extracted field.
 4. **Profile revisions from the scorecard** (`docs/research/10` §1):
