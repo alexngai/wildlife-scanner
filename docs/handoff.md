@@ -11,7 +11,7 @@ For the next working session. Start here, then read the files it points to.
   - Phase 3: daily condition signals, Level 1–2 models with gates, hypothesis scorecard, recent-sightings forecasts for every OPEN species;
   - the data platform's first steps: a job graph, audit-gated policy-filtered bundles, a live iNaturalist ingest, and an API that serves bundles.
 - **Results so far:** `docs/research/08`, `09`, `10` (real San Diego data). Read 10 first.
-- **Test suite:** `uv run pytest` (≈239 tests, ~90 s); `uv run ruff check .`; `uv run ruff format --check .`.
+- **Test suite:** `uv run pytest` (≈240 tests, ~90 s); `uv run ruff check .`; `uv run ruff format --check .`.
 
 ## 2. Standing decisions and constraints (from the project owner)
 
@@ -92,7 +92,8 @@ Cloudflare; hook them up later), with the housekeeping quick fixes; then a secon
      static sizes on real data, and syncing the other lake layers.
 2. **A second region** to prove multi-region (e.g. Northern California or the Pacific Northwest region pack). Then move identities and the status cache to a **global reference store** shared by regions; they are per store today.
 3. **LLM extraction live run + calibration** (`profilegen generate --extract`, `profilegen calibrate`). Blocked on the User-Agent contact and API key (§3). Score per-field accuracy against TetrapodTraits before trusting any extracted field.
-4. **Profile revisions from the scorecard** (`docs/research/10` §1):
+4. **Profile revisions from the scorecard** (`docs/research/10` §1). *Done 2026-11-12: direction
+   claims withdrawn for both, and the scorecard flags them (`scorecard --review`).*
    - leopard shark: water temperature is negative *within* season (the aggregation is seasonal);
    - marbled godwit: higher daily lows → more records;
    - mark contradicted directions for review.
