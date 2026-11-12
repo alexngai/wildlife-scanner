@@ -105,3 +105,12 @@ def test_live_job_advances_its_cursor(tmp_path, monkeypatch):
     # The next run (forced: within its 30-minute cadence) asks only for newer updates.
     run("live", c, jobs=jobs, force=("live",))
     assert queries[1].updated_since == datetime.fromisoformat(cursor) - timedelta(hours=1)
+
+
+def test_region_pack_inherits_curated_files():
+    from wildlife_radar.pipeline.runner import context
+
+    c = context("sandiego", "unused.duckdb", "unused-lake")
+    assert c.region.inherits == "socal"
+    assert c.statuses_path().parts[-2:] == ("socal", "statuses.yaml")
+    assert any(e.event_id_date for e in c.registry().datasets.values())  # socal registry

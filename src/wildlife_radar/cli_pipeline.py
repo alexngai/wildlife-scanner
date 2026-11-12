@@ -30,25 +30,24 @@ def _statuses_path(args: argparse.Namespace, region):
         if not path.exists():
             raise SystemExit(f"error: {path} not found")
         return path
-    candidates = [region_dir(region.id) / "statuses.yaml"]
-    if Path(args.region).suffix:
-        candidates.append(Path(args.region).parent / "statuses.yaml")
-    return next((p for p in candidates if p.exists()), None)
+    from wildlife_radar.regions import pack_file
+
+    pack = Path(args.region).parent if Path(args.region).suffix else region_dir(region.id)
+    return pack_file(region, "statuses.yaml", pack)
 
 
 def _registry(args: argparse.Namespace):
     from pathlib import Path
 
     from wildlife_radar.baseline.effort import DatasetRegistry
-    from wildlife_radar.regions import region_dir
+    from wildlife_radar.regions import pack_file, region_dir
 
     region = _region(args)
-    path = (
-        Path(args.datasets)
-        if getattr(args, "datasets", None)
-        else (region_dir(region.id) / "datasets.yaml")
-    )
-    return DatasetRegistry.load(path)
+    if getattr(args, "datasets", None):
+        return DatasetRegistry.load(Path(args.datasets))
+    pack = Path(args.region).parent if Path(args.region).suffix else region_dir(region.id)
+    path = pack_file(region, "datasets.yaml", pack)
+    return DatasetRegistry.load(path) if path else DatasetRegistry()
 
 
 def _print(model) -> None:

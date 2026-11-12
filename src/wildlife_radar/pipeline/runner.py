@@ -45,15 +45,18 @@ class JobContext:
 
     def registry(self):
         from wildlife_radar.baseline.effort import DatasetRegistry
+        from wildlife_radar.regions import pack_file
 
-        path = self.params.get("datasets") or (
-            self.region_path / "datasets.yaml" if self.region_path else None
+        path = self.params.get("datasets") or pack_file(
+            self.region, "datasets.yaml", self.region_path
         )
         return DatasetRegistry.load(Path(path)) if path else DatasetRegistry()
 
     def statuses_path(self) -> Path | None:
-        path = self.params.get("statuses") or (
-            self.region_path / "statuses.yaml" if self.region_path else None
+        from wildlife_radar.regions import pack_file
+
+        path = self.params.get("statuses") or pack_file(
+            self.region, "statuses.yaml", self.region_path
         )
         return Path(path) if path and Path(path).exists() else None
 

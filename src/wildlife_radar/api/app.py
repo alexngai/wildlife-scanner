@@ -20,7 +20,7 @@ from wildlife_radar.connectors import ALL_SOURCES
 from wildlife_radar.pipeline.publish import current_bundle
 from wildlife_radar.policy.statuses import TierService
 from wildlife_radar.profiles import ProfileLibrary
-from wildlife_radar.regions import load_region, region_dir
+from wildlife_radar.regions import load_region, pack_file, region_dir
 from wildlife_radar.serving.forecast import (
     Forecast,
     ForecastService,
@@ -65,7 +65,9 @@ class _Services:
         self.forecasts = ForecastService(
             self.queries,
             {s.station_id: (s.lat, s.lon) for s in region.tide_stations},
-            registry=DatasetRegistry.load(region_dir(region.id) / "datasets.yaml"),
+            registry=DatasetRegistry.load(
+                pack_file(region, "datasets.yaml") or region_dir(region.id) / "datasets.yaml"
+            ),
         )
 
 

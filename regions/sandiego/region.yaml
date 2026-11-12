@@ -1,0 +1,21 @@
+# San Diego County: a sub-region of socal for quick real-data runs (docs/research/08–10).
+# Curated statuses and the dataset registry come from the socal pack (`inherits`).
+id: sandiego
+name: San Diego County
+inherits: socal
+bbox: [-117.62, 32.53, -116.08, 33.51]
+scopes: [global, us, us-ca, california, ca-southern-central-coast, socal]
+inat_place_scopes: {"1": us, "14": us-ca}
+inat_innermost_place: "14"
+tide_stations:
+  - {station_id: "9410230", name: "La Jolla (Scripps Pier)", lat: 32.867, lon: -117.257}
+  - {station_id: "9410170", name: "San Diego", lat: 32.714, lon: -117.174}
+places:
+  - {place_id: la-jolla-cove, name: La Jolla Cove, kind: dive_site, footprint: {kind: point, lat: 32.8505, lon: -117.2720, uncertainty_m: 300}}
+  - {place_id: tijuana-estuary, name: Tijuana River Estuary, kind: hotspot, footprint: {kind: point, lat: 32.565, lon: -117.125, uncertainty_m: 1000}}
+  - {place_id: cuyamaca, name: Cuyamaca Rancho State Park, kind: park, footprint: {kind: point, lat: 32.93, lon: -116.56, uncertainty_m: 2000}}
+  - {place_id: anza-borrego, name: Borrego Springs area, kind: park, footprint: {kind: point, lat: 33.26, lon: -116.37, uncertainty_m: 3000}}
+pipeline:
+  since_year: 2010
+  backtest_split: 2025-01-01
+  conditions_split: 2023-01-01
