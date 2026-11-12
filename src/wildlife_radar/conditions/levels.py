@@ -11,9 +11,10 @@ For each taxon × effort group:
    (nearest station within the signal's reach). Anomaly normals use training days only.
 4. **Level 2** adds a nowcast: recorded detections and outings in the same parent cell during
    the previous ``nowcast_days`` days (strictly before the trial's date; no same-day contagion).
-5. **Gates** (framework.md §5.4): Level 1 must beat Level 0 and Level 2 must beat Level 1 out of
-   sample, with the lower end of a 90% block-bootstrap interval (blocks = test days) above 0,
-   and Level 2 must also beat persistence (the shrunk recent rate).
+5. **Gates** (framework.md §5.4): Level 1 must beat Level 0 (recalibrated) and Level 2 must
+   beat Level 1 out of sample, with the lower end of a 90% block-bootstrap interval (blocks =
+   test days) above 0 and a Brier improvement of at least ``min_skill`` (0.5%); Level 2 must
+   also beat persistence (the shrunk recent rate).
 6. **Hypothesis scorecard**: each term is dropped in turn; the change in held-out log loss
    (with its interval) says whether the term earns its place: supported, contradicted or
    inconclusive.
@@ -365,6 +366,7 @@ def evaluate_taxon(
     reps: int = 200,
     floor: float = 1e-4,
     seed: int = 7,
+    min_skill: float = 0.005,
 ) -> ConditionsReport:
     report = ConditionsReport(taxon_id, group_id, [t.name for t in terms])
     rows = _trials(conn, taxon_id, group_id, split, neg_per_pos, max_neg, seed)
@@ -429,9 +431,10 @@ def evaluate_taxon(
 
         ci = block_bootstrap(blocks, skill, reps=reps, seed=seed)
         skill_all = 1 - b / b_ref if b_ref > 0 else 0.0
-        return LevelResult(
-            level_no, len(yt), int(yt.sum()), b_ref, b, skill_all, ci, bool(ci[0] > 0)
-        )
+        # A level must beat the one below reliably (interval above zero) *and* by a margin
+        # worth labeling: tiny gains on rare taxa would otherwise switch levels on.
+        passes = bool(ci[0] > 0 and skill_all >= min_skill)
+        return LevelResult(level_no, len(yt), int(yt.sum()), b_ref, b, skill_all, ci, passes)
 
     l1 = level(1, p0r, p1)
     l2 = level(2, p1, p2)
