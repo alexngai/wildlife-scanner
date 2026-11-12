@@ -113,6 +113,8 @@ class ConditionsReport:
     levels: list[LevelResult] = field(default_factory=list)
     scorecard: list[TermScore] = field(default_factory=list)
     brier_persistence: float | None = None
+    brier_level0: float | None = None
+    """Held-out Brier of Level 0 as built (before recalibration), for reference."""
     notes: list[str] = field(default_factory=list)
     models: dict[int, OffsetLogit] = field(default_factory=dict)
 
@@ -405,13 +407,17 @@ def evaluate_taxon(
         return {s: v[mask] for s, v in sig.items()}
 
     off = logit(p0)
+    # Level 1 refits an intercept, which alone recalibrates Level 0 to recent years. The gate
+    # compares against that recalibrated Level 0, so only the condition terms earn the pass.
+    m0 = OffsetLogit([]).fit(sub(train), y[train], off[train], w[train])
     m1 = OffsetLogit(terms).fit(sub(train), y[train], off[train], w[train])
     m2 = OffsetLogit([*terms, *NOWCAST_TERMS]).fit(sub(train), y[train], off[train], w[train])
     yt, wt, p0t = y[held], w[held], p0[held]
+    p0r = m0.predict(sub(held), off[held])
     p1 = m1.predict(sub(held), off[held])
     p2 = m2.predict(sub(held), off[held])
     kt, nt = k[held], n[held]
-    persistence = (kt + 5 * p0t) / (nt + 5)
+    persistence = (kt + 5 * p0r) / (nt + 5)
     blocks = np.array([d.toordinal() for d, h in zip(days, held, strict=True) if h])
 
     def level(level_no, p_ref, p) -> LevelResult:
@@ -427,9 +433,10 @@ def evaluate_taxon(
             level_no, len(yt), int(yt.sum()), b_ref, b, skill_all, ci, bool(ci[0] > 0)
         )
 
-    l1 = level(1, p0t, p1)
+    l1 = level(1, p0r, p1)
     l2 = level(2, p1, p2)
     report.brier_persistence = brier(yt, persistence, wt)
+    report.brier_level0 = brier(yt, p0t, wt)
     l2.passes = l2.passes and l2.brier < report.brier_persistence
     report.levels = [l1, l2]
     held_sig = sub(held)

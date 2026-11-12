@@ -351,7 +351,15 @@ JOBS: dict[str, Job] = {
         Job("live", ("snapshot",), _live, timedelta(minutes=30), "recent iNaturalist records"),
         Job("baseline", ("aliases", "repairs"), _baseline, None, "Level-0 statistics"),
         Job("backtest", ("baseline",), _backtest, None, "Level-0 gates"),
-        Job("tiers", ("baseline", "crosswalk"), _tiers, timedelta(days=30), "statuses → tiers"),
+        # Tiers follow the live layer: new records can carry obscured geoprivacy, which must
+        # raise a tier before anything is published (statuses are cached, so this is cheap).
+        Job(
+            "tiers",
+            ("baseline", "crosswalk", "live"),
+            _tiers,
+            timedelta(days=30),
+            "statuses → tiers",
+        ),
         Job("conditions", ("baseline",), _conditions, timedelta(days=30), "Levels 1–2, scorecard"),
         Job(
             "publish",
