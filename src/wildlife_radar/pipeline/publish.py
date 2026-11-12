@@ -130,6 +130,7 @@ def publish_bundle(
         [(tier, lv) for tier, lvs in levels.items() for lv in lvs],
     )
     visible = "(SELECT taxon_id FROM _pub_tier WHERE tier < 3)"
+    timing = "(SELECT taxon_id FROM _pub_tier WHERE tier <= 1)"
     allowed = (
         "EXISTS (SELECT 1 FROM _pub_tier pt JOIN _pub_level pl ON pl.tier = pt.tier "
         "WHERE pt.taxon_id = x.taxon_id AND pl.level = x.level)"
@@ -158,6 +159,11 @@ def publish_bundle(
             f"SELECT * FROM hypothesis_scorecard x WHERE region_id = $r AND taxon_id IN {visible}"
         ),
         "taxon_alias": f"SELECT * FROM taxon_alias x WHERE taxon_id IN {visible}",
+        # Time-of-day patterns carry no places, but only open and generalized taxa get them.
+        "timed_index": f"SELECT * FROM timed_index x WHERE region_id = $r AND taxon_id IN {timing}",
+        "timed_scorecard": (
+            f"SELECT * FROM timed_scorecard x WHERE region_id = $r AND taxon_id IN {timing}"
+        ),
         "signal_daily": (
             "SELECT * FROM signal_daily x WHERE station_id IN (SELECT unnest($stations))"
         ),
