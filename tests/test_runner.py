@@ -186,6 +186,7 @@ def test_repairs_resume_after_an_interruption(tmp_path, monkeypatch):
     from datetime import date
 
     from wildlife_radar.connectors import gbif_events
+    from wildlife_radar.connectors.base import ConnectorError
     from wildlife_radar.pipeline import runner
     from wildlife_radar.storage import ObservationStore
 
@@ -212,7 +213,7 @@ def test_repairs_resume_after_an_interruption(tmp_path, monkeypatch):
         out = []
         for name, _n in chunk:
             if name == fail["on"]:
-                raise RuntimeError("connection reset")
+                raise ConnectorError("rate limited (HTTP 429)")
             fetched.append(name)
             e = index[name]
             out += [(str(2 * e), name), (str(2 * e + 1), name)]
@@ -222,12 +223,19 @@ def test_repairs_resume_after_an_interruption(tmp_path, monkeypatch):
     monkeypatch.setattr(gbif_events, "fetch_events", fake_fetch)
     monkeypatch.setattr(runner, "REPAIR_CHUNK", 1)
     jobs = {"repairs": Job("repairs", (), runner._repairs)}
-    first = run("repairs", c, jobs=jobs)[0]
-    assert "connection reset" in first["outcome"]
+    # Rate-limited part-way: the job completes with what it has (re-dated records are kept,
+    # the rest stay excluded) and reports what remains.
+    first = run("repairs", c, jobs=jobs)[0]["outcome"]
+    assert "429" in first["stopped"] and first["remaining_events"] == 1
+    assert first["redated"]["kelp"] == 4
     fail["on"] = None
-    second = run("repairs", c, jobs=jobs)[0]
+    second = run("repairs", c, jobs=jobs, force=("repairs",))[0]["outcome"]
     assert fetched == ["SITE_20200101_A", "SITE_20200102_A", "SITE_20200103_A"]  # no repeats
-    assert second["outcome"]["redated"]["kelp"] == 6
+    assert second["redated"]["kelp"] == 2 and second["remaining_events"] == 0
+    # Nothing left to do: unchanged, so downstream jobs keep their inputs.
+    v = latest(c.lake, "socal", "repairs")["version"]
+    third = run("repairs", c, jobs=jobs, force=("repairs",))[0]["outcome"]
+    assert third.get("unchanged") and latest(c.lake, "socal", "repairs")["version"] == v
     with ObservationStore(c.db) as store:
         days = store.conn.execute("SELECT DISTINCT local_date FROM observations").fetchall()
     assert sorted(d for (d,) in days) == [date(2020, 1, 1), date(2020, 1, 2), date(2020, 1, 3)]
