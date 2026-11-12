@@ -1,0 +1,15 @@
+id: limosa-fedoa
+kind: species
+scientific_name: Limosa fedoa
+common_name: Marbled godwit
+extends: [guild/shorebird]
+status: draft
+notes: >
+  Design-validation archetype for "effort-rich, condition-driven" birds. Seasonality is learned
+  from occurrence data rather than elicited.
+
+traits:
+  migratory: true
+
+prior:
+  seasonal: learned

@@ -1,0 +1,35 @@
+id: guild/marine-nearshore-fish
+kind: template
+extends: [base]
+guilds: [marine-nearshore-fish]
+notes: >
+  Nearshore fishes seen by divers and snorkelers. Visibility and surge mostly affect detection,
+  so they are modeled as detectability terms, not habitat terms.
+
+methods:
+  headline: scuba_dive
+  also: [freedive, snorkel]
+
+latent_state:
+  scale: zone
+  spatial_km: 10
+  dynamics: fast
+
+signals:
+  day_of_year:
+    signal: calendar.day_of_year
+    shape: categorical
+  sst_anomaly:
+    signal: ocean.sst_anomaly_c
+    shape: optimum
+    strength: moderate
+  water_clarity:
+    signal: ocean.kd490
+    role: detectability
+    direction: "-"
+    strength: moderate
+  swell:
+    signal: ocean.swell_height_m
+    role: detectability
+    direction: "-"
+    strength: moderate

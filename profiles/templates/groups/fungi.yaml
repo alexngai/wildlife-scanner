@@ -1,0 +1,7 @@
+id: group/fungi
+kind: template
+extends: [base]
+notes: Default for generated profiles in the 'fungi' target group.
+methods:
+  headline: observer_visit
+  also: [wildlife_viewing]

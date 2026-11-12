@@ -1,0 +1,40 @@
+id: guild/shorebird
+kind: template
+extends: [base]
+guilds: [shorebird]
+notes: >
+  Shorebirds concentrate at roosts around high tide; tide stage is mainly an availability term.
+  eBird sources are omitted until terms with Cornell are settled (docs/design/licensing.md).
+
+methods:
+  headline: birding_checklist
+  also: [shore_watch]
+
+latent_state:
+  scale: site
+  dynamics: seasonal
+
+signals:
+  tide_height:
+    signal: tide.height_m
+    role: availability
+    shape: optimum
+    strength: strong
+  tide_stage:
+    signal: tide.stage
+    role: availability
+    shape: categorical
+    strength: moderate
+  tide_daily_low:
+    # Daily stand-in while records carry dates only: days with lower low tides expose more
+    # mudflat for foraging (UNVERIFIED; tested by the hypothesis scorecard).
+    signal: tide.daily_low_m
+    role: availability
+    direction: "-"
+    strength: weak
+    hypothesis: true
+
+nowcast:
+  enabled: true
+  half_life_days: 3
+  spatial_km: 5

@@ -1,0 +1,7 @@
+id: group/plants
+kind: template
+extends: [base]
+notes: Default for generated profiles in the 'plants' target group.
+methods:
+  headline: observer_visit
+  also: [wildlife_viewing]

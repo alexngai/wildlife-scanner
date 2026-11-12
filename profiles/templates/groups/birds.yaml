@@ -1,0 +1,7 @@
+id: group/birds
+kind: template
+extends: [base]
+notes: Default for generated bird profiles until a guild template is assigned in review.
+methods:
+  headline: birding_checklist
+  also: [wildlife_viewing]

@@ -1,0 +1,43 @@
+id: canis-lupus
+kind: species
+scientific_name: Canis lupus
+common_name: Gray wolf
+extends: [guild/large-terrestrial-carnivore]
+status: draft
+
+traits:
+  activity_pattern: crepuscular
+
+sources:
+  inaturalist:
+    obs: presence_only
+    false_positive: elevated
+    lookalikes: [canis-latrans, canis-familiaris]
+  agency_territories:
+    obs: presence_only
+    status: planned
+    footprint: territory_polygon
+    effort: none
+
+policy:
+  default_tier: 2
+  regions:
+    california:
+      tier: 2
+      mode: awareness
+      note: CESA endangered; recolonizing.
+    yellowstone-np:
+      tier: 1
+      mode: viewing
+      exclude: [boundary_hunting_units_in_season]
+      note: >
+        PENDING REVIEW. Established managed viewing. Visitor sighting odds drop when packs near
+        roads are hunted at the park boundary. Ignored until approved.
+      approved_by: []
+
+provenance:
+  traits.activity_pattern:
+    source: docs/research/06-rare-carnivores.md
+    method: elicited
+    confidence: 0.8
+    evidence: Crepuscular where undisturbed; nocturnal under human pressure.

@@ -1,0 +1,7 @@
+id: group/cnidarians
+kind: template
+extends: [base]
+notes: Default for generated profiles in the 'cnidarians' target group (mostly intertidal and subtidal).
+methods:
+  headline: tidepooling
+  also: [snorkel, scuba_dive]

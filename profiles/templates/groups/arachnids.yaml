@@ -1,0 +1,7 @@
+id: group/arachnids
+kind: template
+extends: [base]
+notes: Default for generated profiles in the 'arachnids' target group.
+methods:
+  headline: observer_visit
+  also: [wildlife_viewing]
