@@ -79,12 +79,49 @@ After a code change, a rerun re-executes only the affected jobs: 7 minutes inste
 - **Transient API failures fail closed.** A forced status refresh had 283 failed iNaturalist lookups. Those taxa went to COARSE, which is safe but wrong. Shared HTTP fetching now retries 429s, 5xx errors and connection resets with backoff. After that, COARSE went back from 367 to 154 (161 with the new geoprivacy raises).
 - **Deep paging is slow.** GBIF search pages took ~40 s at deep offsets. Re-dating now lists the 340 affected events with a facet query and fetches each event's records from offset 0: minutes instead of hours.
 
-## 3. Next steps
+## 3. Recent-sightings forecasts for every OPEN species
+
+The `nowcast` job fits Level 2 (recalibrated Level 0 plus recent sightings) for OPEN species
+without needing a profile. It covers the 300 best-sampled species in shared-effort groups, in
+~10 minutes; group-level work (outings, their recent effort, a shared negative sample) is done
+once per group.
+
+**Train/serve mismatch, fixed before shipping.** The first run passed 89 species, mostly birds
+on eBird checklists. But those models learned from recent *checklist* activity, and eBird data
+only arrives through yearly GBIF snapshots: in production they would never see a recent input.
+Nowcast features now come only from sources with a live feed (iNaturalist, including its
+records in snapshots), in training, in the published aggregates and in serving alike.
+
+With honest inputs, **42 of 300 species pass** (birds on checklists: most of them).
+
+| Species | Gain over recalibrated Level 0 | Why recent sightings help |
+|---|---|---|
+| Black oystercatcher | +14.5% | few, site-faithful birds |
+| Tricolored heron | +8.6% | a rare visitor that lingers |
+| Wandering tattler | +8.5% | site-faithful on rocky shores |
+| Lawrence's goldfinch | +3.6% | nomadic |
+| Allen's hummingbird | +3.6% | |
+| American robin | +3.3% | winter flocks |
+| Canchalagua (a plant) | +2.0% | flowering pulses |
+
+Casual-record groups rarely pass: their own effort is already the live feed, and they are noisy.
+
+**Place-first lists** (`/places/{id}/recent`, `/nearby/recent`), from the published bundle on
+2026-11-12 with data through 2026-11-11 (OPEN species only, 24-hour delay):
+
+| Place | Picking up (odds boost from recent sightings) | Reported recently (outings) |
+|---|---|---|
+| La Jolla Cove | black oystercatcher ×2.5 (24% → 33%), Allen's hummingbird ×1.6, western grebe ×1.3 | California sea hare 9, red-shouldered hawk 8, whimbrel 7, … |
+| Tijuana Estuary | Forster's tern ×1.5 (22% → 30%), western grebe ×1.4 | western grebe 3, Forster's tern 3, royal tern 2, … |
+| Cuyamaca | — | California black oak 3, zone-tailed hawk 2, wild turkey 2, Clark's nutcracker 1, … |
+| Anza-Borrego | — | rock hibiscus 4, ocotillo 4, … |
+
+## 4. Next steps
 
 1. **Revise profiles from the scorecard:**
    - leopard shark: within-season water-temperature direction;
    - godwit: tide direction;
    - mark contradicted directions for review.
-2. **Nowcast-only Level 2 for every OPEN taxon with enough data.** It needs no profile, and recent sightings are the strongest real signal so far.
+2. **More live sources for nowcasts:** an eBird feed (partnership), and GBIF's API for datasets that publish frequently, so checklist effort itself is live.
 3. **Timed records** (the iNaturalist API keeps observation times) for intra-day terms: tide stage, hours after sunset.
 4. **Lake on object storage and scheduled runs** (data-platform.md §8 steps 3–5), then a second region.
