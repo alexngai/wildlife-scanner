@@ -51,14 +51,26 @@ def cmd_fetch_signals(args: argparse.Namespace) -> int:
 def _specs(args, region_id_for_profiles):
     from wildlife_radar.conditions import terms_from_profile
     from wildlife_radar.profiles import ProfileLibrary
+    from wildlife_radar.profiles.schema import SpeciesProfile
 
     lib = ProfileLibrary()
     wanted = [t.strip() for t in (args.taxa or "").split(",") if t.strip()] or lib.ids(
         kind="species"
     )
+    template = None
+    if args.template:
+        # Guild defaults for taxa without a species profile (Level 1 "built by templates").
+        template = SpeciesProfile.model_validate(lib.merged(args.template))
     specs, notes = {}, {}
     for taxon_id in wanted:
-        terms, why = terms_from_profile(lib.resolve(taxon_id))
+        if taxon_id in lib.ids(kind="species"):
+            profile = lib.resolve(taxon_id)
+        elif template is not None:
+            profile = template
+        else:
+            notes[taxon_id] = ["no species profile; pass --template for guild defaults"]
+            continue
+        terms, why = terms_from_profile(profile)
         notes[taxon_id] = why
         if terms:
             specs[taxon_id] = terms
@@ -166,6 +178,9 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--split", required=True, help="train before, test from this date")
     p.add_argument("--end")
     p.add_argument("--taxa", help="comma-separated taxon ids (default: all species profiles)")
+    p.add_argument(
+        "--template", help="template whose terms apply to taxa without a profile (guild/…)"
+    )
     p.add_argument("--since-year", type=int)
     p.add_argument("--datasets", help="dataset registry YAML (default: region pack's)")
     p.add_argument("--nowcast-days", type=int, default=14)
