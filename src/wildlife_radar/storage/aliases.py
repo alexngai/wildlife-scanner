@@ -57,9 +57,16 @@ def build_alias_table(conn: duckdb.DuckDBPyConnection) -> dict[str, int]:
     for query_name, raw in conn.execute("SELECT query_name, record FROM taxon_identity").fetchall():
         record = json.loads(raw)
         concept = _concept(record)
-        store_id = species_id_from_name(query_name, "species")
-        if concept and store_id in counts:
-            members[concept].add(store_id)
+        if not concept:
+            continue
+        # The queried name plus every name the identity knows (accepted name, synonyms such
+        # as an original combination): a renamed species may appear in the store under one
+        # that was never queried itself.
+        names = [query_name, record.get("accepted_name"), *record.get("synonyms", [])]
+        for name in names:
+            store_id = species_id_from_name(name, "species") if name else None
+            if store_id in counts:
+                members[concept].add(store_id)
     rows = []
     for concept, ids in members.items():
         if len(ids) < 2:

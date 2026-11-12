@@ -31,6 +31,13 @@ signals:
     signal: human.recreation_intensity
     direction: "-"
     strength: strong
+  moonlight:
+    # Moonlight changes prey and predator activity; the direction for encounters is unknown
+    # (UNVERIFIED; tested by the hypothesis scorecard).
+    signal: astro.moon_illumination
+    role: availability
+    strength: weak
+    hypothesis: true
 
 sources:
   inaturalist:
