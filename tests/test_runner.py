@@ -264,3 +264,28 @@ def test_crosswalk_also_resolves_curated_status_names(tmp_path, monkeypatch):
     out = run("crosswalk", c, jobs={"crosswalk": Job("crosswalk", (), runner._crosswalk)})[0]
     assert isinstance(out["outcome"], dict), out["outcome"]
     assert "Euphydryas editha" in asked
+
+
+def test_unchanged_result_keeps_downstream_up_to_date(tmp_path):
+    """A job rerun by a changed input that reports the same result keeps its version."""
+    calls: list[str] = []
+    state = {"same": False}
+
+    def mid(_c):
+        calls.append("mid")
+        return {"unchanged": True} if state["same"] else {"n": 1}
+
+    jobs = {
+        "source": Job("source", (), lambda _c: calls.append("source") or {}),
+        "mid": Job("mid", ("source",), mid),
+        "down": Job("down", ("mid",), lambda _c: calls.append("down") or {}),
+    }
+    c = ctx(tmp_path)
+    run("down", c, jobs=jobs)
+    v = latest(c.lake, "socal", "mid")["version"]
+    state["same"] = True
+    calls.clear()
+    run("down", c, jobs=jobs, force=("source",))
+    assert calls == ["source", "mid"]  # down did not rerun
+    assert latest(c.lake, "socal", "mid")["version"] == v
+    assert staleness(c.lake, "socal", "mid", c.now, jobs) is None  # new inputs recorded

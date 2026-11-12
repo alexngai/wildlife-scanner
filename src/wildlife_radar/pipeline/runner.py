@@ -453,15 +453,28 @@ def _tiers(ctx: JobContext) -> dict:
             store.conn, region_id=ctx.region.id, scopes=ctx.region.scopes, providers=providers
         )
         part = ref.export_from(store.conn, "inat_taxon_records", started)
+    # Fingerprint of the decisions: live records arrive every tick and rerun this job, but
+    # only a changed tier should make the jobs that read tiers (nowcast, timed) rerun.
+    import hashlib
+
+    fingerprint = hashlib.sha256(
+        json.dumps(sorted((t, int(d.tier)) for t, d in decisions.items())).encode()
+    ).hexdigest()[:16]
+    previous = latest(ctx.lake, ctx.region.id, "tiers")
+    prev_print = ((previous or {}).get("outputs") or {}).get("fingerprint")
     counts: dict[str, int] = {}
     for d in decisions.values():
         counts[d.tier.name] = counts.get(d.tier.name, 0) + 1
-    return {
+    out = {
         "tiers": counts,
         "curated_statuses": str(statuses) if statuses else None,
         "records_from_ref": imported,
         "ref_part": part and part.name,
+        "fingerprint": fingerprint,
     }
+    if previous and previous.get("status") == "complete" and prev_print == fingerprint:
+        out["unchanged"] = True
+    return out
 
 
 def _timed(ctx: JobContext) -> dict:
@@ -839,13 +852,10 @@ def run(
             manifest["outputs"] = jobs[name].run(ctx)
             manifest["status"] = "complete"
             prev = latest(ctx.lake, ctx.region.id, name)
-            if (
-                manifest["outputs"].get("unchanged")
-                and prev
-                and prev.get("status") == "complete"
-                and prev.get("inputs") == inputs
-            ):
-                # Nothing new: keep the previous version so downstream jobs stay up to date.
+            if manifest["outputs"].get("unchanged") and prev and prev.get("status") == "complete":
+                # The job's result is the same as last time (even if an input changed, e.g.
+                # tiers after new live records): keep the previous version so downstream jobs
+                # stay up to date. The manifest still records the new inputs.
                 manifest["version"] = prev["version"]
         except Exception as exc:
             manifest["status"] = "failed"
