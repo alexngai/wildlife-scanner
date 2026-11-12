@@ -70,21 +70,38 @@ class RateLimiter:
         self._last = now
 
 
-def get_json(client: httpx.Client, url: str, params: dict, limiter: RateLimiter | None) -> dict:
-    if limiter is not None:
-        limiter.wait()
-    try:
-        resp = client.get(url, params=params)
-    except httpx.HTTPError as exc:
-        raise ConnectorError(f"request to {url} failed: {exc}") from exc
-    if resp.status_code == 429:
-        raise ConnectorError(f"rate limited by {url} (HTTP 429); slow down and retry later")
-    if resp.status_code >= 400:
-        raise ConnectorError(f"{url} returned HTTP {resp.status_code}: {resp.text[:200]}")
-    try:
-        return resp.json()
-    except ValueError as exc:
-        raise ConnectorError(f"{url} returned invalid JSON") from exc
+def get_json(
+    client: httpx.Client,
+    url: str,
+    params: dict,
+    limiter: RateLimiter | None,
+    retries: int = 0,
+) -> dict:
+    """GET JSON. ``retries`` retries connection errors, rate limits (429) and server errors
+    (5xx) with exponential backoff; client errors (4xx) are not retried."""
+    for attempt in range(retries + 1):
+        if limiter is not None:
+            limiter.wait()
+        try:
+            resp = client.get(url, params=params)
+        except httpx.HTTPError as exc:
+            error = ConnectorError(f"request to {url} failed: {exc}")
+        else:
+            if resp.status_code == 429:
+                error = ConnectorError(f"rate limited by {url} (HTTP 429); slow down")
+            elif resp.status_code >= 500:
+                error = ConnectorError(f"{url} returned HTTP {resp.status_code}")
+            elif resp.status_code >= 400:
+                raise ConnectorError(f"{url} returned HTTP {resp.status_code}: {resp.text[:200]}")
+            else:
+                try:
+                    return resp.json()
+                except ValueError as exc:
+                    raise ConnectorError(f"{url} returned invalid JSON") from exc
+        if attempt == retries:
+            raise error
+        time.sleep(min(60, 2 ** (attempt + 1)))
+    raise AssertionError("unreachable")
 
 
 class ObservationQuery(BaseModel):
