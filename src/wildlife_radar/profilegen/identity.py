@@ -84,6 +84,18 @@ def same_epithet(a: str, b: str) -> bool:
     return _ENDINGS.sub("", a) == _ENDINGS.sub("", b)
 
 
+def _name_matches(record: dict, trusted: list[str]) -> bool:
+    """An iNaturalist record matches if its name is a trusted name, or (at species rank) shares
+    a trusted name's epithet up to gender agreement (genus moves, spelling variants)."""
+    name = record.get("name") or ""
+    if name in trusted:
+        return True
+    if record.get("rank", "species") != "species" or " " not in name:
+        return False
+    epithets = [n.split()[-1] for n in trusted if " " in n]
+    return any(same_epithet(name.split()[-1], e) for e in epithets)
+
+
 class TaxonIdentity(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -111,7 +123,35 @@ class TaxonIdentity(BaseModel):
     wikipedia_title: str | None = None
     iucn_category: str | None = None
     """Referenced Wikidata IUCN category: a status *hint* for raising tiers, never lowering."""
+    synonym_sources: dict[str, str] = Field(default_factory=dict)
+    """Where each synonym came from: ``gbif``, ``inaturalist`` or ``wikidata``."""
     notes: list[str] = Field(default_factory=list)
+
+    def add_synonym(self, name: str | None, source: str) -> None:
+        if name and name not in self.synonyms and name not in (self.accepted_name, self.query_name):
+            self.synonyms.append(name)
+            self.synonym_sources[name] = source
+
+    @property
+    def trusted_names(self) -> list[str]:
+        """Names that may verify ids and merge taxa: accepted, queried, and synonyms from GBIF
+        or a verified iNaturalist chain. Wikidata synonym links are sometimes wrong (e.g. a
+        different species listed as a synonym), so they only ever *raise* protection."""
+        return list(
+            dict.fromkeys(
+                n
+                for n in [
+                    self.accepted_name,
+                    self.query_name,
+                    *(
+                        s
+                        for s in self.synonyms
+                        if self.synonym_sources.get(s, "gbif") != "wikidata"
+                    ),
+                ]
+                if n
+            )
+        )
 
     @property
     def names(self) -> list[str]:
@@ -167,6 +207,7 @@ class IdentityResolver:
         accepted = m.get("species") if synonym else m.get("canonicalName")
         if synonym and m.get("canonicalName"):
             ident.synonyms.append(m["canonicalName"])
+            ident.synonym_sources[m["canonicalName"]] = "gbif"
         ident.accepted_name = accepted or m.get("canonicalName")
         ident.rank = (m.get("rank") or "").lower() or None
         for field in ("kingdom", "phylum", "order", "family", "genus"):
@@ -275,8 +316,7 @@ GROUP BY ?key ?item ?name
             ident.common_name = row["commonName"]
         # Original combination (P1403) and taxon synonyms (P1420, and their reverse links).
         for synonym in (row.get("synonymNames") or "").split("|"):
-            if synonym and synonym not in ident.names:
-                ident.synonyms.append(synonym)
+            ident.add_synonym(synonym, "wikidata")
 
     # -- iNaturalist ----------------------------------------------------------------------
     def _inat_records(self, ids: list[str]) -> dict[str, dict]:
@@ -288,28 +328,22 @@ GROUP BY ?key ?item ?name
         return found
 
     def verify_inat_ids(self, idents: Iterable[TaxonIdentity]) -> None:
-        """Check iNaturalist ids; follow inactive concepts to their current replacement."""
+        """Check iNaturalist ids against the identity's trusted names; follow an inactive
+        concept to its replacement only if the inactive concept itself matches."""
         by_id = {i.ids["inaturalist"]: i for i in idents if "inaturalist" in i.ids}
         try:
             found = self._inat_records(list(by_id))
-            # Wikidata often still points at a concept iNaturalist has since replaced.
-            moved = {
-                inat_id: str(r["current_synonymous_taxon_ids"][0])
-                for inat_id, r in found.items()
-                if r.get("is_active") is False
-                and len(r.get("current_synonymous_taxon_ids") or []) == 1
-            }
-            if moved:
-                current = self._inat_records(sorted(set(moved.values())))
-                for old, new in moved.items():
-                    if new in current:
-                        ident = by_id[old]
-                        ident.notes.append(f"iNaturalist id {old} is inactive; using {new}")
-                        ident.ids["inaturalist"] = new
-                        ident.synonyms.append(found[old].get("name") or "")
-                        found[new] = current[new]
-                        by_id[new] = ident
-                        del by_id[old]
+            moved: dict[str, str] = {}
+            for inat_id, record in found.items():
+                ident = by_id[inat_id]
+                replacements = record.get("current_synonymous_taxon_ids") or []
+                if (
+                    record.get("is_active") is False
+                    and len(replacements) == 1
+                    and _name_matches(record, ident.trusted_names)
+                ):
+                    moved[inat_id] = str(replacements[0])
+            current = self._inat_records(sorted(set(moved.values()))) if moved else {}
         except ConnectorError as exc:
             for ident in by_id.values():
                 ident.notes.append(f"iNaturalist verification failed: {exc}")
@@ -320,23 +354,28 @@ GROUP BY ?key ?item ?name
                 ident.verified["inaturalist"] = False
                 ident.notes.append(f"iNaturalist id {inat_id} not found")
                 continue
+            if inat_id in moved and moved[inat_id] in current:
+                new_id = moved[inat_id]
+                ident.notes.append(f"iNaturalist id {inat_id} is inactive; using {new_id}")
+                ident.add_synonym(record.get("name"), "inaturalist")
+                ident.ids["inaturalist"] = new_id
+                record = current[new_id]
             name = record.get("name") or ""
-            epithets = [n.split()[-1] for n in ident.names if " " in n]
-            if name in ident.names:
+            if record.get("is_active") is False:
+                ident.verified["inaturalist"] = False
+                ident.notes.append(f"iNaturalist id {inat_id} ({name!r}) is inactive")
+            elif _name_matches(record, ident.trusted_names):
                 ident.verified["inaturalist"] = True
-            elif (
-                record.get("rank") == "species"
-                and " " in name
-                and any(same_epithet(name.split()[-1], e) for e in epithets)
-            ):
-                # Same epithet (up to gender agreement), possibly in another genus: a genus
-                # move or a spelling variant. Keep the name as a synonym.
-                ident.verified["inaturalist"] = True
-                ident.synonyms.append(name)
-                ident.notes.append(f"iNaturalist uses the name {name!r}")
+                if name not in ident.names:
+                    # Same epithet (up to gender agreement), possibly in another genus: a
+                    # genus move or a spelling variant.
+                    ident.add_synonym(name, "inaturalist")
+                    ident.notes.append(f"iNaturalist uses the name {name!r}")
             else:
                 ident.verified["inaturalist"] = False
-                ident.notes.append(f"iNaturalist id {inat_id} is {name!r} ({record.get('rank')})")
+                ident.notes.append(
+                    f"iNaturalist id {ident.ids['inaturalist']} is {name!r} ({record.get('rank')})"
+                )
             ident.iconic_taxon = record.get("iconic_taxon_name") or ident.iconic_taxon
             if record.get("preferred_common_name"):
                 # iNaturalist's preferred name beats Wikidata's arbitrary P1843 sample.
@@ -351,7 +390,7 @@ GROUP BY ?key ?item ?name
         for ident in idents:
             if "inaturalist" in ident.ids:
                 continue
-            for name in ident.names[:3]:
+            for name in ident.trusted_names[:3]:
                 try:
                     payload = get_json(
                         self.client,
@@ -374,7 +413,7 @@ GROUP BY ?key ?item ?name
                         ident.notes.append(
                             f"iNaturalist lists {name!r} under {hits[0].get('name')!r}"
                         )
-                        ident.synonyms.append(hits[0]["name"])
+                        ident.add_synonym(hits[0]["name"], "inaturalist")
                     break
 
     # -- Orchestration --------------------------------------------------------------------

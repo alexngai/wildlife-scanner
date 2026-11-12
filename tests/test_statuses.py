@@ -252,3 +252,33 @@ def test_curated_statuses_match_crosswalk_aliases(tmp_path):
     )
     assert decisions["raritas-orientalis"].tier >= PolicyTier.GENERALIZED
     assert decisions["commonus-ubiquitus"].tier == PolicyTier.OPEN
+
+
+def test_natureserve_ranks_reach_tier_assignment():
+    from wildlife_radar.connectors.inaturalist_taxa import parse_taxon_statuses
+    from wildlife_radar.policy.assign import SensitivityInputs, assign_tier
+
+    taxon = {
+        "conservation_statuses": [
+            {
+                "authority": "NatureServe",
+                "status": "S2",
+                "iucn": None,
+                "place": {"id": 14, "ancestor_place_ids": [97394, 1, 14]},
+            },
+            {
+                "authority": "NatureServe",
+                "status": "SNR",
+                "iucn": None,
+                "place": {"id": 14, "ancestor_place_ids": [97394, 1, 14]},
+            },
+        ]
+    }
+    lookup = parse_taxon_statuses(taxon, {"14": "us-ca"}, "14")
+    assert {s.code for s in lookup.statuses} == {"S2", "SNR"}
+    assert lookup.unmapped == ()
+    decision = assign_tier(
+        SensitivityInputs(taxon_resolved=True, statuses=lookup.statuses),
+        scopes=["global", "us-ca"],
+    )
+    assert decision.tier == PolicyTier.COARSE  # S2; SNR adds nothing

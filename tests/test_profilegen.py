@@ -816,3 +816,48 @@ def test_extraction_calibration_against_measured_traits(tmp_path):
     result = extractor.extract(ARTICLE, NAMES, EXTRACTION_FIELDS)
     cands, _ = extraction_candidates(result, ARTICLE, NAMES, accuracy=load_accuracy(path))
     assert {c.field: c.provenance.confidence for c in cands}["traits.habitats"] == 0.5
+
+
+def test_wrong_wikidata_links_do_not_verify_or_merge():
+    # Wikidata lists another species as a synonym and points at its old iNaturalist concept
+    # (seen for Neltuma odorata → screwbean mesquite): neither may verify the id.
+    def services(request: httpx.Request) -> httpx.Response:
+        if "sparql" in str(request.url):
+            return httpx.Response(
+                200,
+                json={
+                    "results": {
+                        "bindings": [
+                            {
+                                "key": {"value": "Mella odorata"},
+                                "item": {"value": "http://www.wikidata.org/entity/Q7"},
+                                "inaturalists": {"value": "100"},
+                                "synonymNames": {"value": "Prosa pubescens"},
+                            }
+                        ]
+                    }
+                },
+            )
+        ids = request.url.path.rsplit("/", 1)[-1]
+        records = {
+            "100": {
+                "id": 100,
+                "name": "Prosa pubescens",
+                "rank": "species",
+                "is_active": False,
+                "current_synonymous_taxon_ids": [101],
+            },
+            "101": {"id": 101, "name": "Strombus pubescens", "rank": "species", "is_active": True},
+        }
+        if ids == "taxa":
+            return httpx.Response(200, json={"results": []})
+        return httpx.Response(200, json={"results": [records[i] for i in ids.split(",")]})
+
+    resolver = IdentityResolver(
+        client=make_client(transport=httpx.MockTransport(services)), limiter=RateLimiter(0)
+    )
+    (ident,) = resolver.resolve_many(["Mella odorata"], gbif="fallback")
+    assert ident.synonym_sources == {"Prosa pubescens": "wikidata"}
+    assert ident.trusted_names == ["Mella odorata"]
+    assert ident.verified["inaturalist"] is False  # not followed, not verified
+    assert ident.ids["inaturalist"] == "100"

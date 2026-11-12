@@ -39,7 +39,7 @@ def test_audit_flags_under_protected_taxa():
     # iNaturalist reported an in-scope status without an IUCN equivalent, plus a status elsewhere.
     lookup = StatusLookup(
         source="inaturalist",
-        unmapped=("State list: Species of Concern (us-ca)",),
+        unmapped=("State list: Endangered (us-ca)", "Local list: Watch (us-ca)"),
         ignored=("Oregon: Endangered @ place 10",),
     )
     conn.execute(
@@ -51,7 +51,8 @@ def test_audit_flags_under_protected_taxa():
     )
     by_check = {(f.check, f.taxon_id): f.severity for f in findings}
     assert by_check[("open_but_threatened_on_wikidata", "raritas-orientalis")] == "high"
-    assert by_check[("open_with_unmapped_status", "commonus-ubiquitus")] == "high"
+    unmapped = sorted(f.severity for f in findings if f.check == "open_with_unmapped_status")
+    assert unmapped == ["high", "medium"]  # threat words make it high
     assert by_check[("threatened_elsewhere", "commonus-ubiquitus")] == "medium"
     # A curated entry under an old genus that matches nothing, while vernalis-litoralis exists.
     assert by_check[("curated_status_unmatched", "oldgenus-litoralis")] == "high"

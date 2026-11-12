@@ -59,10 +59,12 @@ def build_alias_table(conn: duckdb.DuckDBPyConnection) -> dict[str, int]:
         concept = _concept(record)
         if not concept:
             continue
-        # The queried name plus every name the identity knows (accepted name, synonyms such
-        # as an original combination): a renamed species may appear in the store under one
-        # that was never queried itself.
-        names = [query_name, record.get("accepted_name"), *record.get("synonyms", [])]
+        # The queried name plus the identity's trusted names (accepted name; GBIF and
+        # iNaturalist synonyms): a renamed species may appear in the store under a name that
+        # was never queried itself. Wikidata synonym links are not trusted for merging.
+        sources = record.get("synonym_sources") or {}
+        trusted = [s for s in record.get("synonyms", []) if sources.get(s, "gbif") != "wikidata"]
+        names = [query_name, record.get("accepted_name"), *trusted]
         for name in names:
             store_id = species_id_from_name(name, "species") if name else None
             if store_id in counts:
