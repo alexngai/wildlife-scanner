@@ -11,14 +11,19 @@ methods:
   also: [scuba_dive, freedive]
 
 prior:
+  # The warm-season aggregation is a seasonal pattern: the prior carries it, not a daily term.
   seasonal: elicited
   peak: Jul–Oct
 
 signals:
   sst:
+    # Revised 2026-11 from the hypothesis scorecard (docs/research/10 §1): the "+" claim was
+    # about the season, which Level 0 already models. Within the season, raw temperature
+    # entered with a negative sign once the anomaly optimum (from the guild) was included.
+    # No daily direction is claimed until another region or timed records settle it.
     signal: ocean.sst_c
-    direction: "+"
-    strength: strong
+    direction: null
+    strength: weak
     hypothesis: true
 
 provenance:
@@ -27,3 +32,10 @@ provenance:
     method: elicited
     confidence: 0.3
     evidence: Warm-season aggregation of mostly pregnant females at La Jolla Shores (UNVERIFIED).
+  signals.sst:
+    source: docs/research/10-conditions-and-pipeline-2026-11.md
+    method: human
+    confidence: 0.4
+    evidence: >
+      San Diego, test from 2023: the term improves held-out predictions (supported) but its
+      fitted direction is negative within season; the anomaly optimum is also supported.

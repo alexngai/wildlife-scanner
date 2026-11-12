@@ -145,20 +145,30 @@ def cmd_scorecard(args: argparse.Namespace) -> int:
     import duckdb
 
     conn = duckdb.connect(args.db, read_only=True)
+    columns = {r[0] for r in conn.execute("DESCRIBE hypothesis_scorecard").fetchall()}
+    review = "review" if "review" in columns else "NULL"  # stores fitted before the column
     rows = conn.execute(
-        """
+        f"""
         SELECT taxon_id, group_id, term, hypothesis, n_test, round(delta_log_loss, 5),
-            round(ci_lo, 5), round(ci_hi, 5), direction_expected, direction_fitted, verdict
+            round(ci_lo, 5), round(ci_hi, 5), direction_expected, direction_fitted, verdict,
+            {review}
         FROM hypothesis_scorecard WHERE region_id = ? ORDER BY taxon_id, group_id, term
         """,
         [_region(args).id],
     ).fetchall()
+    if args.review:
+        rows = [r for r in rows if r[-1]]
     print(f"{'taxon':28} {'group':20} {'term':22} {'Δlog loss':>10} {'90% CI':>22}  verdict")
-    for t, g, term, hyp, _n, d, lo, hi, exp, fit, verdict in rows:
+    for t, g, term, hyp, _n, d, lo, hi, exp, fit, verdict, why in rows:
         flag = "*" if hyp else " "
         direction = f" ({exp or '?'}→{fit})" if fit else ""
-        print(f"{t:28} {g:20} {term + flag:22} {d:>10} [{lo:>9}, {hi:>9}]  {verdict}{direction}")
+        note = f"  REVIEW: {why}" if why else ""
+        print(
+            f"{t:28} {g:20} {term + flag:22} {d:>10} [{lo:>9}, {hi:>9}]  {verdict}{direction}{note}"
+        )
     print("* hypothesis term; Δlog loss > 0 means the term improves held-out predictions")
+    if args.review:
+        print("REVIEW: revise the profile (docs/research/10 §1 has worked examples), then refit")
     return 0
 
 
@@ -188,4 +198,9 @@ def register(sub: argparse._SubParsersAction) -> None:
 
     p = sub.add_parser("scorecard", help="show the hypothesis scorecard")
     common(p)
+    p.add_argument(
+        "--review",
+        action="store_true",
+        help="only terms whose profile claim needs review (wrong direction or harmful)",
+    )
     p.set_defaults(func=cmd_scorecard)

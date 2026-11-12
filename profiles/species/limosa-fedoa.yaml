@@ -13,3 +13,22 @@ traits:
 
 prior:
   seasonal: learned
+
+signals:
+  tide_daily_low:
+    # Revised 2026-11 from the hypothesis scorecard (docs/research/10 §1): the guild expects
+    # lower low tides to mean more records ("-"); San Diego showed slightly MORE records on
+    # days with higher lows ("+"), a tiny effect. A plausible reading: birds crowd onto fewer
+    # exposed flats and roosts near observers. No direction is claimed until timed records
+    # allow tide-stage terms.
+    direction: null
+    hypothesis: true
+
+provenance:
+  signals.tide_daily_low:
+    source: docs/research/10-conditions-and-pipeline-2026-11.md
+    method: human
+    confidence: 0.3
+    evidence: >
+      San Diego, test from 2023: casual records "supported (tiny)", checklists inconclusive;
+      fitted direction "+" in both, against the guild's "-".

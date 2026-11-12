@@ -114,6 +114,31 @@ def test_normals_use_days_before_cutoff(world):
     assert clim[("TEST1", 200)] > clim[("TEST1", 20)]
 
 
+def test_scorecard_flags_claims_for_review(world):
+    """A term that helps for a reason other than the profile's is marked for review."""
+    conn = world.conn
+    wrong = TermSpec(
+        "sst_anomaly", "ocean.sst_anomaly_c", "linear", "moderate", True, direction="-"
+    )
+    (report,) = run_conditions(
+        conn,
+        region_id="review",
+        bbox=BBOX,
+        split=SPLIT,
+        end=None,
+        specs={"piscis-calida": [wrong]},  # warm water helps this species
+        station_coords={"TEST1": SITE},
+        reps=30,
+    )
+    score = report.scorecard[0]
+    assert score.verdict == "supported" and score.direction_fitted == "+"
+    assert score.review == "fitted direction + contradicts the profile's -"
+    stored = conn.execute(
+        "SELECT review FROM hypothesis_scorecard WHERE region_id = 'review'"
+    ).fetchone()
+    assert stored == (score.review,)
+
+
 def test_levels_and_scorecard(world):
     conn = world.conn
     sst_anomaly = TermSpec("sst_anomaly", "ocean.sst_anomaly_c", "linear", "moderate", True)
@@ -146,7 +171,8 @@ def test_levels_and_scorecard(world):
         "ORDER BY 1, 2"
     ).fetchall()
     assert ("piscis-calida", 1, True) in gates
-    assert conn.execute("SELECT count(*) FROM hypothesis_scorecard").fetchone()[0] == 3
+    n = "SELECT count(*) FROM hypothesis_scorecard WHERE region_id = 'cond'"
+    assert conn.execute(n).fetchone()[0] == 3
     assert conn.execute("SELECT count(*) FROM conditions_models").fetchone()[0] >= 6
 
 
