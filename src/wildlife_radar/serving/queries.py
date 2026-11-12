@@ -452,14 +452,66 @@ class BaselineQueries:
         summary = self.taxon_summary(taxon_id, on)
         group_id = self._choose_group(taxon_id, method)
         tier = PolicyTier(summary.tier)
+        year, weeks, monthly = self._map_period(tier, on)
+        estimates = self._estimate(
+            self._level_for(tier), taxon_ids=[taxon_id], groups=[group_id], weeks=weeks
+        )
+        return self._build_map(summary, group_id, tier, on, year, weeks, monthly, estimates)
+
+    def species_maps(self, taxon_id: str, year: int, method: str | None = None) -> list[SpeciesMap]:
+        """Every map of ``year``: what ``species_map`` returns for each week's Thursday, one map
+        per month for monthly tiers, skipping withheld weeks. Tiers are evaluated per week
+        (profiles can raise them seasonally); the estimates take one query per tier."""
+        taxon_id = self._canon(taxon_id)
+        group_id = self._choose_group(taxon_id, method)
+        periods: dict[tuple, date] = {}
+        for w in range(1, 53):
+            on = week_thursday(year, w)
+            try:
+                tier = self._tier(taxon_id, on)
+            except NotAvailable:
+                continue
+            yr, weeks, _ = self._map_period(tier, on)
+            periods.setdefault((tier, yr, tuple(weeks)), on)
+        by_tier: dict[PolicyTier, set[int]] = defaultdict(set)
+        for tier, _, weeks in periods:
+            by_tier[tier].update(weeks)
+        estimates: dict[tuple[PolicyTier, int], list[Estimate]] = defaultdict(list)
+        for tier, weeks in by_tier.items():
+            for e in self._estimate(
+                self._level_for(tier), taxon_ids=[taxon_id], groups=[group_id], weeks=sorted(weeks)
+            ):
+                estimates[(tier, e.week)].append(e)
+        out = []
+        for (tier, yr, weeks), on in periods.items():
+            found = [e for w in weeks for e in estimates[(tier, w)]]
+            summary = self.taxon_summary(taxon_id, on)
+            monthly = rule_for(tier).time_granularity is Granularity.MONTH
+            out.append(
+                self._build_map(summary, group_id, tier, on, yr, list(weeks), monthly, found)
+            )
+        return out
+
+    @staticmethod
+    def _map_period(tier: PolicyTier, on: date) -> tuple[int, list[int], bool]:
+        """``(year, weeks, monthly)`` a map on ``on`` covers at the tier's time granularity."""
+        if rule_for(tier).time_granularity is Granularity.MONTH:
+            weeks = [w for w in range(1, 53) if week_thursday(on.year, w).month == on.month]
+            return on.year, weeks, True
+        return on.isocalendar().year, [week_of(on)], False
+
+    def _build_map(
+        self,
+        summary: TaxonSummary,
+        group_id: str,
+        tier: PolicyTier,
+        on: date,
+        year: int,
+        weeks: list[int],
+        monthly: bool,
+        estimates: list[Estimate],
+    ) -> SpeciesMap:
         level = self._level_for(tier)
-        monthly = rule_for(tier).time_granularity is Granularity.MONTH
-        if monthly:
-            year = on.year
-            weeks = [w for w in range(1, 53) if week_thursday(year, w).month == on.month]
-        else:
-            year, weeks = on.isocalendar().year, [week_of(on)]
-        estimates = self._estimate(level, taxon_ids=[taxon_id], groups=[group_id], weeks=weeks)
         preds = [self._prediction(e, year, monthly) for e in estimates]
         public, _ = EgressFilter(lambda _t: tier).filter_predictions(preds)
         if public:

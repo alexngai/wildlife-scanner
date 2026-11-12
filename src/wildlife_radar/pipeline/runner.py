@@ -403,6 +403,9 @@ def _publish(ctx: JobContext) -> dict:
     if statuses:
         doc = yaml.safe_load(statuses.read_text(encoding="utf-8")) or {}
         curated = [e["taxon_id"] for e in doc.get("statuses", [])]
+    from wildlife_radar.pipeline.static import before_swap
+
+    hook = None if ctx.params.get("no_static") else before_swap(ctx.region, ctx.now, log=ctx.log)
     with ctx.store() as store:
         result = publish_bundle(
             store.conn,
@@ -414,6 +417,7 @@ def _publish(ctx: JobContext) -> dict:
             now=ctx.now,
             allow_findings=bool(ctx.params.get("allow_findings")),
             inputs=ctx.params.get("_inputs"),
+            before_swap=hook,
         )
     return {"version": result.version, "rows": result.rows, "audit": result.findings}
 

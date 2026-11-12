@@ -11,7 +11,7 @@ a mocked S3 API. Design background: [`design/data-platform.md`](design/data-plat
  │ runs stale jobs → audit  │         │  region=<id>/CURRENT     │        │ auto-stop)       │
  │ → publish → push         │         │  region=<id>/version=<v>/│        │ mirrors CURRENT  │
  └──────────────────────────┘         └──────────────────────────┘        └──────────────────┘
-        ▲ GBIF, iNaturalist, NOAA                    │ static products (CDN), next step
+        ▲ GBIF, iNaturalist, NOAA                    │ static products → frontend (CDN)
 ```
 
 ## Parts
@@ -21,6 +21,7 @@ a mocked S3 API. Design background: [`design/data-platform.md`](design/data-plat
 | Worker | `wildlife-radar worker --region R --db /data/R.duckdb --lake /data/lake --ingest-snapshots --every 30` | fly.io app with a volume (`deploy/fly.worker.toml`) |
 | Publish bucket | `region=<id>/version=<v>/{serving.duckdb, manifest.json}` and `region=<id>/CURRENT` | Cloudflare R2 |
 | API | `wildlife-radar serve --region R --cache-dir /tmp/bundles` with `WILDLIFE_RADAR_PUBLISH_URL` set | fly.io app, auto-stop (`deploy/fly.api.toml`) |
+| Static products | `version=<v>/static/{index,taxa}.json`, `static/maps/…`, `static/places/…` | same bucket, served by R2's public domain / CDN |
 
 - **The worker** ticks every 30 minutes. Each tick runs only stale jobs (`Job.max_age`):
   - live iNaturalist records: every tick;
@@ -40,6 +41,24 @@ a mocked S3 API. Design background: [`design/data-platform.md`](design/data-plat
 - **Rollback:** point `CURRENT` at a kept version:
   - `fly ssh console -a <worker>`, then rewrite the pointer;
   - or upload a one-line `CURRENT` file with any S3 tool.
+
+## Static products (for the frontend)
+
+Built by `publish` from the finished bundle, through the same query layer as the API, before
+`CURRENT` moves (`src/wildlife_radar/pipeline/static.py`):
+
+- `version=<v>/static/index.json`: the entry point. The frontend reads `CURRENT`, then this
+  index, which lists every other file's path (relative to `region=<id>/`).
+- `version=<v>/static/taxa.json`: search index (names, aliases, group, tier, records).
+- `static/maps/<taxon>/<year>.<key>.json`: the year's maps as H3 cells, weekly for openly
+  mapped taxa, monthly at landscape scale for coarse ones. Weeks a taxon is withheld are
+  absent. Withheld taxa are absent everywhere.
+- `static/places/<place>/<year>.<key>.json`: weekly place lists for the region pack's places.
+
+Maps and place lists are content-addressed, so a live publish rebuilds only the index and
+search index. Only files whose inputs changed (a new baseline, a tier change) are regenerated
+and uploaded. The bucket needs public read access (an R2 custom domain or `r2.dev`) for these
+paths. Everything published is already policy-filtered. `--no-static` skips them.
 
 ## Configuration
 
@@ -111,7 +130,10 @@ command as `app`.
 
 ## Not done yet
 
-- **Static products** (search index, calendars, place lists, maps) for the CDN: next.
+- **Static product sizes on real data:** a demo map is ~250 KB per species-year (43 KB
+  gzipped). Common San Diego species cover many more cells. Measure and, if needed, split maps
+  by month or quantize probabilities. PMTiles was skipped: H3 cells render directly in the
+  browser.
 - **One API for several regions:** `serve` serves one region today. A second region means a
   second process or app until the API routes requests by coordinates (data-platform.md §5).
 - **Raw, norm, ref and derived layers stay on the worker's volume.** Only `publish` is in R2. If the

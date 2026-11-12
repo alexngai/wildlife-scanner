@@ -485,7 +485,9 @@ def cmd_publish(args: argparse.Namespace) -> int:
 
     import yaml
 
+    from wildlife_radar.core.time import utcnow
     from wildlife_radar.pipeline.publish import PublishBlocked, publish_bundle
+    from wildlife_radar.pipeline.static import before_swap
     from wildlife_radar.storage import ObservationStore
 
     region = _region(args)
@@ -503,6 +505,8 @@ def cmd_publish(args: argparse.Namespace) -> int:
                 curated_ids=curated,
                 registry=_registry(args),
                 allow_findings=args.allow_findings,
+                now=(now := utcnow()),
+                before_swap=None if args.no_static else before_swap(region, now),
             )
         except PublishBlocked as exc:
             print(f"error: publishing blocked: {exc}; run audit-tiers for details", file=sys.stderr)
@@ -722,6 +726,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--allow-findings", action="store_true", help="publish despite high audit findings"
     )
+    p.add_argument("--no-static", action="store_true", help="skip the static products")
     p.set_defaults(func=cmd_publish)
 
     p = sub.add_parser("demo", help="build an offline demo database from synthetic data")
