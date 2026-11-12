@@ -275,3 +275,42 @@ def test_nowcast_for_open_taxa_without_profiles(world):
     assert gates["piscis-indifferens"] is False  # steady: nothing to gain
     assert "piscis-calida" not in gates  # profiled taxa are handled by run_conditions
     assert [b[0] for b in summary.best][:1] == ["piscis-pulsans"]
+
+
+def test_recent_activity_from_a_bundle(world, tmp_path):
+    import duckdb
+
+    from wildlife_radar.pipeline.publish import publish_bundle
+    from wildlife_radar.policy.statuses import TierService
+    from wildlife_radar.regions import Region
+    from wildlife_radar.serving import BaselineQueries
+    from wildlife_radar.serving.forecast import ForecastService, recent_activity
+
+    conn = world.conn  # nowcasts for region "now" were fitted by the previous test
+    if not conn.execute("SELECT count(*) FROM conditions_gates WHERE region_id = 'now'").fetchone()[
+        0
+    ]:
+        pytest.skip("needs test_nowcast_for_open_taxa_without_profiles")
+    # The busiest day of a pulse in the test period; ask two days later.
+    peak = conn.execute(
+        "SELECT local_date FROM observations WHERE taxon_id = 'piscis-pulsans' "
+        "AND local_date >= '2023-01-01' GROUP BY 1 ORDER BY count(*) DESC LIMIT 1"
+    ).fetchone()[0]
+    on = peak + timedelta(days=2)
+    region = Region(id="now", name="test", bbox=BBOX)
+    result = publish_bundle(
+        conn,
+        region,
+        tmp_path,
+        now=datetime(on.year, on.month, on.day, 12, tzinfo=UTC),
+        allow_findings=True,
+    )
+    bundle = duckdb.connect(str(result.path / "serving.duckdb"), read_only=True)
+    queries = BaselineQueries(bundle, region, TierService(bundle, "now"))
+    activity = recent_activity(ForecastService(queries, {}), *SITE, on)
+    picking = {i.taxon_id: i for i in activity.picking_up}
+    reported = {i.taxon_id for i in activity.reported_recently}
+    assert "piscis-pulsans" in picking and picking["piscis-pulsans"].odds_boost >= 1.25
+    assert picking["piscis-pulsans"].p_now > picking["piscis-pulsans"].p_usual
+    assert "piscis-communis" in reported and "piscis-communis" not in picking
+    assert activity.data_through < on

@@ -58,6 +58,39 @@ class Forecast(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class RecentItem(BaseModel):
+    taxon_id: str
+    scientific_name: str | None
+    common_name: str | None
+    effort_group: str
+    method: str
+    recent_detections: int
+    """Outings with records of the taxon in the ~10 km cell during the window."""
+    recent_outings: int
+    """All outings of the effort group in the cell during the window."""
+    p_usual: float
+    """Baseline (Level 0) chance per outing at this place and week."""
+    p_now: float
+    level: int
+    odds_boost: float | None = None
+    """Factor by which recent sightings change the odds (Level-2 models only)."""
+    drivers: list[Driver] = Field(default_factory=list)
+
+
+class RecentActivity(BaseModel):
+    day: date
+    cell: str
+    resolution_km: float
+    window_days: int
+    data_through: date
+    """Recent records are published with a delay (24 h for openly mapped species)."""
+    picking_up: list[RecentItem] = Field(default_factory=list)
+    """Species whose recent sightings raise today's chance, by a gated Level-2 model."""
+    reported_recently: list[RecentItem] = Field(default_factory=list)
+    """Openly mapped species reported nearby during the window, most reported first."""
+    notes: list[str] = Field(default_factory=list)
+
+
 def _model(raw: str) -> OffsetLogit:
     d = json.loads(raw)
     model = OffsetLogit([TermSpec(**t) for t in d["terms"]])
@@ -234,6 +267,93 @@ class ForecastService:
         )
         out.notes += notes
         return out
+
+
+def _recent_rows(service: ForecastService, c1: str, start: date, end: date) -> list[tuple]:
+    """``(taxon, group, detections, outings)`` in parent cell ``c1`` for days in [start, end)."""
+    conn = service.conn
+    tables = {r[0] for r in conn.execute("SHOW TABLES").fetchall()}
+    if "recent_detections" not in tables:
+        return []
+    return conn.execute(
+        """
+        WITH d AS (
+            SELECT taxon_id, group_id, sum(k) AS k FROM recent_detections
+            WHERE c1 = ? AND day >= ? AND day < ? GROUP BY ALL
+        ),
+        e AS (
+            SELECT group_id, sum(n) AS n FROM recent_effort
+            WHERE c1 = ? AND day >= ? AND day < ? GROUP BY ALL
+        )
+        SELECT d.taxon_id, d.group_id, d.k, coalesce(e.n, d.k) FROM d LEFT JOIN e USING (group_id)
+        ORDER BY d.k DESC
+        """,
+        [c1, start, end, c1, start, end],
+    ).fetchall()
+
+
+def recent_activity(
+    service: ForecastService,
+    lat: float,
+    lon: float,
+    on: date,
+    *,
+    limit: int = 20,
+    min_boost: float = 1.25,
+) -> RecentActivity:
+    """What's being reported near a place, and which species that makes more likely today."""
+    from wildlife_radar.policy.tiers import rule_for
+
+    q = service.q
+    if not q.region.contains(lat, lon):
+        raise ValueError("location is outside the region")
+    c1 = spatial.cell_for_point(lat, lon, q.level_res["parent"])
+    start = on - timedelta(days=service.nowcast_days)
+    delay = rule_for(PolicyTier.OPEN).min_delay
+    out = RecentActivity(
+        day=on,
+        cell=c1,
+        resolution_km=spatial.edge_km(q.level_res["parent"]),
+        window_days=service.nowcast_days,
+        data_through=on - timedelta(days=max(1, delay.days)),
+    )
+    rows = _recent_rows(service, c1, start, on)
+    if not rows:
+        out.notes.append("no recent records published for this area")
+        return out
+    for taxon_id, group_id, k, n in rows:
+        # Only openly mapped taxa, re-checked for this date (profiles can raise tiers seasonally).
+        if q.tiers.get(taxon_id, on) != PolicyTier.OPEN:
+            continue
+        try:
+            fc = service.forecast(taxon_id, lat, lon, on, method=group_id)
+        except (NotAvailable, ValueError):
+            continue
+        boost = None
+        if fc.level >= 2:
+            nowcast = sum(d.contribution for d in fc.drivers if d.signal.startswith("nowcast."))
+            boost = round(math.exp(nowcast), 3)
+        item = RecentItem(
+            taxon_id=taxon_id,
+            scientific_name=fc.taxon.scientific_name,
+            common_name=fc.taxon.common_name,
+            effort_group=group_id,
+            method=fc.method,
+            recent_detections=int(k),
+            recent_outings=int(n),
+            p_usual=fc.p_level0,
+            p_now=fc.p,
+            level=fc.level,
+            odds_boost=boost,
+            drivers=fc.drivers,
+        )
+        out.reported_recently.append(item)
+        if boost is not None and boost >= min_boost:
+            out.picking_up.append(item)
+    out.picking_up.sort(key=lambda i: -(i.p_now * math.log(i.odds_boost or 1)))
+    out.picking_up = out.picking_up[:limit]
+    out.reported_recently = out.reported_recently[:limit]
+    return out
 
 
 def _dt(d: date):
