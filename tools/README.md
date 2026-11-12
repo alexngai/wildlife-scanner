@@ -8,6 +8,7 @@ The normal path is `wildlife-radar ingest-snapshot --snapshot-date …`. It read
 
 | Script | What it does |
 |---|---|
+| `list_parts.py` | Lists a snapshot's parts (`[key, size]`) from the public S3 bucket over HTTPS, for `extract_region.py`. |
 | `footer.py` | Builds a sparse local Parquet file holding only a remote part's footer, so DuckDB can read its metadata. |
 | `extract_region.py` | For each snapshot part: fetches the footer, then only the lat/lon column chunks, and tests the bounding box. If any rows match, it fetches the remaining needed columns and writes the matching rows to a small local staging Parquet. It is resumable: `.done` markers mark finished parts. |
 | `ingest_parallel.py` | Parses staged rows with the package's own parser across N processes and bulk-loads them into an `ObservationStore`. |
@@ -20,7 +21,11 @@ uv run python tools/extract_region.py parts.json staging/ work/ -121.0 32.4 -114
 uv run python tools/ingest_parallel.py data/wr.duckdb staging/ -117.62 32.53 -116.08 33.51 4
 ```
 
-`parts.json` is a JSON list of `[key, size]` pairs for the snapshot's parts. Build it from an S3 `ListObjectsV2` listing of `occurrence/<date>/occurrence.parquet/`.
+`parts.json` is a JSON list of `[key, size]` pairs for the snapshot's parts:
+
+```bash
+uv run python tools/list_parts.py 2026-11-01 data/parts.json
+```
 
 Reference run, 2026-11-01 snapshot, Southern California bounding box:
 - 10,346 parts
