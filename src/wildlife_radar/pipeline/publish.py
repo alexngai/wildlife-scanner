@@ -92,7 +92,10 @@ def publish_bundle(
     now: datetime | None = None,
     allow_findings: bool = False,
     inputs: dict[str, str] | None = None,
+    before_swap=None,
 ) -> PublishResult:
+    """``before_swap(bundle_path, version_dir, final_dir)`` may add files (static products) to
+    the version before it becomes current; whatever it returns is recorded in the manifest."""
     now = now or utcnow()
     findings = audit_tiers(conn, region.id, list(curated_ids))
     high = [f for f in findings if f.severity == "high"]
@@ -193,6 +196,7 @@ def publish_bundle(
         )
     finally:
         conn.execute("DETACH bundle")
+    extra = before_swap(bundle, tmp, final) if before_swap else None
     (tmp / "manifest.json").write_text(
         json.dumps(
             {
@@ -204,6 +208,7 @@ def publish_bundle(
                 "rows": result.rows,
                 "audit": result.findings,
                 "audit_overridden": result.overridden,
+                "static": extra,
                 "status": "complete",
             },
             indent=2,

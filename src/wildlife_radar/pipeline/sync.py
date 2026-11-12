@@ -10,15 +10,19 @@ Layout, the same locally and in the bucket (docs/design/data-platform.md §2)::
 - **Pull** (bucket → API): download the bundle of the remote ``CURRENT`` into a local folder,
   then swap the local pointer; the API follows it (``serve --bundle-dir``).
 - **Prune**: keep the newest few versions (and always the current one), here and remotely.
-  Rollback is a pointer change to a kept version.
+  Rollback is a pointer change to a kept version. Shared static files
+  (``region=<id>/static/...``, content-addressed) are kept while a kept version's
+  ``static/index.json`` references them.
 """
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
 from wildlife_radar.pipeline.publish import BUNDLE_FILE, CURRENT, set_current
+from wildlife_radar.pipeline.static import INDEX, STATIC_DIR, referenced
 from wildlife_radar.storage.objects import NO_CACHE, ObjectStore
 
 KEEP_VERSIONS = 6
@@ -49,6 +53,17 @@ def push_publish(
     remote_version = (store.get_text(f"{_region_prefix(region_id)}/{CURRENT}") or "").strip()
     out: dict = {"version": version, "uploaded": 0}
     if remote_version != version:
+        # Shared static files first (only new ones: they are content-addressed).
+        shared = region_dir / STATIC_DIR
+        if shared.exists():
+            have = set(store.list(f"{_region_prefix(region_id)}/{STATIC_DIR}/"))
+            for path in sorted(p for p in shared.rglob("*") if p.is_file()):
+                if path.name.startswith("."):
+                    continue
+                key = f"{_region_prefix(region_id)}/{path.relative_to(region_dir).as_posix()}"
+                if key not in have:
+                    store.put_file(key, path)
+                    out["uploaded"] += 1
         folder = region_dir / f"version={version}"
         prefix = f"{_region_prefix(region_id)}/version={version}"
         files = sorted(p for p in folder.rglob("*") if p.is_file())
@@ -57,7 +72,7 @@ def push_publish(
         for path in files:
             store.put_file(f"{prefix}/{path.relative_to(folder).as_posix()}", path)
         store.put_text(f"{_region_prefix(region_id)}/{CURRENT}", version + "\n", NO_CACHE)
-        out["uploaded"] = len(files)
+        out["uploaded"] += len(files)
     out["pruned"] = prune_remote(store, region_id, keep)
     return out
 
@@ -65,10 +80,20 @@ def push_publish(
 def prune_remote(store: ObjectStore, region_id: str, keep: int = KEEP_VERSIONS) -> list[str]:
     keys = store.list(f"{_region_prefix(region_id)}/version=")
     current = (store.get_text(f"{_region_prefix(region_id)}/{CURRENT}") or "").strip()
-    drop = _stale(sorted(_versions_from_keys(keys, region_id)), current, keep)
+    versions = sorted(_versions_from_keys(keys, region_id))
+    drop = _stale(versions, current, keep)
     if drop:
         prefixes = tuple(f"{_region_prefix(region_id)}/version={v}/" for v in drop)
         store.delete([k for k in keys if k.startswith(prefixes)])
+    # Shared static files no kept version references.
+    used: set[str] = set()
+    for v in set(versions) - set(drop):
+        text = store.get_text(f"{_region_prefix(region_id)}/version={v}/{STATIC_DIR}/{INDEX}")
+        if text:
+            used |= referenced(json.loads(text))
+    shared = store.list(f"{_region_prefix(region_id)}/{STATIC_DIR}/")
+    strip = len(_region_prefix(region_id)) + 1
+    store.delete([k for k in shared if k[strip:] not in used])
     return drop
 
 
@@ -82,6 +107,14 @@ def prune_local(publish_root: Path, region_id: str, keep: int = KEEP_VERSIONS) -
     drop = _stale(versions, local_current(region_dir), keep)
     for v in drop:
         shutil.rmtree(region_dir / f"version={v}", ignore_errors=True)
+    shared = region_dir / STATIC_DIR
+    if shared.exists():
+        used: set[str] = set()
+        for index in region_dir.glob(f"version=*/{STATIC_DIR}/{INDEX}"):
+            used |= referenced(json.loads(index.read_text(encoding="utf-8")))
+        for path in [p for p in shared.rglob("*") if p.is_file()]:
+            if path.relative_to(region_dir).as_posix() not in used:
+                path.unlink()
     return drop
 
 
