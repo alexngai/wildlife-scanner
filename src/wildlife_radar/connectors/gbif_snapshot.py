@@ -52,6 +52,7 @@ SNAPSHOT_COLUMNS = (
     "recordedby",
     "mediatype",
     "issue",
+    "eventid",
 )
 
 
@@ -84,8 +85,13 @@ def snapshot_rows(
     if any(p.startswith(("s3://", "http://", "https://")) for p in path_list):
         con.execute("INSTALL httpfs; LOAD httpfs; SET s3_region='us-east-1'")
     lon_min, lat_min, lon_max, lat_max = bbox
-    cols = ", ".join(SNAPSHOT_COLUMNS)
     sources = "[" + ", ".join(_quote(p) for p in path_list) + "]"
+    # Older extracts may lack newer columns (e.g. eventid): select NULL for those.
+    present = {
+        r[0].lower()
+        for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet({sources}) LIMIT 0").fetchall()
+    }
+    cols = ", ".join(c if c in present else f"NULL AS {c}" for c in SNAPSHOT_COLUMNS)
     cursor = con.execute(
         f"""
         SELECT {cols} FROM read_parquet({sources})

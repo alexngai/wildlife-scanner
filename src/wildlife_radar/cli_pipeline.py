@@ -228,6 +228,51 @@ def cmd_build_tiers(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_repair_dates(args: argparse.Namespace) -> int:
+    """Re-date placeholder-dated records from their event ids (registry: event_id_date)."""
+    from wildlife_radar.connectors.gbif_events import fetch_event_ids
+    from wildlife_radar.storage import ObservationStore
+    from wildlife_radar.storage.repair import (
+        missing_event_ids,
+        redate_from_event_ids,
+        set_event_ids,
+    )
+
+    region = _region(args)
+    registry = _registry(args)
+    report = {}
+    with ObservationStore(args.db) as store:
+        for key, entry in registry.datasets.items():
+            if not (entry.event_id_date and entry.placeholder_dates):
+                continue
+            fetched = 0
+            if not args.no_fetch:
+                for d in entry.placeholder_dates:
+                    if missing_event_ids(store.conn, key, [d]):
+                        print(f"fetching event ids for {key} on {d}…", file=sys.stderr)
+                        fetched += set_event_ids(
+                            store.conn,
+                            key,
+                            fetch_event_ids(key, d.isoformat(), region.bbox, workers=args.workers),
+                        )
+            redated = redate_from_event_ids(
+                store.conn, key, entry.event_id_date, entry.placeholder_dates
+            )
+            report[key] = {
+                "event_ids_fetched": fetched,
+                "redated": redated,
+                "still_on_placeholder_dates": store.conn.execute(
+                    "SELECT count(*) FROM observations WHERE dataset_key = ? "
+                    "AND local_date IN (SELECT unnest(?))",
+                    [key, list(entry.placeholder_dates)],
+                ).fetchone()[0],
+            }
+    print(json.dumps(report, indent=2))
+    if report:
+        print("note: rebuild the baseline to use the repaired dates", file=sys.stderr)
+    return 0
+
+
 def cmd_audit_tiers(args: argparse.Namespace) -> int:
     import yaml
 
@@ -401,6 +446,15 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--statuses", help="curated statuses YAML (default: the region pack's)")
     p.add_argument("--refresh-statuses", action="store_true", help="ignore cached status lookups")
     p.set_defaults(func=cmd_build_tiers)
+
+    p = sub.add_parser(
+        "repair-dates", help="re-date placeholder-dated records from their event ids"
+    )
+    common(p)
+    p.add_argument("--datasets", help="dataset registry YAML (default: region pack's)")
+    p.add_argument("--no-fetch", action="store_true", help="don't fetch missing event ids")
+    p.add_argument("--workers", type=int, default=4)
+    p.set_defaults(func=cmd_repair_dates)
 
     p = sub.add_parser("audit-tiers", help="check tiers against every status signal (gate)")
     common(p)

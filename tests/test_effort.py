@@ -305,3 +305,78 @@ def test_survey_taxa_without_absences_use_casual_effort(world_store):
     finally:
         store.conn.execute("DELETE FROM observations WHERE dedupe_key LIKE 'snail-%'")
     assert classes == {"megastraea-undosa": "casual", "piscis-communis": "dive_survey"}
+
+
+def test_redate_from_event_ids_and_fetch_partitions():
+    from datetime import timedelta
+
+    import httpx
+
+    from wildlife_radar.connectors.base import RateLimiter, make_client
+    from wildlife_radar.connectors.gbif_events import fetch_event_ids
+    from wildlife_radar.core.time import Precision, TimeWindow
+    from wildlife_radar.storage.repair import (
+        missing_event_ids,
+        redate_from_event_ids,
+        set_event_ids,
+    )
+
+    world = SyntheticWorld(
+        observers=2, visits_per_observer=5, survey_sites=SITES, survey_species=(COMMON_FISH,)
+    )
+    records = [r for r in world.generate() if r.source_id == "synthetic-survey"][:40]
+    stamp = datetime(2024, 11, 30, 8, tzinfo=UTC)
+    placeholder = TimeWindow(start=stamp, end=stamp + timedelta(days=1), precision=Precision.DAY)
+    true_dates = {r.source_record_id: r.time.start.date() for r in records}
+    records = [r.model_copy(update={"time": placeholder}) for r in records]
+    store = ObservationStore()
+    store.add(records)
+    conn = store.conn
+    key = "synthetic-dive-survey"
+    assert missing_event_ids(conn, key, [date(2024, 11, 30)]) == 40
+
+    # The search API pages records; the box is split until each piece is under the cap.
+    def api(request: httpx.Request) -> httpx.Response:
+        params = request.url.params
+        if params["limit"] == "0":
+            lat_lo, lat_hi = map(float, params["decimalLatitude"].split(","))
+            inside = [r for r in records if lat_lo <= r.footprint.lat <= lat_hi]
+            return httpx.Response(200, json={"count": len(inside)})
+        lat_lo, lat_hi = map(float, params["decimalLatitude"].split(","))
+        inside = [r for r in records if lat_lo <= r.footprint.lat <= lat_hi]
+        offset, limit = int(params["offset"]), int(params["limit"])
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "key": int(r.source_record_id),
+                        "eventID": f"SITE_{true_dates[r.source_record_id]:%Y%m%d}_swath",
+                    }
+                    for r in inside[offset : offset + limit]
+                ]
+            },
+        )
+
+    pairs = list(
+        fetch_event_ids(
+            key,
+            "2024-11-30",
+            world.bbox,
+            client=make_client(transport=httpx.MockTransport(api)),
+            limiter=RateLimiter(0),
+            workers=1,
+        )
+    )
+    assert len(pairs) == 40
+    assert set_event_ids(conn, key, pairs) == 40
+    assert redate_from_event_ids(conn, key, r"_(\d{8})_", [date(2024, 11, 30)]) == 40
+    rows = conn.execute(
+        "SELECT source_record_id, local_date, week, visit_key, time_start FROM observations"
+    ).fetchall()
+    for record_id, d, week, visit_key, start in rows:
+        assert d == true_dates[record_id]
+        assert week == min(d.isocalendar().week, 52)
+        assert f"|{d.isoformat()}|" in visit_key
+        assert start.date() == d  # local midnight at -117° is 08:00 UTC the same day
+    assert missing_event_ids(conn, key, [date(2024, 11, 30)]) == 0
