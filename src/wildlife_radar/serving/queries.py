@@ -300,6 +300,14 @@ class BaselineQueries:
                 }
         self._licenses = self._load_licenses(conn)
         self._aliases = alias_map(conn)
+        # Display names from the identity crosswalk (published bundles carry taxon_names).
+        self._names: dict[str, str] = {}
+        if "taxon_names" in tables:
+            self._names = dict(
+                conn.execute(
+                    "SELECT taxon_id, common_name FROM taxon_names WHERE common_name IS NOT NULL"
+                ).fetchall()
+            )
 
     # ------------------------------------------------------------------ helpers
     def _load_licenses(self, conn: duckdb.DuckDBPyConnection) -> dict[str, LicenseInfo]:
@@ -330,8 +338,10 @@ class BaselineQueries:
 
     def common_name(self, taxon_id: str) -> str | None:
         if taxon_id in self._species_profiles:
-            return self.profiles.resolve(taxon_id).common_name
-        return None
+            name = self.profiles.resolve(taxon_id).common_name
+            if name:
+                return name
+        return self._names.get(taxon_id)
 
     def license_for(self, groups: list[str | None]) -> LicenseInfo:
         infos = [self._licenses[g] for g in groups if g in self._licenses]

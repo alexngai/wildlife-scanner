@@ -33,6 +33,7 @@ import duckdb
 import h3
 
 from wildlife_radar.baseline.effort import SURVEY_CLASSES, DatasetRegistry, create_dataset_classes
+from wildlife_radar.connectors.gbif import INATURALIST_RG_DATASET
 from wildlife_radar.core.time import utcnow
 from wildlife_radar.storage.aliases import ensure_alias_table
 from wildlife_radar.storage.observations import CELL_RESOLUTIONS, VISIT_RES, naive_utc
@@ -219,7 +220,10 @@ def create_training_view(
             coalesce(tg.taxon_group, b.group_id) || ':' || b.effort_class AS egroup,
             b.cell_r{R} AS c, b.cell_r{P1} AS c1, b.cell_r{P2} AS c2, b.week, b.local_date,
             (b.outcome IN ('detected', 'presence_only') OR (b.outcome = 'count' AND b.count > 0))
-                AS detected
+                AS detected,
+            -- Sources with a live feed: nowcast inputs come only from these, in training and
+            -- in serving alike (data-platform.md §4).
+            (b.source_id = 'inaturalist' OR b.dataset_key = '{INATURALIST_RG_DATASET}') AS live
         FROM base b LEFT JOIN tg USING (taxon_id)
         """,
         [

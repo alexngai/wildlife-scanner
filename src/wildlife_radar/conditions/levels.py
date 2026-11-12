@@ -9,8 +9,9 @@ For each taxon × effort group:
    context → range-only fallback, as in the Level-0 backtest).
 3. **Level 1** adds the profile's condition terms for which daily signals exist near the trial
    (nearest station within the signal's reach). Anomaly normals use training days only.
-4. **Level 2** adds a nowcast: recorded detections and outings in the same parent cell during
-   the previous ``nowcast_days`` days (strictly before the trial's date; no same-day contagion).
+4. **Level 2** adds a nowcast: detections of the taxon and outings recording its taxon group in
+   the same parent cell during the previous ``nowcast_days`` days (strictly before the trial's
+   date; no same-day contagion), from live sources only (as available when forecasting).
 5. **Gates** (framework.md §5.4): Level 1 must beat Level 0 (recalibrated) and Level 2 must
    beat Level 1 out of sample, with the lower end of a 90% block-bootstrap interval (blocks =
    test days) above 0 and a Brier improvement of at least ``min_skill`` (0.5%); Level 2 must
@@ -322,17 +323,18 @@ def _nowcast(
         """
         CREATE OR REPLACE TEMP TABLE _cdet AS
         SELECT c1, local_date AS d, count(DISTINCT visit_key) AS k FROM _all
-        WHERE taxon_id = ? AND egroup = ? AND detected GROUP BY ALL
+        WHERE taxon_id = ? AND detected AND live GROUP BY ALL
         """,
-        [taxon_id, group_id],
+        [taxon_id],
     )
+    # Only live sources (as available when forecasting): outings of the taxon group.
     conn.execute(
         """
         CREATE OR REPLACE TEMP TABLE _ceff AS
         SELECT c1, local_date AS d, count(DISTINCT visit_key) AS n FROM _all
-        WHERE egroup = ? GROUP BY ALL
+        WHERE live AND taxon_group = ? GROUP BY ALL
         """,
-        [group_id],
+        [split_egroup(group_id)[0]],
     )
 
     def window_sum(table: str, col: str) -> np.ndarray:

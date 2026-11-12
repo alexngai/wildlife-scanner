@@ -169,6 +169,21 @@ def publish_bundle(
             used = {k: v for k, v in params.items() if f"${k}" in sql}
             conn.execute(f"CREATE TABLE bundle.{table} AS {sql}", used)
             result.rows[table] = conn.execute(f"SELECT count(*) FROM bundle.{table}").fetchone()[0]
+        if "taxon_identity" in present:
+            # Display names from the identity crosswalk (iNaturalist's preferred names).
+            conn.execute(
+                f"""
+                CREATE TABLE bundle.taxon_names AS
+                SELECT p.taxon_id, any_value(p.scientific_name) AS scientific_name,
+                       any_value(i.record->>'$.common_name') AS common_name
+                FROM prior_taxa p LEFT JOIN taxon_identity i ON i.query_name = p.scientific_name
+                WHERE p.region_id = ? AND p.taxon_id IN {visible} GROUP BY 1
+                """,
+                [region.id],
+            )
+            result.rows["taxon_names"] = conn.execute(
+                "SELECT count(*) FROM bundle.taxon_names"
+            ).fetchone()[0]
         if "observations" in present:
             result.rows.update(_recent(conn, region, registry, config or BaselineConfig(), now))
         conn.execute(
@@ -207,8 +222,8 @@ def _recent(
     cfg: BaselineConfig,
     now: datetime,
 ) -> dict[str, int]:
-    """Recent detections (OPEN taxa only) and effort per effort group, parent cell and day,
-    from records older than the OPEN tier's delay."""
+    """Recent detections (OPEN taxa only) and outings per taxon group, parent cell and day,
+    from live sources and records older than the OPEN tier's delay."""
     delay = rule_for(PolicyTier.OPEN).min_delay
     create_training_view(
         conn,
@@ -222,17 +237,17 @@ def _recent(
     conn.execute(
         """
         CREATE TABLE bundle.recent_effort AS
-        SELECT egroup AS group_id, c1, local_date AS day, count(DISTINCT visit_key) AS n
-        FROM _pub_recent WHERE local_date IS NOT NULL GROUP BY ALL
+        SELECT taxon_group, c1, local_date AS day, count(DISTINCT visit_key) AS n
+        FROM _pub_recent WHERE live AND local_date IS NOT NULL GROUP BY ALL
         """
     )
     conn.execute(
         """
         CREATE TABLE bundle.recent_detections AS
-        SELECT r.taxon_id, r.egroup AS group_id, r.c1, r.local_date AS day,
+        SELECT r.taxon_id, r.taxon_group, r.c1, r.local_date AS day,
                count(DISTINCT r.visit_key) AS k
         FROM _pub_recent r JOIN _pub_tier t ON t.taxon_id = r.taxon_id AND t.tier = 0
-        WHERE r.detected AND r.local_date IS NOT NULL GROUP BY ALL
+        WHERE r.live AND r.detected AND r.local_date IS NOT NULL GROUP BY ALL
         """
     )
     return {

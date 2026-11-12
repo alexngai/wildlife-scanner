@@ -1,8 +1,10 @@
 """Recent-sightings forecasts (Level 2) for every OPEN taxon with enough data.
 
 Level 2 here is the Level-0 baseline (recalibrated by an intercept) plus two nowcast terms:
-recorded detections of the taxon, and outings of its effort group, in the same parent cell
-(~10 km) during the previous ``days`` days, strictly before the day. It needs no profile and no
+recorded detections of the taxon, and outings recording its taxon group, in the same parent
+cell (~10 km) during the previous ``days`` days, strictly before the day. Both come only from
+sources with a live feed (iNaturalist), in training as in serving, so a model trained on eBird
+checklists still has its inputs when only iNaturalist is live. It needs no profile and no
 stations, so it can run for hundreds of taxa. Taxa with a species profile get their Level 1–2
 from ``levels.run_conditions`` instead.
 
@@ -60,9 +62,15 @@ def _group_tables(
         """,
         [split_d, group_id],
     )
+    # Recent effort: outings with live-source records of the same taxon group (whatever the
+    # effort class), since only live sources are available when forecasting.
     conn.execute(
-        "CREATE OR REPLACE TEMP TABLE _ng_eff AS "
-        "SELECT c1, d, count(*) AS n FROM _ng_base GROUP BY ALL"
+        """
+        CREATE OR REPLACE TEMP TABLE _ng_eff AS
+        SELECT c1, local_date AS d, count(DISTINCT visit_key) AS n FROM _all
+        WHERE live AND taxon_group = ? AND local_date IS NOT NULL GROUP BY ALL
+        """,
+        [split_egroup(group_id)[0]],
     )
     # Recent effort depends only on the group: computed once for all its outings.
     conn.execute(
@@ -129,9 +137,9 @@ def evaluate_nowcast(
         """
         CREATE OR REPLACE TEMP TABLE _nt_det AS
         SELECT c1, local_date AS d, count(DISTINCT visit_key) AS k FROM _all
-        WHERE taxon_id = ? AND egroup = ? AND detected GROUP BY ALL
+        WHERE taxon_id = ? AND detected AND live GROUP BY ALL
         """,
-        [taxon_id, group_id],
+        [taxon_id],
     )
     conn.execute(
         f"""
