@@ -95,19 +95,45 @@ ready for deck.gl's `H3HexagonLayer` or polygons from `cellToBoundary`.
 ## Place lists (`static/places/<place>.<key>.json`)
 
 ```json
-{"format": 2, "place": {"place_id": "point-lobos", "…": "…"}, "year_basis": 2026,
- "weeks": [ {"week": 1, "groups": [ {"group": "birds:checklist", "most_likely": ["…"],
-             "special_here": ["…"], "peaking_now": ["…"]} ], "awareness": ["…"]}, "…" ]}
+{
+  "format": 2, "place": {"place_id": "point-lobos", "…": "…"}, "year_basis": 2026,
+  "p_scale": 100000,
+  "item_fields": ["taxon_id", "p", "lift_x100", "seasonal_index_x100", "confidence", "res"],
+  "resolutions_km": [1.41, 9.85],
+  "awareness_message": "…",
+  "taxa": {"enhydra-lutris": {"scientific_name": "…", "common_name": "Sea Otter", "group": "mammals"}},
+  "groups": {"birds:checklist": {"taxon_group": "birds", "effort_class": "checklist",
+             "label": "…", "method": "birding_checklist", "license": {"…": "…"}}},
+  "weeks": [
+    {"week": 1,
+     "groups": {"birds:checklist": {"most_likely": [["sitta-carolinensis", 4120, 180, 95, "h", 0]],
+                                    "special_here": ["…"], "peaking_now": ["…"]}},
+     "awareness": ["enhydra-lutris"], "area_fallback": []}
+  ]
+}
 ```
 
-`weeks[w - 1]` is ISO week `w`, in the API's `PlaceLists` shape without `date` and without
-`new_for_you` (that needs a life list; ask the API).
+- `weeks[w - 1]` is ISO week `w`.
+- List items are rows in `item_fields` order:
+  - `p / p_scale` is the chance per outing;
+  - `lift_x100 / 100` and `seasonal_index_x100 / 100` are the ratios;
+  - confidence is `h`/`m`/`l`/`i`;
+  - `res` indexes `resolutions_km` (larger means a coarser area was used).
+- Names come from `taxa`, and group labels, methods and licenses from `groups`, each stored once.
+- `awareness` lists sensitive species present at landscape scale, shown with
+  `awareness_message` and no numbers.
+- `new_for_you` needs a life list, so it comes from the API.
 
 ## Sizes (Monterey Bay, 4,866 taxa)
 
-See `docs/research/11-second-region-monterey-2026-11.md` §3. Format 1 stored a row per cell
-and week with repeated ids and floats, and one file per year. Format 2 stores ids once and
-integers in a matrix.
+| | Format 1 | Format 2 |
+|---|---|---|
+| All species maps | 5.3 GB (two years) | 256 MB (50 MB gzipped), one file per species |
+| Largest map (western scrub-jay) | ~1 MB (239 KB gzipped) | 166 KB (56 KB gzipped) |
+| One place's weekly lists (Point Lobos, 37 effort groups) | 11.3 MB | 2.2 MB (534 KB gzipped) |
+
+Format 1 stored a row per cell and week with repeated ids and floats, and full list items
+with names. Format 2 stores ids and names once and integers in matrices or short rows.
 
 ## What stays in the API
 

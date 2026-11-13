@@ -40,6 +40,7 @@ from wildlife_radar.policy.statuses import TierService
 from wildlife_radar.policy.tiers import PolicyTier
 from wildlife_radar.regions import Region
 from wildlife_radar.serving.queries import (
+    AWARENESS_MESSAGE,
     LEVEL0_LABEL,
     BaselineQueries,
     NotAvailable,
@@ -111,19 +112,76 @@ def map_doc(q: BaselineQueries, taxon_id: str, year: int, meta: dict) -> dict | 
     }
 
 
+_LIST_KEYS = ("most_likely", "special_here", "peaking_now")
+_CONF = {"insufficient": "i", "low": "l", "medium": "m", "high": "h"}
+
+
+def _x100(v: float | None) -> int | None:
+    return None if v is None else int(round(v * 100))
+
+
 def place_doc(q: BaselineQueries, place, year: int) -> dict:
+    """Format 2: names, groups and resolutions once; each list item a short row
+    ``[taxon_id, p, lift×100, seasonal_index×100, confidence, resolution]`` (see
+    docs/design/static-products.md)."""
     lat, lon = place.footprint.lat, place.footprint.lon
+    taxa: dict[str, dict] = {}
+    groups: dict[str, dict] = {}
+    resolutions: list[float] = []
+
+    def taxon(item) -> str:
+        taxa.setdefault(
+            item["taxon_id"],
+            {
+                "scientific_name": item["scientific_name"],
+                "common_name": item["common_name"],
+                "group": item["group"],
+            },
+        )
+        return item["taxon_id"]
+
+    def res(km: float) -> int:
+        if km not in resolutions:
+            resolutions.append(km)
+        return resolutions.index(km)
+
     weeks = []
     for w in range(1, 53):
-        doc = q.place_lists(lat, lon, week_thursday(year, w)).model_dump(mode="json")
-        doc.pop("date", None)  # weeks, not dates: the file serves every year
-        for g in doc["groups"]:
-            g.pop("new_for_you", None)  # needs a life list: API only
-        weeks.append(doc)
+        lists = q.place_lists(lat, lon, week_thursday(year, w)).model_dump(mode="json")
+        week: dict = {"week": w, "groups": {}}
+        for g in lists["groups"]:
+            groups.setdefault(
+                g["group"],
+                {k: g[k] for k in ("taxon_group", "effort_class", "label", "method", "license")},
+            )
+            week["groups"][g["group"]] = {
+                key: [
+                    [
+                        taxon(i),
+                        _q(i["p"]),
+                        _x100(i["lift"]),
+                        _x100(i["seasonal_index"]),
+                        _CONF[i["confidence"]],
+                        res(i["resolution_km"]),
+                    ]
+                    for i in g[key]
+                ]
+                for key in _LIST_KEYS
+                if g[key]
+            }
+        week["awareness"] = [taxon(a) for a in lists["awareness"]]
+        week["area_fallback"] = lists["area_fallback"]
+        weeks.append(week)
     return {
         "format": FORMAT,
         "place": place.model_dump(mode="json"),
         "year_basis": year,
+        "p_scale": P_SCALE,
+        "item_fields": ["taxon_id", "p", "lift_x100", "seasonal_index_x100", "confidence", "res"],
+        "resolutions_km": resolutions,
+        "awareness_message": AWARENESS_MESSAGE,
+        "taxa": taxa,
+        "groups": groups,
         "weeks": weeks,
     }
 
