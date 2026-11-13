@@ -198,3 +198,13 @@ def test_hourly_forecast_end_to_end_and_policy(store, tmp_path):  # noqa: F811
     ).json()
     assert coarse["hours"] == [] and any("openly mapped" in n for n in coarse["notes"])
     assert json.dumps(body)  # serializable
+
+
+def test_hourly_taxa_are_picked_across_groups():
+    from wildlife_radar.pipeline.runner import pick_timed_taxa
+
+    info = {f"bird-{i}": ("birds", None, 1000 - i, 0) for i in range(10)}
+    info |= {"fish-a": ("fishes", None, 50, 0), "fish-b": ("fishes", None, 40, 1)}
+    info |= {"otter": ("mammals", None, 900, 2), "slug": ("mollusks", None, 30, 0)}
+    picked = pick_timed_taxa(info, {"birds", "fishes", "mammals", "mollusks"}, 5)
+    assert picked == ["bird-0", "fish-a", "slug", "bird-1", "fish-b"]  # otter: COARSE
