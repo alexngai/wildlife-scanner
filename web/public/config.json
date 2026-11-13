@@ -1,0 +1,5 @@
+{
+  "staticBase": "/data",
+  "apiBase": "/api",
+  "regions": []
+}
