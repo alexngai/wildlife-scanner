@@ -289,3 +289,83 @@ def test_unchanged_result_keeps_downstream_up_to_date(tmp_path):
     assert calls == ["source", "mid"]  # down did not rerun
     assert latest(c.lake, "socal", "mid")["version"] == v
     assert staleness(c.lake, "socal", "mid", c.now, jobs) is None  # new inputs recorded
+
+
+def _kelp_store(path, registry_dir):
+    from datetime import date
+
+    from wildlife_radar.storage import ObservationStore
+
+    registry = registry_dir / "datasets.yaml"
+    registry.write_text(
+        "datasets:\n  kelp: {placeholder_dates: [2023-11-30], event_id_date: '_(\\d{8})_'}\n",
+        encoding="utf-8",
+    )
+    with ObservationStore(path) as store:
+        for i in range(4):
+            store.conn.execute(
+                "INSERT INTO observations (dedupe_key, obs_id, source_id, source_record_id, "
+                "dataset_key, local_date, lon) VALUES (?, ?, 'gbif', ?, 'kelp', ?, -117.2)",
+                [f"k{i}", f"o{i}", str(i), date(2023, 11, 30)],
+            )
+    return registry
+
+
+def test_event_ids_survive_a_rebuild_through_the_reference_store(tmp_path, monkeypatch):
+    """Ids fetched once are re-applied from the reference store: no second fetch."""
+    from datetime import date
+
+    from wildlife_radar.connectors import gbif_events
+    from wildlife_radar.pipeline import runner
+    from wildlife_radar.storage import ObservationStore
+
+    events = [("SITE_20200101_A", 2), ("SITE_20200102_A", 2)]
+    calls: list[str] = []
+
+    def fake_fetch(key, chunk, **_kw):
+        out = []
+        for name, _n in chunk:
+            calls.append(name)
+            e = [n for n, _ in events].index(name)
+            out += [(str(2 * e), name), (str(2 * e + 1), name)]
+        return out
+
+    monkeypatch.setattr(gbif_events, "event_ids", lambda *a, **k: events)
+    monkeypatch.setattr(gbif_events, "fetch_events", fake_fetch)
+    jobs = {"repairs": Job("repairs", (), runner._repairs)}
+    first = ctx(tmp_path / "a")
+    first.params["datasets"] = str(_kelp_store(first.db, tmp_path))
+    assert run("repairs", first, jobs=jobs)[0]["outcome"]["redated"]["kelp"] == 4
+    assert len(calls) == 2
+    # The environment is lost; only the reference store survives (in a bucket or on a volume:
+    # sync_ref copies its parts). A fresh store and lake, with the same snapshot rows.
+    import shutil
+
+    second = ctx(tmp_path / "b")
+    shutil.copytree(first.lake / "ref", second.lake / "ref")
+    second.params["datasets"] = str(_kelp_store(second.db, tmp_path))
+    out = run("repairs", second, jobs=jobs)[0]["outcome"]
+    assert out["ids_from_ref"] == 4 and out["redated"]["kelp"] == 4
+    assert len(calls) == 2  # nothing fetched again
+    with ObservationStore(second.db) as store:
+        days = {d for (d,) in store.conn.execute("SELECT local_date FROM observations").fetchall()}
+    assert days == {date(2020, 1, 1), date(2020, 1, 2)}
+
+
+def test_event_ids_from_earlier_runs_are_adopted(tmp_path, monkeypatch):
+    """Stores repaired before the reference table existed keep their work."""
+    from wildlife_radar.connectors import gbif_events
+    from wildlife_radar.pipeline import runner
+    from wildlife_radar.storage import ObservationStore
+
+    c = ctx(tmp_path / "a")
+    c.lake = tmp_path / "lake"
+    c.params["datasets"] = str(_kelp_store(c.db, tmp_path))
+    with ObservationStore(c.db) as store:  # ids set by an older version of the job
+        store.conn.execute("UPDATE observations SET event_id = 'SITE_20200101_A'")
+    fetched: list = []
+    monkeypatch.setattr(gbif_events, "event_ids", lambda *a, **k: [("SITE_20200101_A", 4)])
+    monkeypatch.setattr(gbif_events, "fetch_events", lambda *a, **k: fetched.append(a) or [])
+    out = run("repairs", c, jobs={"repairs": Job("repairs", (), runner._repairs)})[0]["outcome"]
+    assert out["ids_adopted"] == 4 and not fetched and out["redated"]["kelp"] == 4
+    assert out["ref_part"]  # and they now live in the reference store

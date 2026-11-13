@@ -9,9 +9,82 @@ and only where the event id holds a valid ``YYYYMMDD`` date.
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from datetime import date
+from datetime import date, datetime
 
 import duckdb
+
+EVENT_IDS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS gbif_event_ids (
+    gbif_id VARCHAR PRIMARY KEY, dataset_key VARCHAR, event_id VARCHAR, fetched_at TIMESTAMP
+)
+"""
+"""GBIF record id → eventID, fetched from the API (snapshots lack eventID). Region-independent,
+so shared through the reference store: a rebuild re-applies them instead of re-fetching."""
+
+
+def store_event_ids(
+    conn: duckdb.DuckDBPyConnection,
+    dataset_key: str,
+    pairs: Iterable[tuple[str, str]],
+    fetched_at: datetime,
+) -> int:
+    """Keep ``(gbifID, eventID)`` pairs in ``gbif_event_ids`` (the reference store's copy)."""
+    conn.execute(EVENT_IDS_SCHEMA)
+    rows = [(g, dataset_key, e, fetched_at.replace(tzinfo=None)) for g, e in pairs]
+    if rows:
+        conn.executemany("INSERT OR REPLACE INTO gbif_event_ids VALUES (?, ?, ?, ?)", rows)
+    return len(rows)
+
+
+def adopt_event_ids(conn: duckdb.DuckDBPyConnection, dataset_key: str, fetched_at: datetime) -> int:
+    """Copy event ids already on the dataset's records (from earlier runs) into
+    ``gbif_event_ids``, so they count as fetched and reach the reference store."""
+    conn.execute(EVENT_IDS_SCHEMA)
+    before = conn.execute("SELECT count(*) FROM gbif_event_ids").fetchone()[0]
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO gbif_event_ids
+        SELECT source_record_id, dataset_key, event_id, ?
+        FROM observations
+        WHERE dataset_key = ? AND event_id IS NOT NULL AND source_record_id IS NOT NULL
+        """,
+        [fetched_at.replace(tzinfo=None), dataset_key],
+    )
+    return conn.execute("SELECT count(*) FROM gbif_event_ids").fetchone()[0] - before
+
+
+def apply_event_ids(conn: duckdb.DuckDBPyConnection, dataset_key: str) -> int:
+    """Fill missing ``event_id`` of the dataset's records from ``gbif_event_ids`` (one update)."""
+    conn.execute(EVENT_IDS_SCHEMA)
+    before = conn.execute(
+        "SELECT count(*) FROM observations WHERE dataset_key = ? AND event_id IS NOT NULL",
+        [dataset_key],
+    ).fetchone()[0]
+    conn.execute(
+        """
+        UPDATE observations SET event_id = g.event_id
+        FROM gbif_event_ids g
+        WHERE observations.dataset_key = ? AND g.dataset_key = ?
+          AND observations.source_record_id = g.gbif_id AND observations.event_id IS NULL
+        """,
+        [dataset_key, dataset_key],
+    )
+    after = conn.execute(
+        "SELECT count(*) FROM observations WHERE dataset_key = ? AND event_id IS NOT NULL",
+        [dataset_key],
+    ).fetchone()[0]
+    return after - before
+
+
+def fetched_events(conn: duckdb.DuckDBPyConnection, dataset_key: str) -> set[str]:
+    """Events whose records' ids are already known (stored in whole chunks of events)."""
+    conn.execute(EVENT_IDS_SCHEMA)
+    return {
+        e
+        for (e,) in conn.execute(
+            "SELECT DISTINCT event_id FROM gbif_event_ids WHERE dataset_key = ?", [dataset_key]
+        ).fetchall()
+    }
 
 
 def set_event_ids(

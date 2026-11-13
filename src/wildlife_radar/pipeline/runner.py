@@ -160,22 +160,29 @@ def _repairs(ctx: JobContext) -> dict:
     """Re-date records a dataset stamped with a placeholder date, from their event ids.
 
     Event ids come from the GBIF API (snapshots don't carry them), event by event, in chunks
-    checkpointed in ``repair_events``. Work is **budgeted**: a run stops after
-    ``repair_budget_s`` (default 30 min) or when GBIF rate-limits it, and completes with what
-    it has; records not yet re-dated stay excluded. The job reruns daily and continues where
-    it stopped; a run that makes no progress reports ``unchanged``, so nothing downstream
-    rebuilds. Requests share one rate limiter (default 4/s over 4 threads).
+    of ``REPAIR_CHUNK`` events. Each chunk's ids are kept in ``gbif_event_ids`` and exported
+    to the shared reference store, so a rebuild re-applies them instead of re-fetching.
+    Work is **budgeted**: a run stops after ``repair_budget_s`` (default 30 min) or when GBIF
+    rate-limits it, and completes with what it has; records not yet re-dated stay excluded.
+    The job reruns daily and continues where it stopped; a run that changes nothing reports
+    ``unchanged``, so nothing downstream rebuilds. Requests share one rate limiter (default
+    4/s over 4 threads).
     """
     import time
 
     from wildlife_radar.connectors.base import ConnectorError, RateLimiter, make_client
     from wildlife_radar.connectors.gbif_events import event_ids, fetch_events
     from wildlife_radar.storage.repair import (
+        adopt_event_ids,
+        apply_event_ids,
+        fetched_events,
         missing_event_ids,
         redate_from_event_ids,
-        set_event_ids,
+        store_event_ids,
     )
 
+    started = utcnow()
+    ref = ctx.ref()
     workers = int(ctx.params.get("repair_workers") or 4)
     limiter = RateLimiter(float(ctx.params.get("repair_interval_s") or 0.25))
     deadline = time.monotonic() + float(ctx.params.get("repair_budget_s") or 1800)
@@ -183,58 +190,55 @@ def _repairs(ctx: JobContext) -> dict:
     stopped: str | None = None
     with ctx.store() as store:
         conn = store.conn
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS repair_events (dataset_key VARCHAR, event_date DATE, "
-            "event_id VARCHAR, done_at TIMESTAMP)"
-        )
+        # Ids fetched before (by any region or earlier store) come from the reference store.
+        out["ids_from_ref"] = ref.import_into(conn, "gbif_event_ids")
         client = make_client(timeout=60)
-        for key, entry in ctx.registry().datasets.items():
-            if not (entry.event_id_date and entry.placeholder_dates):
-                continue
-            for d in entry.placeholder_dates:
-                if not missing_event_ids(conn, key, [d]):
+        try:
+            for key, entry in ctx.registry().datasets.items():
+                if not (entry.event_id_date and entry.placeholder_dates):
                     continue
-                done = {
-                    e
-                    for (e,) in conn.execute(
-                        "SELECT event_id FROM repair_events WHERE dataset_key = ? "
-                        "AND event_date = ?",
-                        [key, d],
-                    ).fetchall()
-                }
-                try:
-                    listed = event_ids(client, key, d.isoformat(), ctx.region.bbox, limiter)
-                except ConnectorError as exc:
-                    stopped = str(exc)
-                    break
-                events = [e for e in listed if e[0] not in done]
-                for i in range(0, len(events), REPAIR_CHUNK):
-                    if stopped or time.monotonic() > deadline:
-                        stopped = stopped or "time budget used"
-                        out["remaining_events"] += len(events) - i
-                        break
-                    chunk = events[i : i + REPAIR_CHUNK]
+                out["ids_adopted"] = adopt_event_ids(conn, key, utcnow())
+                apply_event_ids(conn, key)
+                done = fetched_events(conn, key)
+                for d in entry.placeholder_dates:
+                    if stopped or not missing_event_ids(conn, key, [d]):
+                        continue
                     try:
-                        pairs = fetch_events(
-                            key, chunk, client=client, limiter=limiter, workers=workers
-                        )
-                    except ConnectorError as exc:  # e.g. HTTP 429: continue next run
+                        listed = event_ids(client, key, d.isoformat(), ctx.region.bbox, limiter)
+                    except ConnectorError as exc:
                         stopped = str(exc)
-                        out["remaining_events"] += len(events) - i
                         break
-                    set_event_ids(conn, key, pairs)
-                    conn.executemany(
-                        "INSERT INTO repair_events VALUES (?, ?, ?, now()::TIMESTAMP)",
-                        [(key, d, name) for name, _ in chunk],
-                    )
-                    out["events_done"] += len(chunk)
-                    ctx.log(
-                        f"repairs {key[:8]} {d}: {min(i + REPAIR_CHUNK, len(events))}/"
-                        f"{len(events)} events"
-                    )
-            out["redated"][key] = redate_from_event_ids(
-                conn, key, entry.event_id_date, entry.placeholder_dates
-            )
+                    events = [e for e in listed if e[0] not in done]
+                    for i in range(0, len(events), REPAIR_CHUNK):
+                        if time.monotonic() > deadline:
+                            stopped = "time budget used"
+                        if stopped:
+                            out["remaining_events"] += len(events) - i
+                            break
+                        chunk = events[i : i + REPAIR_CHUNK]
+                        try:
+                            pairs = fetch_events(
+                                key, chunk, client=client, limiter=limiter, workers=workers
+                            )
+                        except ConnectorError as exc:  # e.g. HTTP 429: continue next run
+                            stopped = str(exc)
+                            out["remaining_events"] += len(events) - i
+                            break
+                        # Stored per completed chunk: an event is either fully known or absent.
+                        store_event_ids(conn, key, pairs, utcnow())
+                        apply_event_ids(conn, key)
+                        done.update(name for name, _ in chunk)
+                        out["events_done"] += len(chunk)
+                        ctx.log(
+                            f"repairs {key[:8]} {d}: {min(i + REPAIR_CHUNK, len(events))}/"
+                            f"{len(events)} events"
+                        )
+                out["redated"][key] = redate_from_event_ids(
+                    conn, key, entry.event_id_date, entry.placeholder_dates
+                )
+        finally:
+            part = ref.export_from(conn, "gbif_event_ids", started)
+            out["ref_part"] = part and part.name
     if stopped:
         out["stopped"] = stopped
     if not out["events_done"] and not any(out["redated"].values()):
