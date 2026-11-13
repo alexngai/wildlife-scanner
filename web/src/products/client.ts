@@ -89,6 +89,12 @@ export class StaticClient {
     return this.json<PlaceFile>(join(this.regionRoot(region), ref.file));
   }
 
+  /** The live version right now (never memoised): used to notice a newer publish. */
+  async latestVersion(region: string): Promise<string> {
+    const text = await this.getText(join(this.regionRoot(region), "CURRENT"), { cache: "no-cache" });
+    return text.trim();
+  }
+
   /** Forget CURRENT pointers, so the next read picks up a newer publish. */
   refresh(): void {
     for (const key of [...this.cache.keys()]) if (key.startsWith("CURRENT:")) this.cache.delete(key);

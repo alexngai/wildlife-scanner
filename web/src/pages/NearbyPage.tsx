@@ -11,6 +11,7 @@ import { listsFromApi, listsFromPlaceFile } from "../lib/lists";
 import { useAsync } from "../lib/useAsync";
 import { weekOf } from "../lib/weeks";
 import type { StaticIndex } from "../products/types";
+import { usePageTitle } from "../lib/usePageTitle";
 
 type Pos = { lat: number; lon: number };
 type GeoState = { status: "idle" } | { status: "locating" } | { status: "ok"; pos: Pos } | { status: "error"; message: string };
@@ -22,6 +23,7 @@ export function NearbyPage() {
   const { region = "" } = useParams();
   const index = useRegionIndex(region);
   const [geo, setGeo] = useState<GeoState>({ status: "idle" });
+  usePageTitle(index?.status === "ok" ? `Nearby · ${index.data.region.name}` : "Nearby");
 
   const locate = () => {
     if (!("geolocation" in navigator)) {

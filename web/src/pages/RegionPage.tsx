@@ -4,6 +4,7 @@ import { SpeciesSearch } from "../components/SpeciesSearch";
 import { Async } from "../components/Status";
 import { rememberRegion, useRegionIndex, useTaxa } from "../hooks";
 import { displayName, shortDate } from "../lib/format";
+import { usePageTitle } from "../lib/usePageTitle";
 
 const KIND: Record<string, string> = { dive_site: "Dive site", park: "Park", zone: "Area", trail: "Trail", beach: "Beach" };
 
@@ -11,6 +12,7 @@ export function RegionPage() {
   const { region = "" } = useParams();
   const index = useRegionIndex(region);
   const taxa = useTaxa(region);
+  usePageTitle(index?.status === "ok" ? index.data.region.name : index?.status === "error" ? "Not available" : null);
   useEffect(() => {
     if (index?.status === "ok") rememberRegion(region);
   }, [index?.status, region]);

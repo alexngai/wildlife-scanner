@@ -1,6 +1,8 @@
-import { Link, NavLink, Outlet, useParams } from "react-router";
+import { useEffect, useRef } from "react";
+import { Link, NavLink, Outlet, useLocation, useParams } from "react-router";
 import { useServices } from "../context";
 import { useThemeContext } from "../themeContext";
+import { useFreshness } from "../lib/useFreshness";
 import type { ThemeChoice } from "../lib/theme";
 
 const NEXT: Record<ThemeChoice, ThemeChoice> = { system: "light", light: "dark", dark: "system" };
@@ -10,6 +12,19 @@ export function Layout() {
   const { region } = useParams();
   const { choice, setChoice } = useThemeContext();
   const { config } = useServices();
+  const { pathname } = useLocation();
+  const newer = useFreshness(region);
+  const mainRef = useRef<HTMLElement>(null);
+  const firstRender = useRef(true);
+  // After client-side navigation, move focus to the new page so screen readers start there.
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    mainRef.current?.focus({ preventScroll: false });
+    window.scrollTo({ top: 0 });
+  }, [pathname]);
   return (
     <div className="app">
       <a className="skip-link" href="#main">
@@ -38,7 +53,15 @@ export function Layout() {
           </button>
         </nav>
       </header>
-      <main id="main" tabIndex={-1}>
+      {newer && (
+        <div className="update-banner" role="status">
+          <span>New data has been published.</span>
+          <button type="button" className="button" onClick={() => window.location.reload()}>
+            Show the latest
+          </button>
+        </div>
+      )}
+      <main id="main" tabIndex={-1} ref={mainRef}>
         <Outlet />
       </main>
       <footer className="site-footer">
