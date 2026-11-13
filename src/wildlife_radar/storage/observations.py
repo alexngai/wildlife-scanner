@@ -132,6 +132,11 @@ COLUMNS = [
 ]
 
 
+# The dialect of our own CSV writer, stated rather than sniffed: a sample without a quoted
+# field would otherwise be read as unquoted and break on the first "Name, 1819".
+CSV_OPTIONS = "FORMAT csv, HEADER false, NULLSTR '', DELIMITER ',', QUOTE '\"', ESCAPE '\"'"
+
+
 def _csv_value(v: object) -> object:
     if isinstance(v, datetime | date):
         return v.isoformat()
@@ -284,9 +289,7 @@ class ObservationStore:
             self.conn.execute(
                 "CREATE OR REPLACE TEMP TABLE _staging AS SELECT * FROM observations LIMIT 0"
             )
-            self.conn.execute(
-                f"COPY _staging FROM '{tmp_path}' (FORMAT csv, HEADER false, NULLSTR '')"
-            )
+            self.conn.execute(f"COPY _staging FROM '{tmp_path}' ({CSV_OPTIONS})")
             self.conn.execute("INSERT OR REPLACE INTO observations SELECT * FROM _staging")
             self.conn.execute("DROP TABLE _staging")
         finally:
