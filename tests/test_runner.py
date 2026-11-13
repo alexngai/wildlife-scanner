@@ -95,6 +95,7 @@ def test_live_job_advances_its_cursor(tmp_path, monkeypatch):
 
     monkeypatch.setattr(inaturalist.INaturalistConnector, "fetch", fake_fetch)
     c = ctx(tmp_path, now=datetime.now(UTC))
+    c.region = c.region.model_copy(update={"coverage": None})  # the per-region path
     with ObservationStore(c.db) as store:
         store.add(SyntheticWorld(observers=5, visits_per_observer=10).generate()[20:21])
     jobs = {k: runner.JOBS[k] for k in ("snapshot", "live")}
@@ -141,6 +142,7 @@ def test_live_job_pulls_registry_live_datasets_from_gbif(tmp_path):
             return iter(self.items)
 
     c = ctx(tmp_path, now=datetime.now(UTC))
+    c.region = c.region.model_copy(update={"coverage": None})  # the per-region path
     with ObservationStore(c.db) as store:
         store.add(records[:1])
     gbif = Fake(records[5:8])
