@@ -10,7 +10,9 @@ several (``sync_ref`` copies parts through object storage). On read, the newest
 Only region-independent data is shared:
 
 - ``taxon_identity``: name → identity crosswalk records (Catalogue of Life, Wikidata, ...);
-- ``inat_taxon_records``: raw iNaturalist taxon records.
+- ``inat_taxon_records``: raw iNaturalist taxon records;
+- ``gbif_event_ids``: GBIF record id → eventID for re-dated survey records (slow to fetch:
+  GBIF rate-limits the paging, so a rebuild must not start over).
 
 Status *lookups* are not shared: which statuses apply depends on each region's places, so they
 are parsed and cached per region (connectors/inaturalist_taxa.py).
@@ -27,10 +29,12 @@ import duckdb
 from wildlife_radar.connectors.inaturalist_taxa import RECORDS_SCHEMA
 from wildlife_radar.core.time import utcnow
 from wildlife_radar.profilegen.identity import IDENTITY_SCHEMA
+from wildlife_radar.storage.repair import EVENT_IDS_SCHEMA
 
 REF_TABLES: dict[str, tuple[str, str]] = {
     "taxon_identity": ("query_name", IDENTITY_SCHEMA),
     "inat_taxon_records": ("taxon_id", RECORDS_SCHEMA),
+    "gbif_event_ids": ("gbif_id", EVENT_IDS_SCHEMA),
 }
 
 
