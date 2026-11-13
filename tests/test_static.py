@@ -60,8 +60,22 @@ def test_static_products_follow_policy(store, tmp_path):  # noqa: F811
     # Places from the region pack, weekly lists without life-list items.
     place = index["places"]["la-jolla-cove"]
     doc = json.loads((region_dir / place["file"]).read_text())
-    assert len(doc["weeks"]) == 52
-    assert all("new_for_you" not in g for w in doc["weeks"] for g in w["groups"])
+    assert len(doc["weeks"]) == 52 and doc["weeks"][0]["week"] == 1
+    items = [
+        row
+        for w in doc["weeks"]
+        for lists in w["groups"].values()
+        for key, rows in lists.items()
+        for row in rows
+    ]
+    assert items and all(len(r) == len(doc["item_fields"]) for r in items)
+    assert all(r[0] in doc["taxa"] for r in items)  # names once, in the taxa table
+    assert all(
+        set(lists) <= {"most_likely", "special_here", "peaking_now"}  # no life-list items
+        for w in doc["weeks"]
+        for lists in w["groups"].values()
+    )
+    assert set(doc["groups"]) >= {g for w in doc["weeks"] for g in w["groups"]}
     # The manifest records what was built.
     manifest = json.loads((result.path / "manifest.json").read_text())
     assert manifest["static"]["taxa"] == len(taxa)
