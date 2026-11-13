@@ -1,0 +1,224 @@
+{
+ "taxon": {
+  "taxon_id": "testus-primus",
+  "scientific_name": "Testus primus",
+  "common_name": "Common Testbird",
+  "group": "birds",
+  "records_visits": 5000,
+  "tier": 0,
+  "mode": "forecast",
+  "gate": null,
+  "effort_groups": []
+ },
+ "day": "2026-05-20",
+ "timezone": "America/Los_Angeles",
+ "p_day": 0.42,
+ "level": 1,
+ "hours": [
+  {
+   "start": "2026-05-20T00:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 0.3,
+   "factors": {
+    "diel": "night"
+   }
+  },
+  {
+   "start": "2026-05-20T01:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 0.3,
+   "factors": {
+    "diel": "night"
+   }
+  },
+  {
+   "start": "2026-05-20T02:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 0.3,
+   "factors": {
+    "diel": "night"
+   }
+  },
+  {
+   "start": "2026-05-20T03:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 0.3,
+   "factors": {
+    "diel": "night"
+   }
+  },
+  {
+   "start": "2026-05-20T04:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 0.3,
+   "factors": {
+    "diel": "night"
+   }
+  },
+  {
+   "start": "2026-05-20T05:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 1,
+   "factors": {
+    "diel": "day"
+   }
+  },
+  {
+   "start": "2026-05-20T06:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 2.1,
+   "factors": {
+    "diel": "dawn"
+   }
+  },
+  {
+   "start": "2026-05-20T07:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 2.1,
+   "factors": {
+    "diel": "dawn"
+   }
+  },
+  {
+   "start": "2026-05-20T08:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 2.1,
+   "factors": {
+    "diel": "dawn"
+   }
+  },
+  {
+   "start": "2026-05-20T09:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 2.1,
+   "factors": {
+    "diel": "dawn"
+   }
+  },
+  {
+   "start": "2026-05-20T10:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 1,
+   "factors": {
+    "diel": "day"
+   }
+  },
+  {
+   "start": "2026-05-20T11:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 1,
+   "factors": {
+    "diel": "day"
+   }
+  },
+  {
+   "start": "2026-05-20T12:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 1,
+   "factors": {
+    "diel": "day"
+   }
+  },
+  {
+   "start": "2026-05-20T13:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 1,
+   "factors": {
+    "diel": "day"
+   }
+  },
+  {
+   "start": "2026-05-20T14:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 1,
+   "factors": {
+    "diel": "day"
+   }
+  },
+  {
+   "start": "2026-05-20T15:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 1,
+   "factors": {
+    "diel": "day"
+   }
+  },
+  {
+   "start": "2026-05-20T16:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 1,
+   "factors": {
+    "diel": "day"
+   }
+  },
+  {
+   "start": "2026-05-20T17:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 1,
+   "factors": {
+    "diel": "day"
+   }
+  },
+  {
+   "start": "2026-05-20T18:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 1,
+   "factors": {
+    "diel": "day"
+   }
+  },
+  {
+   "start": "2026-05-20T19:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 1,
+   "factors": {
+    "diel": "day"
+   }
+  },
+  {
+   "start": "2026-05-20T20:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 0.3,
+   "factors": {
+    "diel": "night"
+   }
+  },
+  {
+   "start": "2026-05-20T21:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 0.3,
+   "factors": {
+    "diel": "night"
+   }
+  },
+  {
+   "start": "2026-05-20T22:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 0.3,
+   "factors": {
+    "diel": "night"
+   }
+  },
+  {
+   "start": "2026-05-20T23:00:00-07:00",
+   "p": 0.42,
+   "multiplier": 0.3,
+   "factors": {
+    "diel": "night"
+   }
+  }
+ ],
+ "best": [
+  "2026-05-20T06:00:00-07:00",
+  "2026-05-20T07:00:00-07:00",
+  "2026-05-20T08:00:00-07:00"
+ ],
+ "factors": {
+  "diel": {
+   "dawn": 2.1,
+   "day": 1,
+   "night": 0.3
+  }
+ },
+ "notes": []
+}
