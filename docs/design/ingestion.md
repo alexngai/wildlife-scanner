@@ -137,7 +137,11 @@ existence check (below).
 - *Daily:* iNaturalist observations from the last 7 days in the live log are requested again
   by id (200 per request, ~350 requests a day for California); ids that don't come back are
   listed in `deleted/` and removed from every region's store on its next load.
-- Still to do: a weekly 60-day check, and a manual tombstone list for urgent takedowns.
+- Not planned (owner, 2026-11-13): a weekly 60-day check or a manual tombstone list. The
+  licenses (CC0/CC BY/CC BY-NC) don't require deletions to propagate; the check exists for
+  privacy changes (observations made private) and good citizenship, and the products are
+  aggregates. Older deletions are removed when GBIF's monthly snapshot drops them. Revisit
+  if a takedown request ever arrives.
 
 **Cadence.** The live job pulls the coverage area at most every 25 minutes; regions load from
 the log on every tick. Recommended once hosted: ingest every 15 min, publish every 30–60 min
