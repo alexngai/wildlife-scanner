@@ -5,6 +5,7 @@ const pages = [
   "/",
   "/r/testland",
   "/r/testland/species/testus-primus?week=20&place=test-cove",
+  "/r/testland/species/testus-primus?week=20&view=compare",
   "/r/testland/species/rarus-tertius",
   "/r/testland/places/test-cove?week=20",
   "/r/testland/nearby",
@@ -21,6 +22,8 @@ for (const theme of ["light", "dark"] as const) {
       await page.goto(path);
       await expect(page.locator("main h1")).toBeVisible();
       await page.waitForLoadState("networkidle");
+      // Open any "as a table" disclosures so their contents are checked too.
+      for (const summary of await page.locator("details.data-table > summary").all()) await summary.click();
       // The map canvas is described by its aria-label; MapLibre's own controls are third-party.
       const results = await new AxeBuilder({ page }).exclude(".maplibregl-ctrl").analyze();
       const serious = results.violations.filter((v) => v.impact === "serious" || v.impact === "critical");

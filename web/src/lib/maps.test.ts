@@ -2,7 +2,16 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { latLngToCell } from "h3-js";
 import type { SpeciesMapFile } from "../products/types";
-import { calendar, cellsForPeriod, isPresenceOnly, liftFor, presenceCells, segmentForWeek, toGeoJSON } from "./maps";
+import {
+  calendar,
+  cellsForPeriod,
+  isPresenceOnly,
+  liftBinFor,
+  liftFor,
+  presenceCells,
+  segmentForWeek,
+  toGeoJSON,
+} from "./maps";
 
 const load = (id: string) =>
   JSON.parse(
@@ -69,5 +78,15 @@ describe("species maps", () => {
     const lift = liftFor(seg, 1, 19);
     expect(lift).not.toBeNull();
     expect(lift!).toBeGreaterThan(0);
+  });
+
+  it("carries lift into cell features, binned around 'about the same'", () => {
+    const hit = segmentForWeek(primus, 20)!;
+    const geo = toGeoJSON(cellsForPeriod(hit.segment, hit.j, primus.p_scale));
+    const withP = geo.features.filter((f) => f.properties.p !== null);
+    expect(withP.every((f) => f.properties.lift !== null && f.properties.liftBin >= 0)).toBe(true);
+    const insufficient = geo.features.filter((f) => f.properties.insufficient);
+    expect(insufficient.every((f) => f.properties.lift === null && f.properties.liftBin === -1)).toBe(true);
+    expect([0.3, 0.6, 1, 1.5, 3].map(liftBinFor)).toEqual([0, 1, 2, 3, 4]);
   });
 });

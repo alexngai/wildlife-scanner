@@ -12,7 +12,7 @@ Cloudflare Pages. AGPL-3.0, like the rest of the repository.
 |---|---|---|
 | `/` | region picker | `/config.json` regions (or API `/regions`) → each region's `index.json` |
 | `/r/:region` | species search, places, "near me" | `taxa.json`, `index.json` |
-| `/r/:region/species/:id` | week map + slider, calendar (region or a tapped cell / place), what the number means, confidence, daily forecast + drivers, hourly timing, licence | species map file; API `forecast`, `forecast/hourly`, `timing` |
+| `/r/:region/species/:id` | week map + slider (with play), coloured by chance or by chance compared with the wider area; cell details on hover/tap; named places on the map; the map as a table (keyboard alternative to tapping); calendar (region or a tapped cell / place), what the number means, confidence, daily forecast + drivers, hourly timing, licence | species map file; API `forecast`, `forecast/hourly`, `timing` |
 | `/r/:region/places/:id` | most likely / special here / peaking now / new for you, awareness species, picking up now / reported recently with data delay | place file; API `places/{id}/recent` |
 | `/r/:region/nearby` | geolocation (on request, rounded to ~100 m) → closest places, lists, recent activity | `index.json`; API `nearby`, `nearby/recent` |
 | `/about` | AGPL source link, non-commercial notice, licences, privacy | API `/sources` |
@@ -31,6 +31,9 @@ Data arrives policy-filtered, and the app adds display rules on top. See
   [NEEDS.md](NEEDS.md) §1).
 - Confidence: `i` cells are drawn hatched as "not enough data", never as zero, and low
   confidence is paler.
+- "Compared with the wider area" divides a cell's published value by the published
+  reference value (`ref.p`, its parent cell or the region) for the same period. Both numbers
+  are already in the file, so nothing finer is derived.
 - Publication delays are shown with recent activity (`data_through`) and per species.
 - Licence and attribution appear with every map and list, alongside a non-commercial notice
   and the source link.

@@ -7,8 +7,14 @@ import { resetLifeListCache } from "../src/lib/lifelist";
 
 // MapLibre needs WebGL; unit tests check what the map is given instead.
 vi.mock("../src/components/MapView", () => ({
-  default: (props: { label: string; data: { features: unknown[] } }) => (
-    <div data-testid="map" aria-label={props.label} data-cells={props.data.features.length} />
+  default: (props: { label: string; data: { features: unknown[] }; metric?: string; places?: unknown[] }) => (
+    <div
+      data-testid="map"
+      aria-label={props.label}
+      data-cells={props.data.features.length}
+      data-metric={props.metric}
+      data-places={props.places?.length}
+    />
   ),
 }));
 
@@ -61,6 +67,27 @@ describe("species page", () => {
     expect(screen.getByText(/raises the odds 1\.4×/)).toBeInTheDocument();
     expect(screen.getByText(/lowers the odds 0\.8×/)).toBeInTheDocument();
     expect(await screen.findByText(/Best hours/)).toBeInTheDocument();
+  });
+
+  it("switches the map to 'compared with wider area' and lists cells as a table", async () => {
+    const user = userEvent.setup();
+    const { router } = renderApp("/r/testland/species/testus-primus?week=20");
+    const map = await screen.findByTestId("map");
+    expect(map).toHaveAttribute("data-metric", "chance");
+    expect(map).toHaveAttribute("data-places", "2");
+    await user.click(screen.getByRole("button", { name: "Compared with wider area", pressed: false }));
+    expect(screen.getByTestId("map")).toHaveAttribute("data-metric", "lift");
+    expect(screen.getByRole("list", { name: /compared with the wider area/ })).toBeInTheDocument();
+    expect(router.state.location.search).toContain("view=compare");
+
+    await user.click(screen.getByText("Show the map as a table"));
+    const table = screen.getByText("Show the map as a table").closest("details")!.querySelector("table")!;
+    expect(within(table).getByRole("columnheader", { name: "Against wider area" })).toBeInTheDocument();
+    const choose = within(table).getAllByRole("button", { name: /^Choose/ });
+    expect(choose.length).toBe(15);
+    await user.click(choose[0]!);
+    expect(router.state.location.search).toMatch(/lat=.*lon=/);
+    expect(await screen.findByText(/Calendar here/)).toBeInTheDocument();
   });
 
   it("explains when the API isn't configured", async () => {

@@ -7,11 +7,12 @@ import { CalendarChart } from "../components/CalendarChart";
 import { ConfidenceBadge } from "../components/Confidence";
 import { Legend } from "../components/Legend";
 import { LicenseNote } from "../components/License";
+import { MapTable } from "../components/MapTable";
 import { Async, Loading, NotAvailable } from "../components/Status";
 import { WeekSlider } from "../components/WeekSlider";
 import { useServices } from "../context";
 import { useRegionIndex } from "../hooks";
-import { displayName, groupLabel, km, methodLabel, percent } from "../lib/format";
+import { displayName, groupLabel, km, methodLabel, percent, times } from "../lib/format";
 import { roundCoord } from "../lib/geo";
 import {
   bestPeriods,
@@ -24,7 +25,9 @@ import {
   segmentForWeek,
   toGeoJSON,
 } from "../lib/maps";
-import { TIER_NAME, delayText, isAwareness } from "../lib/policy";
+import { CONFIDENCE_TEXT, TIER_NAME, delayText, isAwareness } from "../lib/policy";
+import type { MapMetric } from "../components/mapColors";
+import type { CellFeatureProps } from "../lib/maps";
 import { useAsync } from "../lib/useAsync";
 import { isoDate, monthLabel, weekLabel, weekOf } from "../lib/weeks";
 import type { SpeciesMapFile, StaticIndex } from "../products/types";
@@ -64,6 +67,11 @@ function SpeciesView({ region, index, map }: { region: string; index: StaticInde
   const lat = params.get("lat");
   const lon = params.get("lon");
   const point = useMemo(() => pointFrom(index, placeId, lat, lon), [index, placeId, lat, lon]);
+  const metric: MapMetric = params.get("view") === "compare" ? "lift" : "chance";
+  const mapPlaces = useMemo(
+    () => Object.entries(index.places).map(([id, p]) => ({ id, name: p.name, lat: p.lat, lon: p.lon })),
+    [index],
+  );
   const where: Where | null = placeId && index.places[placeId] ? { placeId } : point;
   const [date, setDate] = useState(isoDate());
 
@@ -75,6 +83,9 @@ function SpeciesView({ region, index, map }: { region: string; index: StaticInde
     }
     setParams(next, { replace: true });
   };
+
+  const choosePoint = (pt: { lat: number; lon: number }) =>
+    update({ lat: String(roundCoord(pt.lat)), lon: String(roundCoord(pt.lon)), place: null });
 
   const hit = useMemo(() => segmentForWeek(map, week), [map, week]);
   const presenceOnlyWeek = hit ? isPresenceOnly(hit.segment) : false;
@@ -108,13 +119,16 @@ function SpeciesView({ region, index, map }: { region: string; index: StaticInde
   const best = series ? bestPeriods(series) : [];
   const currentPeriod = series?.granularity === "month" ? hit?.period : week;
 
+  const hasLift = geo.features.some((f) => f.properties.liftBin >= 0);
+  const showLift = metric === "lift" && hasLift;
+
   const mapLabel = awareness
     ? `Map of where ${displayName(t)} is present at landscape scale (awareness only).`
     : !hit
       ? `No map is published for ${displayName(t)} in week ${week}.`
       : presenceOnlyWeek
         ? `Map of where ${displayName(t)} is present this time of year (awareness only).`
-        : `Map of ${displayName(t)}: chance per outing in week ${week} across ${geo.features.length} cells of ${km(hit.segment.resolution_km)}; highest ${percent(Math.max(0, ...values))}.`;
+        : `Map of ${displayName(t)}: ${showLift ? "chance compared with the wider area" : "chance per outing"} in week ${week} across ${geo.features.length} cells of ${km(hit.segment.resolution_km)}; highest chance ${percent(Math.max(0, ...values))}.`;
 
   return (
     <article>
@@ -162,6 +176,24 @@ function SpeciesView({ region, index, map }: { region: string; index: StaticInde
             At this time of year this species is shown for awareness only: presence at landscape scale, without numbers.
           </p>
         )}
+        {!awareness && hit && !presenceOnlyWeek && hasLift && (
+          <div className="map-tools">
+            <div className="segmented" role="group" aria-label="Colour the map by">
+              <button type="button" aria-pressed={!showLift} onClick={() => update({ view: null })}>
+                Chance
+              </button>
+              <button type="button" aria-pressed={showLift} onClick={() => update({ view: "compare" })}>
+                Compared with wider area
+              </button>
+            </div>
+          </div>
+        )}
+        {showLift && !presenceOnlyWeek && (
+          <p className="muted small">
+            Each cell's chance against the average of the wider area around it this week. Orange cells are better than
+            their surroundings, even where the chance itself is low.
+          </p>
+        )}
         <div className="map-wrap">
           <Suspense fallback={<div className="map map-placeholder">Loading map…</div>}>
             <MapView
@@ -171,21 +203,31 @@ function SpeciesView({ region, index, map }: { region: string; index: StaticInde
               basemap={config.basemap}
               selectedCell={selectedCell}
               label={mapLabel}
-              onSelect={
-                awareness
-                  ? undefined
-                  : (pt) => update({ lat: String(roundCoord(pt.lat)), lon: String(roundCoord(pt.lon)), place: null })
-              }
+              metric={showLift ? "lift" : "chance"}
+              places={mapPlaces}
+              selectedPlace={placeId}
+              onPlace={(id) => update({ place: id, lat: null, lon: null })}
+              describe={awareness || presenceOnlyWeek ? undefined : describeCell}
+              onSelect={awareness ? undefined : choosePoint}
             />
           </Suspense>
         </div>
-        <Legend theme={theme} presence={awareness || presenceOnlyWeek} />
+        <Legend theme={theme} presence={awareness || presenceOnlyWeek} metric={showLift ? "lift" : "chance"} />
         {!awareness && hit && !presenceOnlyWeek && (
           <p className="muted small">
             {geo.features.length} cells of {km(hit.segment.resolution_km)}
             {hit.segment.granularity === "month" ? `, monthly (${monthLabel(hit.period)})` : `, ${weekLabel(year, week)}`}
-            {insufficient > 0 && ` · ${insufficient} with not enough data`}. Tap a cell to see its calendar and forecast.
+            {insufficient > 0 && ` · ${insufficient} with not enough data`}. Tap a cell, or use the table, to see its calendar and forecast.
           </p>
+        )}
+        {!awareness && hit && !presenceOnlyWeek && (
+          <MapTable
+            data={geo}
+            places={index.places}
+            selectedCell={selectedCell}
+            onChoose={choosePoint}
+            sortBy={showLift ? "lift" : "chance"}
+          />
         )}
       </section>
 
@@ -316,4 +358,11 @@ function clampWeek(w: number): number {
 
 function cellAt(pt: { lat: number; lon: number }, res: number): string {
   return latLngToCell(pt.lat, pt.lon, res);
+}
+
+function describeCell(c: CellFeatureProps): string {
+  if (c.insufficient) return "Not enough data here";
+  if (c.p === null) return "";
+  const lift = c.lift === null ? "" : ` · ${times(c.lift)} the wider area`;
+  return `${percent(c.p)} chance per outing · ${CONFIDENCE_TEXT[c.confidence].toLowerCase()}${lift}`;
 }
