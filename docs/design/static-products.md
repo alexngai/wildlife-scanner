@@ -1,5 +1,19 @@
 # Static products: file formats (format 2)
 
+**This is a contract** with the web app (`web/`, branch `claude/web-app`), as is the API's
+`/openapi.json`. Breaking changes bump `format` (every file carries it), are listed below, and
+the web session is told. Additions (new fields, new endpoints) don't bump it; clients ignore
+fields they don't know.
+
+## Changelog
+
+| Date | Change | Breaking |
+|---|---|---|
+| 2026-11-13 | **Format 2.** Maps: one file per species for any year (ISO weeks), `segments` of cells × periods integer matrices (`p_scale`), lift via `ref`; paths `static/maps/<taxon>.<key>.json`. Places: names and groups once, list items as rows (`item_fields`); paths `static/places/<place>.<key>.json`. Index: `maps` is `{taxon: path}`, places carry `file`, `lat`, `lon`. | yes (format 1 → 2) |
+| 2026-11-13 | API: `GET /species/{id}/forecast/hourly` (hourly spread of the daily forecast, OPEN species only); `GET /species/{id}/timing` (descriptive time-of-day/tide indices, OPEN and GENERALIZED). | no (additions) |
+| 2026-11-12 | API: several regions per process. `GET /regions`; `region=` on `/taxa`, `/taxa/{id}`, `/species/{id}/map` (required when more than one region is served); `/health` lists `regions` (single-region fields kept at the top level). | no for one region |
+| 2026-11-12 | Format 1 (first static products): per species and year, rows of `[cell, p, lift, seasonal_index, confidence]`. | — |
+
 What the frontend reads from the CDN. Everything here is already policy-filtered: withheld taxa
 are absent, sensitive taxa appear only at their tier's resolution and time granularity, and
 there are no individual records. Built by `publish` (`src/wildlife_radar/pipeline/static.py`).
