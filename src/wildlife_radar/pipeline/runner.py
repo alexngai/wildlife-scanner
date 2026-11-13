@@ -117,7 +117,10 @@ def _snapshot(ctx: JobContext) -> dict:
         available = ctx.params.get("snapshot_date") or remote.latest_snapshot()
         if available is None:
             raise RuntimeError("no complete GBIF snapshot found")
-        if (ingested is None or available > ingested) and ctx.region.coverage:
+        newer = ingested is None or available > ingested
+        if ctx.params.get("reingest_snapshot"):
+            newer = True
+        if newer and ctx.region.coverage:
             # One pass for the whole coverage area (shared by its regions), then this
             # region's tiles; rows the new snapshot lacks are reconciled away.
             from wildlife_radar.pipeline import coverage
@@ -145,7 +148,7 @@ def _snapshot(ctx: JobContext) -> dict:
                 live_keys=ctx.registry().live_keys(),
             )
             ingested = available
-        elif ingested is None or available > ingested:
+        elif newer:
             ctx.log(f"ingesting GBIF snapshot {available} (previous: {ingested or 'none'})")
             work = (
                 ctx.lake / "raw" / "gbif-snapshot" / f"date={available}" / f"region={ctx.region.id}"

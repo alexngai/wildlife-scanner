@@ -411,6 +411,7 @@ def _run_params(args: argparse.Namespace) -> dict:
             "snapshot_date": args.snapshot_date,
             "snapshot_workers": args.snapshot_workers,
             "keep_staging": args.keep_staging,
+            "reingest_snapshot": args.reingest_snapshot,
         }.items()
         if v
     }
@@ -619,6 +620,12 @@ def snapshot_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--snapshot-date", help="with --ingest-snapshots: this snapshot, not the newest")
     p.add_argument("--snapshot-workers", type=int, help="download threads (default 10)")
     p.add_argument("--keep-staging", action="store_true", help="keep staged snapshot rows")
+    p.add_argument(
+        "--reingest-snapshot",
+        action="store_true",
+        help="with --ingest-snapshots: ingest the snapshot even if its date was already "
+        "ingested (e.g. to switch a region to its coverage tiles)",
+    )
 
 
 def register(sub: argparse._SubParsersAction) -> None:

@@ -129,6 +129,11 @@ def test_snapshot_job_ingests_only_newer_snapshots(bucket, tmp_path):
     m = latest(c.lake, "socal", "snapshot")
     assert m["outputs"]["snapshot_date"] == "2026-11-01" and m["version"] != version
     assert calls == ["down", "down"]
+    # Re-ingesting the same date is possible on request.
+    c.params["reingest_snapshot"] = True
+    run("down", c, jobs=jobs, force=("snapshot",))
+    assert latest(c.lake, "socal", "snapshot")["outputs"]["snapshot_date"] == "2026-11-01"
+    assert calls == ["down", "down", "down"]
 
 
 def test_snapshot_job_without_ingest_registers_store(tmp_path):
