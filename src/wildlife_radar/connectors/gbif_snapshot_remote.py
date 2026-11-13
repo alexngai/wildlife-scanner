@@ -388,36 +388,51 @@ def ingest_staged(
         conn = store.conn
         parts = [p for p, n in results if n]
         src = "[" + ", ".join(f"'{p}'" for p in parts) + "]"
-        if parts:
-            conn.execute(
-                f"INSERT OR REPLACE INTO observations BY NAME SELECT * FROM read_parquet({src}) "
-                "QUALIFY row_number() OVER (PARTITION BY dedupe_key ORDER BY ingested_at DESC) = 1"
-            )
         removed = 0
-        # No rows at all is more likely a failed extract than an empty area: delete nothing.
-        if reconcile_taken is not None and parts:
-            lon_min, lat_min, lon_max, lat_max = bbox
-            before = conn.execute("SELECT count(*) FROM observations").fetchone()[0]
-            conn.execute(
-                f"""
-                DELETE FROM observations
-                WHERE source_id = 'gbif' AND ingested_at < ?
-                  AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?
-                  AND dedupe_key NOT IN (SELECT dedupe_key FROM read_parquet({src}))
-                  AND (coalesce(dataset_key, '') NOT IN (SELECT unnest(?)) OR ingested_at < ?)
-                """,
-                [
-                    started,
-                    lat_min,
-                    lat_max,
-                    lon_min,
-                    lon_max,
-                    list(live_keys or []),
-                    reconcile_taken.replace(tzinfo=None),
-                ],
-            )
-            removed = before - conn.execute("SELECT count(*) FROM observations").fetchone()[0]
-            log(f"reconciled: {removed:,} GBIF rows no longer in the snapshot removed")
+        # Order doesn't matter, and not keeping it lets DuckDB stream and spill.
+        conn.execute("SET preserve_insertion_order = false")
+        # One transaction: reconcile, drop the old versions of incoming keys, insert. Cheaper
+        # than INSERT OR REPLACE, which checks every row against the key index and ran out
+        # of memory re-loading 24 M rows into a store that already held them.
+        conn.begin()
+        try:
+            # No rows at all is more likely a failed extract than an empty area: delete nothing.
+            if reconcile_taken is not None and parts:
+                lon_min, lat_min, lon_max, lat_max = bbox
+                before = conn.execute("SELECT count(*) FROM observations").fetchone()[0]
+                conn.execute(
+                    f"""
+                    DELETE FROM observations
+                    WHERE source_id = 'gbif' AND ingested_at < ?
+                      AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?
+                      AND dedupe_key NOT IN (SELECT dedupe_key FROM read_parquet({src}))
+                      AND (coalesce(dataset_key, '') NOT IN (SELECT unnest(?)) OR ingested_at < ?)
+                    """,
+                    [
+                        started,
+                        lat_min,
+                        lat_max,
+                        lon_min,
+                        lon_max,
+                        list(live_keys or []),
+                        reconcile_taken.replace(tzinfo=None),
+                    ],
+                )
+                removed = before - conn.execute("SELECT count(*) FROM observations").fetchone()[0]
+                log(f"reconciled: {removed:,} GBIF rows no longer in the snapshot removed")
+            if parts:
+                conn.execute(
+                    "DELETE FROM observations WHERE dedupe_key IN "
+                    f"(SELECT dedupe_key FROM read_parquet({src}))"
+                )
+                conn.execute(
+                    f"INSERT INTO observations BY NAME SELECT * FROM read_parquet({src}) QUALIFY "
+                    "row_number() OVER (PARTITION BY dedupe_key ORDER BY ingested_at DESC) = 1"
+                )
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
         total = store.count()
     shutil.rmtree(tmpdir, ignore_errors=True)
     log(f"loaded in {time.time() - t1:.0f}s; store has {total:,} rows")
