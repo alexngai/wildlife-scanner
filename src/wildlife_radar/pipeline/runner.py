@@ -479,7 +479,26 @@ def _tiers(ctx: JobContext) -> dict:
 
 
 TIMED_TOP = 40
-"""Besides profiled species, the most-recorded open/generalized taxa get hourly models."""
+"""Besides profiled species, this many open/generalized taxa get hourly models: the
+most-recorded of each taxon group in turn (the top 40 of a region are otherwise all common
+birds, whose daily rhythms barely differ from other birds')."""
+
+
+def pick_timed_taxa(info: dict, groups: set[str], top: int) -> list[str]:
+    """Open/generalized taxa for hourly models: round robin over taxon groups, most recorded
+    first within each. ``info``: taxon → (group, name, records, tier)."""
+    by_group: dict[str, list[str]] = {}
+    for t in sorted(info, key=lambda t: (-(info[t][2] or 0), t)):
+        g, _name, _n, tier = info[t]
+        if tier is not None and tier <= 1 and g in groups:
+            by_group.setdefault(g, []).append(t)
+    picked: list[str] = []
+    while len(picked) < top and any(by_group.values()):
+        for g in sorted(by_group):
+            if by_group[g] and len(picked) < top:
+                picked.append(by_group[g].pop(0))
+    return picked
+
 
 HOURLY_COUNTS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS inat_hourly (
