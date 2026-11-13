@@ -1,6 +1,6 @@
 # Ingestion and data model: staying fresh (proposal, 2026-11-13)
 
-Status: **proposal for discussion with the owner.** Builds on
+Status: **accepted 2026-11-13; steps 1, 2 and 4 implemented** (see §6). Builds on
 [`data-platform.md`](data-platform.md) (layers, jobs) and measurements from San Diego and
 Monterey Bay ([`../research/10`](../research/10-conditions-and-pipeline-2026-11.md),
 [`11`](../research/11-second-region-monterey-2026-11.md)).
@@ -112,3 +112,33 @@ Alert when a source misses its target twice.
    non-iNaturalist GBIF data acceptable until an eBird feed exists?
 4. **Deletions:** is "removed at the next monthly snapshot" fast enough, or should we ask
    about an iNaturalist account for its deletions feed?
+
+## 6. Decisions and status (2026-11-13)
+
+Owner decisions: California is the first coverage area; a private bucket for the lake is
+approved (not yet created); the iNaturalist account doesn't help with deletions (its
+deletions feed lists only the signed-in user's own observations), so deletions use an
+existence check (below).
+
+| Step | Status | Where |
+|---|---|---|
+| 1. Freshness metrics | done | `pipeline/freshness.py`; `freshness` table in bundles; `/health` |
+| 2. Coverage snapshot pass, delta, reconciliation | done | `pipeline/coverage.py`; `wildlife-radar-pipeline coverage-snapshot`; the `snapshot` job of regions with `coverage:` |
+| 3. Corrections layer | covered for now | event ids in `lake/ref` are re-applied after each ingest; no separate table |
+| 4. Live log | done | `pipeline/livelog.py`; the `live` job of regions with `coverage:` |
+| 5. Work store as cache | later | |
+| Bucket sync of `lake/ref` and `lake/norm` | waiting for the bucket | |
+
+**Deletions, as built.**
+- *Monthly:* when a region ingests a new snapshot, GBIF rows from earlier ingests that the
+  snapshot no longer has are deleted (deleted or re-licensed at the source, withdrawn
+  datasets). Rows of live datasets pulled after the snapshot date are kept until the next
+  snapshot can confirm them. `delta.json` reports per-dataset additions, removals and changes.
+- *Daily:* iNaturalist observations from the last 7 days in the live log are requested again
+  by id (200 per request, ~350 requests a day for California); ids that don't come back are
+  listed in `deleted/` and removed from every region's store on its next load.
+- Still to do: a weekly 60-day check, and a manual tombstone list for urgent takedowns.
+
+**Cadence.** The live job pulls the coverage area at most every 25 minutes; regions load from
+the log on every tick. Recommended once hosted: ingest every 15 min, publish every 30–60 min
+while the OPEN delay is 24 h.
