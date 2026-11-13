@@ -34,6 +34,8 @@ export interface CellValue {
   /** Chance per outing (0-1); null when there is no number to show. */
   p: number | null;
   confidence: ConfidenceLevel;
+  /** p compared with the published reference area (parent cell or region) for the same period. */
+  lift?: number | null;
 }
 
 /** Cells for one period. "Insufficient" cells are kept (shown as "not enough data"). */
@@ -47,7 +49,7 @@ export function cellsForPeriod(segment: MapSegment, j: number, pScale: number): 
       return;
     }
     if (raw === null || confidence === "none") return;
-    out.push({ cell, p: raw / pScale, confidence });
+    out.push({ cell, p: raw / pScale, confidence, lift: liftFor(segment, i, j) });
   });
   return out;
 }
@@ -89,6 +91,17 @@ export function binFor(p: number): number {
 
 export const BIN_LABELS = ["<1%", "1–5%", "5–10%", "10–25%", "25–50%", "≥50%"];
 
+/** Colour bins for lift (a cell against its wider area); the same thresholds drive the legend. */
+export const LIFT_BINS = [0.5, 0.8, 1.25, 2] as const;
+
+export function liftBinFor(lift: number): number {
+  let b = 0;
+  for (const t of LIFT_BINS) if (lift >= t) b += 1;
+  return b; // 0..4, 2 = about the same as the wider area
+}
+
+export const LIFT_LABELS = ["Under half", "Lower", "About the same", "Higher", "Over twice"];
+
 export interface CellFeatureProps {
   cell: string;
   bin: number;
@@ -96,6 +109,10 @@ export interface CellFeatureProps {
   confidence: ConfidenceLevel;
   insufficient: boolean;
   presence: boolean;
+  /** Ratio to the wider area, or null when there's no reference. */
+  lift: number | null;
+  /** Lift colour bin, or -1 when there's no lift. */
+  liftBin: number;
 }
 
 export interface FeatureCollection {
@@ -126,6 +143,8 @@ export function toGeoJSON(values: CellValue[]): FeatureCollection {
         confidence: v.confidence,
         insufficient: v.confidence === "insufficient",
         presence: false,
+        lift: v.lift ?? null,
+        liftBin: v.lift === null || v.lift === undefined ? -1 : liftBinFor(v.lift),
       },
       geometry: { type: "Polygon", coordinates: polygon(v.cell) },
     })),
@@ -138,7 +157,7 @@ export function presenceGeoJSON(cells: string[]): FeatureCollection {
     features: cells.map((cell, id) => ({
       type: "Feature",
       id,
-      properties: { cell, bin: -1, p: null, confidence: "none", insufficient: false, presence: true },
+      properties: { cell, bin: -1, p: null, confidence: "none", insufficient: false, presence: true, lift: null, liftBin: -1 },
       geometry: { type: "Polygon", coordinates: polygon(cell) },
     })),
   };
