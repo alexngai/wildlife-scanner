@@ -322,7 +322,7 @@ def _parse_chunk(args: tuple[str, list[Segment], Bbox]) -> tuple[str, int]:
     only a step and is deleted at once, so scratch space stays small)."""
     from wildlife_radar.connectors.gbif_snapshot import snapshot_observations
     from wildlife_radar.storage import ObservationStore
-    from wildlife_radar.storage.observations import _csv_value, observation_row
+    from wildlife_radar.storage.observations import CSV_OPTIONS, _csv_value, observation_row
 
     out, segments, bbox = args
     tmp = out + ".csv"
@@ -337,7 +337,7 @@ def _parse_chunk(args: tuple[str, list[Segment], Bbox]) -> tuple[str, int]:
         os.remove(tmp)
         return out, 0
     with ObservationStore() as mem:
-        mem.conn.execute(f"COPY observations FROM '{tmp}' (FORMAT csv, HEADER false, NULLSTR '')")
+        mem.conn.execute(f"COPY observations FROM '{tmp}' ({CSV_OPTIONS})")
         mem.conn.execute(f"COPY observations TO '{out}' (FORMAT parquet, COMPRESSION zstd)")
     os.remove(tmp)
     return out, n
