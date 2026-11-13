@@ -98,9 +98,13 @@ def _snapshot(ctx: JobContext) -> dict:
     """Register the store's GBIF snapshot ingest; with ``ingest_snapshots``, first ingest the
     newest complete monthly snapshot if it is newer than the last one ingested.
 
+    A region inside a coverage area (``coverage:`` in its pack) reads that area's snapshot
+    tiles, built once for all its regions, and drops GBIF rows the new snapshot no longer has
+    (deleted or withdrawn at the source; pipeline/coverage.py). Other regions extract their
+    own bounding box.
+
     Reports ``unchanged`` when nothing new arrived, so downstream jobs keep their inputs and a
-    weekly check costs one bucket listing, not a rebuild. Records deleted upstream stay in the
-    store until a full rebuild (takedowns are handled then).
+    weekly check costs one bucket listing, not a rebuild.
     """
     prev = latest(ctx.lake, ctx.region.id, "snapshot")
     prev_out = (prev or {}).get("outputs") or {}
@@ -113,7 +117,35 @@ def _snapshot(ctx: JobContext) -> dict:
         available = ctx.params.get("snapshot_date") or remote.latest_snapshot()
         if available is None:
             raise RuntimeError("no complete GBIF snapshot found")
-        if ingested is None or available > ingested:
+        if (ingested is None or available > ingested) and ctx.region.coverage:
+            # One pass for the whole coverage area (shared by its regions), then this
+            # region's tiles; rows the new snapshot lacks are reconciled away.
+            from wildlife_radar.pipeline import coverage
+            from wildlife_radar.regions import load_region
+
+            ctx.log(f"GBIF snapshot {available} via coverage {ctx.region.coverage}")
+            workers = int(ctx.params.get("snapshot_workers") or 10)
+            built = coverage.build(
+                load_region(ctx.region.coverage),
+                available,
+                ctx.lake,
+                workers=workers,
+                keep_staging=bool(ctx.params.get("keep_staging")),
+                log=ctx.log,
+            )
+            out["coverage"] = {k: built.get(k) for k in ("coverage", "rows", "reused", "delta")}
+            out["ingest"] = coverage.ingest_region(
+                ctx.region,
+                ctx.db,
+                ctx.lake,
+                ctx.region.coverage,
+                available,
+                workers=max(1, workers // 2),
+                log=ctx.log,
+                live_keys=ctx.registry().live_keys(),
+            )
+            ingested = available
+        elif ingested is None or available > ingested:
             ctx.log(f"ingesting GBIF snapshot {available} (previous: {ingested or 'none'})")
             work = (
                 ctx.lake / "raw" / "gbif-snapshot" / f"date={available}" / f"region={ctx.region.id}"

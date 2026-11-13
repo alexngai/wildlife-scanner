@@ -455,6 +455,24 @@ def cmd_worker(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_coverage_snapshot(args: argparse.Namespace) -> int:
+    """Extract a coverage area from a GBIF snapshot into Parquet tiles (once for its regions)."""
+    from wildlife_radar.connectors import gbif_snapshot_remote as remote
+    from wildlife_radar.pipeline import coverage
+
+    date_ = args.snapshot_date or remote.latest_snapshot()
+    out = coverage.build(
+        load_region(args.coverage),
+        date_,
+        Path(args.lake),
+        workers=args.workers,
+        keep_staging=args.keep_staging,
+        log=lambda m: print(m, file=sys.stderr, flush=True),
+    )
+    print(json.dumps({k: v for k, v in out.items() if k != "tiles"}, indent=2, default=str))
+    return 0
+
+
 def cmd_push_publish(args: argparse.Namespace) -> int:
     """Upload the region's current published version to object storage and swap its pointer."""
     from wildlife_radar.pipeline.sync import push_publish
@@ -734,6 +752,16 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--datasets", help="dataset registry YAML (default: the region pack's)")
     snapshot_args(p)
     p.set_defaults(func=cmd_worker)
+
+    p = sub.add_parser(
+        "coverage-snapshot", help="extract a coverage area from a GBIF snapshot into tiles"
+    )
+    p.add_argument("--coverage", default="california", help="region pack of the coverage area")
+    p.add_argument("--snapshot-date", help="default: the newest complete snapshot")
+    p.add_argument("--lake", default="data/lake")
+    p.add_argument("--workers", type=int, default=10)
+    p.add_argument("--keep-staging", action="store_true")
+    p.set_defaults(func=cmd_coverage_snapshot)
 
     p = sub.add_parser("push-publish", help="upload the current published version")
     common(p)
