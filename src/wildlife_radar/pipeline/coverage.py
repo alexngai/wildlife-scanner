@@ -82,17 +82,32 @@ def build(
     shutil.rmtree(out_dir, ignore_errors=True)
     out_dir.mkdir(parents=True)
     con = duckdb.connect()
+    # Order doesn't matter here; not preserving it lets DuckDB stream instead of buffering.
+    con.execute("SET preserve_insertion_order = false")
     files = f"'{(staging / '*.parquet').as_posix()}'"
-    con.execute(
-        f"""
-        COPY (
-            SELECT *, floor(decimallatitude)::INTEGER AS tlat,
-                floor(decimallongitude)::INTEGER AS tlon
-            FROM read_parquet({files}, union_by_name = true)
-        ) TO '{out_dir.as_posix()}'
-        (FORMAT parquet, COMPRESSION zstd, PARTITION_BY (tlat, tlon), OVERWRITE_OR_IGNORE)
-        """
-    )
+    # One latitude band at a time: writing every tile at once keeps a buffer open per tile and
+    # spilled >12 GB for California (180 M rows, 121 tiles).
+    bands = [
+        b
+        for (b,) in con.execute(
+            f"SELECT DISTINCT floor(decimallatitude)::INTEGER FROM read_parquet({files}, "
+            "union_by_name = true) WHERE decimallatitude IS NOT NULL ORDER BY 1"
+        ).fetchall()
+    ]
+    for band in bands:
+        con.execute(
+            f"""
+            COPY (
+                SELECT *, floor(decimallatitude)::INTEGER AS tlat,
+                    floor(decimallongitude)::INTEGER AS tlon
+                FROM read_parquet({files}, union_by_name = true)
+                WHERE floor(decimallatitude)::INTEGER = {int(band)}
+            ) TO '{out_dir.as_posix()}'
+            (FORMAT parquet, COMPRESSION zstd, PARTITION_BY (tlat, tlon), OVERWRITE_OR_IGNORE,
+             FILENAME_PATTERN 'part-{{i}}')
+            """
+        )
+        log(f"coverage {coverage.id} {snapshot_date}: wrote latitude band {band}")
     tiles = {
         f"{a}_{b}": n
         for a, b, n in con.execute(
