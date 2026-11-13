@@ -77,3 +77,14 @@ The app doesn't send the life list to `/places/{id}/lists?life_list=…` or `/ne
 computes "new for you" from the published lists and a life list kept in `localStorage`, so
 the list never leaves the device. If the API's `new_for_you` ever draws on more than the
 published lists, say so, and the app can offer it as an opt-in.
+
+## 8. `taxa.json` lists only the species visible on the publish date
+
+**What:** build the search index from every taxon that has a published map, not
+`list_taxa(today)`. Give each entry its strictest tier and mode over the year, or per-season
+modes.
+
+**Why:** a species withheld only this week (e.g. in a protected season) is missing from
+search all week, although its map file is published for its other weeks and opens by direct
+link. Each entry's `tier` and `mode` also describe only the publish day, so a species that
+becomes awareness-only later in the year is labelled `forecast` in search.
