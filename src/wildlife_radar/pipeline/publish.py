@@ -131,6 +131,7 @@ def publish_bundle(
     )
     visible = "(SELECT taxon_id FROM _pub_tier WHERE tier < 3)"
     timing = "(SELECT taxon_id FROM _pub_tier WHERE tier <= 1)"
+    hourly_ok = "(SELECT taxon_id FROM _pub_tier WHERE tier = 0)"
     allowed = (
         "EXISTS (SELECT 1 FROM _pub_tier pt JOIN _pub_level pl ON pl.tier = pt.tier "
         "WHERE pt.taxon_id = x.taxon_id AND pl.level = x.level)"
@@ -164,12 +165,30 @@ def publish_bundle(
         "timed_scorecard": (
             f"SELECT * FROM timed_scorecard x WHERE region_id = $r AND taxon_id IN {timing}"
         ),
+        # Hourly forecasts are finer than any tier but OPEN allows (hour granularity).
+        "hourly_models": (
+            f"SELECT * FROM hourly_models x WHERE region_id = $r AND passes "
+            f"AND taxon_id IN {hourly_ok}"
+        ),
+        "hourly_scorecard": (
+            f"SELECT * FROM hourly_scorecard x WHERE region_id = $r AND taxon_id IN {hourly_ok}"
+        ),
+        # Tide predictions around now, so the API can place hours on the tide (public data).
+        "tide_hilo": (
+            "SELECT * FROM tide_hilo x WHERE station_id IN (SELECT unnest($stations)) "
+            "AND t BETWEEN $t0 AND $t1"
+        ),
         "signal_daily": (
             "SELECT * FROM signal_daily x WHERE station_id IN (SELECT unnest($stations))"
         ),
     }
     present = _tables(conn)
-    params = {"r": region.id, "stations": [s.station_id for s in region.tide_stations]}
+    params = {
+        "r": region.id,
+        "stations": [s.station_id for s in region.tide_stations],
+        "t0": naive_utc(now) - timedelta(days=3),
+        "t1": naive_utc(now) + timedelta(days=120),
+    }
     conn.execute(f"ATTACH '{bundle}' AS bundle")
     try:
         for table, sql in selects.items():

@@ -126,7 +126,8 @@ def test_timed_job_scores_profiled_species(tmp_path):
     with ObservationStore(db) as work:
         work.conn.execute(
             "CREATE TABLE prior_taxa AS SELECT 'sandiego' AS region_id, "
-            "'atractoscion-nobilis' AS taxon_id, 'fishes' AS taxon_group"
+            "'atractoscion-nobilis' AS taxon_id, 'fishes' AS taxon_group, "
+            "'Atractoscion nobilis' AS scientific_name, 50 AS n_visits"
         )
         work.conn.execute(
             "CREATE TABLE inat_taxon_records AS SELECT 'atractoscion-nobilis' AS taxon_id, "
@@ -147,6 +148,7 @@ def test_timed_job_scores_profiled_species(tmp_path):
     ctx.region.pipeline.since_year = 2024
     result = run("timed", ctx, jobs={"timed": Job("timed", (), runner._timed)})[0]
     out = result["outcome"]
+    assert isinstance(out, dict), out
     assert out["taxa"]["atractoscion-nobilis"]["verdicts"]["hours_after_sunset"] == "supported"
     assert hist.calls == [("9999",), ("47178", "47273")]
     conn = duckdb.connect(str(db), read_only=True)
@@ -154,9 +156,14 @@ def test_timed_job_scores_profiled_species(tmp_path):
     assert signals == {
         "astro.diel_phase",
         "astro.hours_since_sunset",
+        "astro.moonlight",
         "tide.stage",
         "tide.height_m",
     }
+    # The hourly model ran and was stored (gate outcome depends on the synthetic counts).
+    assert "passes" in out["taxa"]["atractoscion-nobilis"]["hourly"]
+    stored = conn.execute("SELECT count(*) FROM hourly_models").fetchone()[0]
+    assert stored == 1
 
 
 def test_timing_is_published_for_open_and_generalized_taxa_only(store, tmp_path):  # noqa: F811

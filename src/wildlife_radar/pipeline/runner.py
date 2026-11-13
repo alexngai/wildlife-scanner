@@ -14,6 +14,7 @@ regions through the reference store (``lake/ref``, storage/refstore.py).
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import traceback
@@ -477,38 +478,114 @@ def _tiers(ctx: JobContext) -> dict:
     return out
 
 
+TIMED_TOP = 40
+"""Besides profiled species, the most-recorded open/generalized taxa get hourly models."""
+
+HOURLY_COUNTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS inat_hourly (
+    region_id VARCHAR, series VARCHAR, hour TIMESTAMP, n INTEGER
+);
+CREATE TABLE IF NOT EXISTS inat_hourly_years (
+    region_id VARCHAR, series VARCHAR, year INTEGER, fetched_at TIMESTAMP
+);
+"""
+
+
+def _hourly_counts(conn, hist, region, series: str, ids, start: date, end: date, now) -> dict:
+    """Hourly counts for a taxon or group, cached in the store: years before last year are
+    fetched once, recent years every run (records keep arriving)."""
+    conn.execute(HOURLY_COUNTS_SCHEMA)
+    have = {
+        y
+        for (y,) in conn.execute(
+            "SELECT year FROM inat_hourly_years WHERE region_id = ? AND series = ?",
+            [region.id, series],
+        ).fetchall()
+    }
+    for year in range(start.year, end.year + 1):
+        if year in have and year < end.year - 1:
+            continue
+        counts = hist.hourly(
+            ids, region.bbox, max(start, date(year, 1, 1)), min(end, date(year, 12, 31))
+        )
+        conn.execute(
+            "DELETE FROM inat_hourly WHERE region_id = ? AND series = ? AND year(hour) = ?",
+            [region.id, series, year],
+        )
+        if counts:
+            conn.executemany(
+                "INSERT INTO inat_hourly VALUES (?, ?, ?, ?)",
+                [(region.id, series, t.replace(tzinfo=None), n) for t, n in counts.items()],
+            )
+        conn.execute(
+            "DELETE FROM inat_hourly_years WHERE region_id = ? AND series = ? AND year = ?",
+            [region.id, series, year],
+        )
+        conn.execute(
+            "INSERT INTO inat_hourly_years VALUES (?, ?, ?, ?)",
+            [region.id, series, year, now.replace(tzinfo=None)],
+        )
+    return {
+        t.replace(tzinfo=UTC): n
+        for t, n in conn.execute(
+            "SELECT hour, n FROM inat_hourly WHERE region_id = ? AND series = ? AND hour >= ? "
+            "AND hour < ?",
+            [region.id, series, start, end + timedelta(days=1)],
+        ).fetchall()
+    }
+
+
 def _timed(ctx: JobContext) -> dict:
-    """Time-of-day and tide-stage indices for profiled species (conditions/timed.py).
+    """Hourly factors (conditions/factors.py, hourly.py) from iNaturalist hourly counts.
+
+    For profiled species and the ``timed_top`` most-recorded open or generalized taxa:
+    descriptive indices per factor (``timed_index``), checks of the profile's intra-day claims
+    (``timed_scorecard``), and a gated hourly model that spreads the daily forecast over the
+    hours (``hourly_models``, ``hourly_scorecard``). Counts are cached in the store.
 
     Errors are recorded per taxon rather than failing the job: publishing depends on it, and
     an iNaturalist outage must not hold back live data.
     """
-    from wildlife_radar.conditions import timed
+    from wildlife_radar.conditions import factors, hourly, timed
     from wildlife_radar.connectors.inat_histogram import GROUP_TAXA, InatHistogram
     from wildlife_radar.connectors.inaturalist_taxa import (
         RECORDS_SCHEMA,
         InatTaxonStatusProvider,
     )
     from wildlife_radar.connectors.noaa_coops import CoopsTideConnector
-    from wildlife_radar.policy.statuses import TaxonInfo
+    from wildlife_radar.policy.statuses import TIERS_SCHEMA, TaxonInfo
     from wildlife_radar.profiles import ProfileLibrary
 
     hist = ctx.params.get("_histogram") or InatHistogram()
     lib = ProfileLibrary()
     start = date(ctx.region.pipeline.since_year or 2010, 1, 1)
     end = ctx.now.date() - timedelta(days=1)
-    out: dict = {"taxa": {}, "errors": {}}
+    split = ctx.conditions_split().date()
+    top = int(ctx.params.get("timed_top", TIMED_TOP))
+    out: dict = {"taxa": {}, "errors": {}, "hourly_models": 0, "hourly_passing": []}
     with ctx.store() as store:
         conn = store.conn
         conn.execute(timed.TIMED_SCHEMA)
-        present = dict(
-            conn.execute(
-                "SELECT taxon_id, any_value(taxon_group) FROM prior_taxa WHERE region_id = ? "
-                "GROUP BY 1",
-                [ctx.region.id],
-            ).fetchall()
+        conn.execute(hourly.HOURLY_SCHEMA)
+        conn.execute(TIERS_SCHEMA)
+        rows = conn.execute(
+            "SELECT p.taxon_id, any_value(p.taxon_group), any_value(p.scientific_name), "
+            "sum(p.n_visits), any_value(t.tier) FROM prior_taxa p "
+            "LEFT JOIN tiers t ON t.region_id = p.region_id AND t.taxon_id = p.taxon_id "
+            "WHERE p.region_id = ? GROUP BY 1",
+            [ctx.region.id],
+        ).fetchall()
+        info = {t: (g, name, n, tier) for t, g, name, n, tier in rows}
+        profiled = [t for t in lib.ids(kind="species") if t in info]
+        ranked = sorted(
+            (
+                t
+                for t, (g, _n, _v, tier) in info.items()
+                if tier is not None and tier <= 1 and g in GROUP_TAXA
+            ),
+            key=lambda t: -info[t][2],
         )
-        taxa = [t for t in lib.ids(kind="species") if t in present]
+        taxa = list(dict.fromkeys([*profiled, *ranked[:top]]))
         # Where the sun and tides are evaluated: the primary tide station, else the centre.
         lon_min, lat_min, lon_max, lat_max = ctx.region.bbox
         lat, lon = (lat_min + lat_max) / 2, (lon_min + lon_max) / 2
@@ -519,17 +596,14 @@ def _timed(ctx: JobContext) -> dict:
             hilo = timed.load_hilo(conn, station.station_id)
             have = {t.year for t, _, _ in hilo}
             tides = ctx.params.get("_tides") or CoopsTideConnector()
-            for year in range(start.year, end.year + 1):
-                if year in have and year != end.year:
+            for year in range(start.year, end.year + 2):
+                if year in have and year < end.year:
                     continue
                 try:
                     values = tides.predictions(
-                        station.station_id,
-                        date(year, 1, 1),
-                        min(date(year, 12, 31), end + timedelta(days=2)),
-                        interval="hilo",
+                        station.station_id, date(year, 1, 1), date(year, 12, 31), interval="hilo"
                     )
-                except Exception as exc:  # tide indices are skipped for that year
+                except Exception as exc:  # tide factors are skipped for that year
                     out["errors"][f"tides:{year}"] = str(exc)
                     continue
                 timed.store_hilo(
@@ -551,23 +625,37 @@ def _timed(ctx: JobContext) -> dict:
             ).fetchall()
         )
         resolver = InatTaxonStatusProvider({})
-        effort_cache: dict[str, dict] = {}
+        value_cache: dict = {}
+
+        def value(signal: str, t: datetime):
+            key = (signal, t)
+            if key not in value_cache:
+                value_cache[key] = signals.value(signal, t, edges)
+            return value_cache[key]
+
         for taxon_id in taxa:
-            profile = lib.resolve(taxon_id)
+            group, name, _n, _tier = info[taxon_id]
+            profile = lib.resolve(taxon_id) if taxon_id in profiled else None
             try:
                 inat_id = known.get(taxon_id) or resolver._resolve_id(
-                    TaxonInfo(taxon_id=taxon_id, scientific_name=profile.scientific_name)
+                    TaxonInfo(taxon_id=taxon_id, scientific_name=name or taxon_id)
                 )
-                group = present[taxon_id]
                 if inat_id is None or group not in GROUP_TAXA:
                     out["errors"][taxon_id] = "no iNaturalist id or effort group"
                     continue
-                counts = hist.hourly([inat_id], ctx.region.bbox, start, end)
-                if group not in effort_cache:
-                    effort_cache[group] = hist.hourly(
-                        GROUP_TAXA[group], ctx.region.bbox, start, end
-                    )
-                effort = effort_cache[group]
+                counts = _hourly_counts(
+                    conn, hist, ctx.region, f"taxon:{inat_id}", [inat_id], start, end, ctx.now
+                )
+                effort = _hourly_counts(
+                    conn,
+                    hist,
+                    ctx.region,
+                    f"group:{group}",
+                    GROUP_TAXA[group],
+                    start,
+                    end,
+                    ctx.now,
+                )
             except Exception as exc:
                 out["errors"][taxon_id] = f"{type(exc).__name__}: {exc}"
                 continue
@@ -575,6 +663,7 @@ def _timed(ctx: JobContext) -> dict:
             for signal in (
                 "astro.diel_phase",
                 "astro.hours_since_sunset",
+                "astro.moonlight",
                 "tide.stage",
                 "tide.height_m",
             ):
@@ -588,19 +677,39 @@ def _timed(ctx: JobContext) -> dict:
                     signals.offset,
                 )
             verdicts = []
-            for name, spec in profile.signals.items():
-                sig = spec.signal or name
+            for tname, spec in profile.signals.items() if profile else ():
+                sig = spec.signal or tname
                 if sig not in timed.TIMED_SIGNALS:
                     continue
-                rows = indices.get("astro.diel_phase" if sig == "astro.sun_altitude_deg" else sig)
-                if rows:
+                rows_ = indices.get("astro.diel_phase" if sig == "astro.sun_altitude_deg" else sig)
+                if rows_:
                     trait = (profile.traits or {}).get("activity_pattern")
-                    verdicts.append(timed.judge(name, spec, sig, rows, trait))
+                    verdicts.append(timed.judge(tname, spec, sig, rows_, trait))
             n = sum(counts.values())
             timed.persist(conn, ctx.region.id, taxon_id, indices, verdicts, n, ctx.now)
+            terms = factors.hourly_terms(group, profile, tides=bool(hilo))
+            fit = hourly.fit_hourly(
+                counts,
+                effort,
+                terms,
+                value,
+                split,
+                offset_hours=signals.offset,
+                expectations=timed.expectations(profile),
+            )
+            hourly.persist(conn, ctx.region.id, taxon_id, fit, split, ctx.now)
+            out["hourly_models"] += 1
+            if fit.passes:
+                out["hourly_passing"].append(taxon_id)
             out["taxa"][taxon_id] = {
                 "records": n,
                 "verdicts": {v.term: v.verdict for v in verdicts},
+                "hourly": {
+                    "passes": fit.passes,
+                    "gain": None if math.isnan(fit.gain) else round(fit.gain / fit.loss_base, 4),
+                    "supported": [t.term for t in fit.scorecard if t.verdict == "supported"],
+                    "note": fit.note,
+                },
             }
     return out
 

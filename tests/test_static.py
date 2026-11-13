@@ -38,18 +38,28 @@ def test_static_products_follow_policy(store, tmp_path):  # noqa: F811
     for path in files:
         assert "secretus" not in path.read_text(encoding="utf-8").lower(), path
     # COARSE (IUCN EN): monthly maps at the landscape resolution only.
-    coarse = json.loads((region_dir / index["maps"]["raritas-orientalis"]["2026"]).read_text())
-    assert len(coarse["periods"]) == 12
+    coarse = json.loads((region_dir / index["maps"]["raritas-orientalis"]).read_text())
+    assert coarse["format"] == 2 and len(coarse["segments"]) == 1
+    seg = coarse["segments"][0]
+    assert (
+        seg["tier"] == 2 and seg["granularity"] == "month" and seg["periods"] == list(range(1, 13))
+    )
     finest = rule_for(2).h3_res
-    for period in coarse["periods"]:
-        assert period["tier"] == 2
-        assert all(h3.get_resolution(c[0]) <= finest for c in period["cells"])
-    # OPEN: weekly maps.
-    open_map = json.loads((region_dir / index["maps"]["vernalis-litoralis"]["2026"]).read_text())
-    assert len(open_map["periods"]) == 52 and open_map["periods"][0]["cells"]
+    assert all(h3.get_resolution(c) <= finest for c in seg["cells"])
+    assert seg["ref"]["resolution"] is None and set(seg["ref"]["p"]) == {"region"}
+    # OPEN: weekly maps; integer probabilities, one confidence code per week.
+    open_map = json.loads((region_dir / index["maps"]["vernalis-litoralis"]).read_text())
+    seg = open_map["segments"][0]
+    assert seg["granularity"] == "week" and seg["periods"] == list(range(1, 53))
+    assert len(seg["p"]) == len(seg["cells"]) and all(len(row) == 52 for row in seg["p"])
+    assert all(isinstance(v, int) for row in seg["p"] for v in row if v is not None)
+    assert all(len(c) == 52 and set(c) <= set("ilmh-") for c in seg["confidence"])
+    # Lift and seasonal index are derivable: p / reference p, and p / the row's mean.
+    parent = h3.cell_to_parent(seg["cells"][0], seg["ref"]["resolution"])
+    assert parent in seg["ref"]["p"]
     # Places from the region pack, weekly lists without life-list items.
     place = index["places"]["la-jolla-cove"]
-    doc = json.loads((region_dir / place["files"]["2026"]).read_text())
+    doc = json.loads((region_dir / place["file"]).read_text())
     assert len(doc["weeks"]) == 52
     assert all("new_for_you" not in g for w in doc["weeks"] for g in w["groups"])
     # The manifest records what was built.
@@ -91,3 +101,34 @@ def test_batched_maps_equal_single_maps(store):  # noqa: F811
             one = q.species_map(taxon_id, m.date)
             assert one.time_window == m.time_window and one.taxon == m.taxon
             assert sorted(one.cells, key=lambda c: c.cell) == sorted(m.cells, key=lambda c: c.cell)
+
+
+def test_matrix_maps_equal_the_policy_filtered_maps(store):  # noqa: F811
+    """The vectorized matrices carry exactly what species_maps (EgressFilter) returns."""
+    from wildlife_radar.policy.statuses import TierService
+    from wildlife_radar.serving.queries import BaselineQueries
+
+    st, region = store
+    q = BaselineQueries(st.conn, region, TierService(st.conn, "socal"))
+    codes = {"insufficient": "i", "low": "l", "medium": "m", "high": "h"}
+    for taxon_id in ("vernalis-litoralis", "raritas-orientalis"):
+        segments = q.species_matrix(taxon_id, 2026)
+        assert len(segments) == 1
+        seg = segments[0]
+        maps = q.species_maps(taxon_id, 2026)
+        assert len(maps) == len(seg.periods)
+        assert seg.granularity == ("month" if taxon_id == "raritas-orientalis" else "week")
+        for m in maps:
+            label = m.date.month if seg.granularity == "month" else m.date.isocalendar().week
+            i = seg.periods.index(label)
+            got = {
+                c: (seg.p[j][i], seg.confidence[j][i])
+                for j, c in enumerate(seg.cells)
+                if seg.p[j][i] is not None
+            }
+            want = {c.cell: (c.p, codes[c.confidence.value]) for c in m.cells}
+            assert got.keys() == want.keys()
+            for c, (p, conf) in want.items():
+                assert abs(got[c][0] - p) < 2e-6 and got[c][1] == conf
+            assert all(h3.get_resolution(c) == seg.resolution for c in seg.cells)
+    assert q.species_matrix("secretus-maximus", 2026) == []  # withheld: nothing at all

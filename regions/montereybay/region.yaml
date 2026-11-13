@@ -3,6 +3,7 @@
 # Curated statuses and the dataset registry come from the california pack (`inherits`).
 id: montereybay
 name: Monterey Bay
+timezone: America/Los_Angeles
 inherits: california
 bbox: [-122.55, 35.95, -121.1, 37.2]
 # The mountain lion's CESA listing covers the Central Coast populations (Santa Cruz

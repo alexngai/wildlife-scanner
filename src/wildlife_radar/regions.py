@@ -56,6 +56,8 @@ class Region(BaseModel):
     tide_stations: list[TideStation] = Field(default_factory=list)
     places: list[Place] = Field(default_factory=list)
     pipeline: PipelineSettings = Field(default_factory=PipelineSettings)
+    timezone: str | None = None
+    """IANA time zone for local times in outputs (e.g. hourly forecasts)."""
     inherits: str | None = None
     """Another region pack whose curated files (statuses.yaml, datasets.yaml) apply here when
     this pack has none, e.g. a county inside ``socal``."""

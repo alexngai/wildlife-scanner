@@ -37,7 +37,15 @@ from datetime import UTC, date, datetime, timedelta
 
 import duckdb
 
-from wildlife_radar.connectors.astronomy import daily_events
+from wildlife_radar.conditions.factors import (
+    DIEL,
+    FACTORS,
+    MOONLIGHT,
+    SINCE_SUNSET,
+    SUNSET_BINS,
+    TIDE_STAGE,
+)
+from wildlife_radar.connectors.astronomy import astro_state, daily_events
 
 TIMED_SCHEMA = """
 CREATE TABLE IF NOT EXISTS timed_index (
@@ -55,16 +63,16 @@ CREATE TABLE IF NOT EXISTS tide_hilo (
 );
 """
 
-DIEL = ("night", "dawn", "day", "dusk")
-TIDE_STAGE = ("low", "rising", "high", "falling")
-SUNSET_BINS = ((0, 1), (1, 2), (2, 4), (4, 24))
 HEIGHT_BANDS = 5
+MOONLIT_FRACTION = 0.25
+"""A night hour is moonlit when the moon is above the horizon and at least this much lit."""
 
 #: Intra-day signals this module computes (profile signal id → categories, in order).
 TIMED_SIGNALS: dict[str, tuple[str, ...]] = {
     "astro.diel_phase": DIEL,
     "astro.sun_altitude_deg": DIEL,  # profiles state diel activity as sun altitude
-    "astro.hours_since_sunset": (*(f"{a}-{b}h" for a, b in SUNSET_BINS), "daylight"),
+    "astro.hours_since_sunset": SINCE_SUNSET,
+    "astro.moonlight": MOONLIGHT,
     "tide.stage": TIDE_STAGE,
     "tide.height_m": tuple(f"q{i + 1}" for i in range(HEIGHT_BANDS)),
 }
@@ -143,10 +151,32 @@ class HourSignals:
             stage = "falling" if k1 == "H" else "rising"
         return stage, height
 
+    def moonlight(self, t: datetime) -> str | None:
+        diel = self.diel(t)
+        if diel is None:
+            return None
+        if diel != "night":
+            return "day"
+        state = astro_state(self.lat, self.lon, t)
+        up = state.moon_altitude_deg > 0 and state.moon_illumination >= MOONLIT_FRACTION
+        return "moonlit" if up else "dark"
+
+    def value(self, signal: str, t: datetime, height_edges: list[float]) -> float | None:
+        """A factor's value for the hour starting ``t``: the level index for categorical
+        factors (see ``factors.FACTORS``), the number for numeric ones."""
+        if FACTORS.get(signal) and FACTORS[signal].shape != "categorical":
+            tide = self.tide(t + timedelta(minutes=30))
+            return None if tide is None else tide[1]
+        cats = FACTORS[signal].categories
+        c = self.category(signal, t, height_edges)
+        return None if c is None else float(cats.index(c))
+
     def category(self, signal: str, t: datetime, height_edges: list[float]) -> str | None:
         mid = t + timedelta(minutes=30)
         if signal in ("astro.diel_phase", "astro.sun_altitude_deg"):
             return self.diel(mid)
+        if signal == "astro.moonlight":
+            return self.moonlight(mid)
         if signal == "astro.hours_since_sunset":
             h = self.hours_since_sunset(mid)
             if h is None:
@@ -293,6 +323,24 @@ def judge(term: str, spec, signal: str, rows: list[CategoryIndex], trait=None) -
         verdict=verdict,
         review=review,
     )
+
+
+def expectations(profile) -> dict[str, tuple[str, ...]]:
+    """Levels a profile expects an hourly factor to peak at, by factor id (for scorecards):
+    the diel phase its activity trait implies, the hours-after-sunset bin its ``at`` names."""
+    if profile is None:
+        return {}
+    out: dict[str, tuple[str, ...]] = {}
+    trait = (profile.traits or {}).get("activity_pattern")
+    if trait in ACTIVITY_PEAK:
+        out["astro.diel_phase"] = ACTIVITY_PEAK[trait]
+    for name, spec in profile.signals.items():
+        sig = spec.signal or name
+        params = getattr(spec, "params", {}) or {}
+        if sig == "astro.hours_since_sunset" and "at" in params:
+            at = float(params["at"])
+            out[sig] = tuple(f"{a}-{b}h" for a, b in SUNSET_BINS if a - 1 <= at < b + 1)
+    return out
 
 
 def store_hilo(conn: duckdb.DuckDBPyConnection, station_id: str, rows) -> None:
