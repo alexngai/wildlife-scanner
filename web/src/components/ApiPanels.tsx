@@ -71,7 +71,11 @@ export function ForecastPanel({ taxonId, where, date }: { taxonId: string; where
               <DriverList drivers={f.drivers ?? []} />
             </>
           ) : (
-            <p className="muted small">No daily factors apply: this is the seasonal estimate for this week.</p>
+            <p className="muted small">
+              {f.level === 0
+                ? "No daily factors are modelled for this species yet, so this is the usual chance for this week. It doesn't mean conditions don't matter."
+                : "No single factor stands out today."}
+            </p>
           )}
           <Notes notes={f.notes} />
         </div>

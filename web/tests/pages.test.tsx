@@ -24,6 +24,7 @@ describe("species page", () => {
     expect(screen.getByRole("img", { name: /Seasonal calendar/ })).toBeInTheDocument();
     expect(screen.getByText(/Non-commercial use only/)).toBeInTheDocument();
     expect(screen.getByText(/published after at least 24 hours/)).toBeInTheDocument();
+    expect(document.title).toBe("Common Testbird · wildlife-radar");
   });
 
   it("shows awareness species without any numbers or calendar", async () => {
@@ -66,6 +67,14 @@ describe("species page", () => {
     renderApp("/r/testland/species/testus-primus?place=test-cove", { config: { apiBase: "" } });
     expect(await screen.findByText(/Daily forecasts come from the live service/)).toBeInTheDocument();
   });
+
+  it("says when no daily factors are modelled yet", async () => {
+    const f = fixtureApi("forecast") as Record<string, unknown>;
+    renderApp("/r/testland/species/testus-primus?place=test-cove", {
+      api: { "/species/testus-primus/forecast": { ...f, level: 0, p_level0: 0.42, drivers: [] } },
+    });
+    expect(await screen.findByText(/No daily factors are modelled for this species yet/)).toBeInTheDocument();
+  });
 });
 
 describe("place page", () => {
@@ -79,10 +88,10 @@ describe("place page", () => {
     expect(screen.getAllByText("not enough data").length).toBeGreaterThan(0);
 
     const newSection = screen.getAllByRole("heading", { name: "New for you" })[0]!.closest("section")!;
-    expect(within(newSection).getByText("Common Testbird")).toBeInTheDocument();
-    await user.click(within(newSection).getByRole("button", { name: /Common Testbird: add to your life list/ }));
+    expect(within(newSection).getByRole("link", { name: "Common Testbird" })).toBeInTheDocument();
+    await user.click(within(newSection).getByRole("button", { name: "Seen Common Testbird", pressed: false }));
     expect(JSON.parse(localStorage.getItem("wildlife-radar:life-list:v1")!)).toEqual(["testus-primus"]);
-    expect(within(newSection).queryByText("Common Testbird")).toBeNull();
+    expect(within(newSection).queryByRole("link", { name: "Common Testbird" })).toBeNull();
     expect(requested.join()).not.toContain("testus-primus,"); // life list never sent
   });
 

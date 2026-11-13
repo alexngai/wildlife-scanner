@@ -165,5 +165,11 @@ export default function MapView({ data, bounds, theme, basemap, selectedCell, on
     if (bounds && mapRef.current) mapRef.current.fitBounds(bounds, { padding: 24, duration: 0 });
   }, [bounds]);
 
-  return <div ref={container} className="map" role="img" aria-label={label} data-testid="map" />;
+  // MapLibre's canvas is focusable (keyboard pan and zoom), so the description goes on it
+  // rather than on a wrapping role="img".
+  useEffect(() => {
+    mapRef.current?.getCanvas().setAttribute("aria-label", label);
+  }, [label]);
+
+  return <div ref={container} className="map" data-testid="map" />;
 }

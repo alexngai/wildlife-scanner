@@ -14,10 +14,11 @@ function SeenToggle({ id, name }: { id: string; name: string }) {
       type="button"
       className={`seen-toggle${on ? " on" : ""}`}
       aria-pressed={on}
-      aria-label={`${name}: ${on ? "on your life list" : "add to your life list"}`}
+      title={on ? "On your life list (saved in this browser)" : "Add to your life list (saved in this browser)"}
       onClick={() => toggle(id)}
     >
-      {on ? "✓ Seen" : "+ Seen"}
+      <span aria-hidden="true">{on ? "✓ " : "+ "}</span>
+      Seen <span className="sr-only">{name}</span>
     </button>
   );
 }

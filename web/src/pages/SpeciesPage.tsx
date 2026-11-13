@@ -29,6 +29,7 @@ import { useAsync } from "../lib/useAsync";
 import { isoDate, monthLabel, weekLabel, weekOf } from "../lib/weeks";
 import type { SpeciesMapFile, StaticIndex } from "../products/types";
 import { useThemeContext } from "../themeContext";
+import { usePageTitle } from "../lib/usePageTitle";
 
 const MapView = lazy(() => import("../components/MapView"));
 
@@ -37,6 +38,7 @@ export function SpeciesPage() {
   const { products } = useServices();
   const index = useRegionIndex(region);
   const map = useAsync(() => products.speciesMap(region, taxonId), [products, region, taxonId]);
+  usePageTitle(map?.status === "ok" ? displayName(map.data.taxon) : map?.status === "error" ? "Not available" : null);
   return (
     <div className="page">
       <p className="crumbs">

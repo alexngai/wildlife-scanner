@@ -2,10 +2,12 @@ import { Link } from "react-router";
 import { Async } from "../components/Status";
 import { lastRegion, useRegions } from "../hooks";
 import { shortDate } from "../lib/format";
+import { usePageTitle } from "../lib/usePageTitle";
 
 export function HomePage() {
   const regions = useRegions();
   const last = lastRegion();
+  usePageTitle(null);
   return (
     <div className="page">
       <h1>Where and when to see wildlife</h1>

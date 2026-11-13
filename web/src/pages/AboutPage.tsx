@@ -3,11 +3,13 @@ import { CONFIDENCE_TEXT, LEVEL_TEXT, TIER_DELAY, TIER_NAME } from "../lib/polic
 import { setLifeList, useLifeList } from "../lib/lifelist";
 import { useAsync } from "../lib/useAsync";
 import { Async } from "../components/Status";
+import { usePageTitle } from "../lib/usePageTitle";
 
 export function AboutPage() {
   const { config, api } = useServices();
   const sources = useAsync(api.enabled ? () => api.sources() : null, [api]);
   const { seen } = useLifeList();
+  usePageTitle("About");
   return (
     <div className="page prose">
       <h1>About wildlife-radar</h1>

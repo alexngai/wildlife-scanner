@@ -8,6 +8,7 @@ import { useRegionIndex } from "../hooks";
 import { listsFromPlaceFile } from "../lib/lists";
 import { useAsync } from "../lib/useAsync";
 import { weekOf } from "../lib/weeks";
+import { usePageTitle } from "../lib/usePageTitle";
 
 export function PlacePage() {
   const { region = "", placeId = "" } = useParams();
@@ -18,6 +19,7 @@ export function PlacePage() {
   const thisWeek = weekOf(new Date());
   const week = Math.min(52, Math.max(1, Number(params.get("week")) || thisWeek));
   const year = new Date().getFullYear();
+  usePageTitle(file?.status === "ok" ? file.data.place.name : file?.status === "error" ? "Not available" : null);
   return (
     <div className="page">
       <p className="crumbs">

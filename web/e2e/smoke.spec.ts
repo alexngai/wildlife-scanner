@@ -62,10 +62,10 @@ test("place page: lists, life list, recent activity with delay", async ({ page }
   await page.goto("/r/testland/places/test-cove");
   await expect(page.getByRole("heading", { level: 1, name: "Test Cove" })).toBeVisible();
   await expect(page.getByText(/Sightings through/)).toBeVisible();
-  const seen = page.getByRole("button", { name: /Common Testbird: add to your life list/ }).first();
+  const seen = page.getByRole("button", { name: "Seen Common Testbird", pressed: false }).first();
   await seen.click();
   await page.reload();
-  await expect(page.getByRole("button", { name: /Common Testbird: on your life list/ }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Seen Common Testbird", pressed: true }).first()).toBeVisible();
 });
 
 test("unknown species and deep links work (SPA routing)", async ({ page }) => {

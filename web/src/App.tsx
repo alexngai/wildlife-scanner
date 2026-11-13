@@ -9,11 +9,13 @@ import { NearbyPage } from "./pages/NearbyPage";
 import { PlacePage } from "./pages/PlacePage";
 import { RegionPage } from "./pages/RegionPage";
 import { ThemeProvider } from "./themeContext";
+import { usePageTitle } from "./lib/usePageTitle";
 
 // The species page carries h3-js and the map; load it only when needed.
 const SpeciesPage = lazy(() => import("./pages/SpeciesPage").then((m) => ({ default: m.SpeciesPage })));
 
 function NotFound() {
+  usePageTitle("Not found");
   return (
     <div className="page">
       <NotAvailable what="This page" detail="There's nothing at this address." />
