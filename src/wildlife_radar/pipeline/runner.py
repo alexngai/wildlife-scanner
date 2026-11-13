@@ -600,15 +600,7 @@ def _timed(ctx: JobContext) -> dict:
         ).fetchall()
         info = {t: (g, name, n, tier) for t, g, name, n, tier in rows}
         profiled = [t for t in lib.ids(kind="species") if t in info]
-        ranked = sorted(
-            (
-                t
-                for t, (g, _n, _v, tier) in info.items()
-                if tier is not None and tier <= 1 and g in GROUP_TAXA
-            ),
-            key=lambda t: -info[t][2],
-        )
-        taxa = list(dict.fromkeys([*profiled, *ranked[:top]]))
+        taxa = list(dict.fromkeys([*profiled, *pick_timed_taxa(info, set(GROUP_TAXA), top)]))
         # Where the sun and tides are evaluated: the primary tide station, else the centre.
         lon_min, lat_min, lon_max, lat_max = ctx.region.bbox
         lat, lon = (lat_min + lat_max) / 2, (lon_min + lon_max) / 2
