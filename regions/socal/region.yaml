@@ -1,5 +1,6 @@
 id: socal
 name: Southern California
+timezone: America/Los_Angeles
 inherits: california
 bbox: [-121.0, 32.4, -114.1, 35.8]
 notes: >

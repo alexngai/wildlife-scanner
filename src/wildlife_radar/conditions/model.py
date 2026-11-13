@@ -3,7 +3,8 @@
     logit p = logit p_L0(cell, week) + b0 + Σ_k f_k(signal_k)
 
 ``f_k`` takes its form from the profile's ``shape`` (linear/monotone: z; optimum/peak: z, z²;
-cyclic: sin, cos of an angle) and its prior strength from ``strength``: a ridge penalty on
+cyclic: sin, cos of an angle; categorical: one indicator per category but the first, which is
+the reference) and its prior strength from ``strength``: a ridge penalty on
 standardized features (weak → strong shrinkage toward "no effect"). The Level-0 logit enters as
 an offset, so terms explain departures from the usual place-and-season rate, not the season
 itself. Fitted by penalized iteratively reweighted least squares with case weights (negatives
@@ -34,8 +35,13 @@ class TermSpec:
     role: str = "presence"
     direction: str | None = None
     """Expected direction from the profile ("+"/"-"), compared with the fitted one."""
+    categories: tuple[str, ...] = ()
+    """For ``categorical`` terms: the levels; the signal holds each row's level index (the
+    first level is the reference, folded into the intercept)."""
 
     def basis(self, x: np.ndarray) -> list[np.ndarray]:
+        if self.shape == "categorical":
+            return [(x == i).astype(float) for i in range(1, len(self.categories))]
         if self.shape == "cyclic":
             rad = np.radians(x)
             return [np.sin(rad), np.cos(rad)]
@@ -43,8 +49,14 @@ class TermSpec:
             return [x, x * x]
         return [x]
 
+    @classmethod
+    def from_dict(cls, d: dict) -> TermSpec:
+        return cls(**{**d, "categories": tuple(d.get("categories") or ())})
+
     @property
     def width(self) -> int:
+        if self.shape == "categorical":
+            return max(len(self.categories) - 1, 0)
         return 2 if self.shape in ("cyclic", "optimum", "peak") else 1
 
 
@@ -130,15 +142,39 @@ class OffsetLogit:
             j += t.width
         raise KeyError(term)
 
+    def category_effects(self, term: str) -> dict[str, float]:
+        """Log-odds of each level of a categorical term relative to its reference level."""
+        j = 0
+        for t in self.terms:
+            if t.name == term:
+                levels = np.arange(len(t.categories), dtype=float)
+                z = (np.column_stack(t.basis(levels)) - self.means[j : j + t.width]) / self.sds[
+                    j : j + t.width
+                ]
+                eff = z @ self.coef[j : j + t.width]
+                return {c: float(e - eff[0]) for c, e in zip(t.categories, eff, strict=True)}
+            j += t.width
+        raise KeyError(term)
+
     def to_dict(self) -> dict:
         return {
-            "terms": [t.__dict__ for t in self.terms],
+            "terms": [{**t.__dict__, "categories": list(t.categories)} for t in self.terms],
             "coef": self.coef.tolist(),
             "intercept": self.intercept,
             "means": self.means.tolist(),
             "sds": self.sds.tolist(),
             "converged": self.converged,
         }
+
+
+def model_from_dict(d: dict) -> OffsetLogit:
+    model = OffsetLogit([TermSpec.from_dict(t) for t in d["terms"]])
+    model.coef = np.array(d["coef"])
+    model.intercept = d["intercept"]
+    model.means = np.array(d["means"])
+    model.sds = np.array(d["sds"])
+    model.converged = d["converged"]
+    return model
 
 
 def logit(p: np.ndarray) -> np.ndarray:

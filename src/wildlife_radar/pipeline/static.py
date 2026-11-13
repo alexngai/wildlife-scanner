@@ -3,21 +3,24 @@
 They are read from the bundle through the same query layer as the API, so they pass the same
 policy by construction: withheld taxa are absent, sensitive taxa appear only at their tier's
 resolution and time granularity, and tiers are evaluated per week (seasonal raises apply).
+The file formats are documented for frontend use in ``docs/design/static-products.md``.
 
 Layout under ``publish/region=<id>/``::
 
-    version=<v>/static/index.json    entry point: what exists and where (small, per version)
-    version=<v>/static/taxa.json     search index: names, aliases, group, tier
-    static/maps/<taxon>/<year>.<key>.json       weekly (or monthly) H3 maps for a year
-    static/places/<place>/<year>.<key>.json     weekly place lists for a year
+    version=<v>/static/index.json      entry point: what exists and where (small, per version)
+    version=<v>/static/taxa.json       search index: names, aliases, group, tier
+    static/maps/<taxon>.<key>.json     the year's maps as cells × weeks (or months) matrices
+    static/places/<place>.<key>.json   weekly place lists
 
 Maps and place lists are **content-addressed**: ``key`` hashes everything that determines the
 file (baseline build, the taxon's tier for each week, names, gates, licenses, format version),
 so a publish regenerates and uploads only files whose inputs changed. Live publishes every
-30 minutes therefore cost one small index; a new monthly baseline regenerates everything.
+30 minutes therefore cost one small index; a new monthly baseline regenerates everything,
+in parallel processes.
 
-Maps are H3 cells (``[cell, p, lift, seasonal_index, confidence]``), which the frontend can
-draw directly (e.g. h3-js or deck.gl's H3 layer); no tile pipeline is needed at these sizes.
+Maps are keyed by ISO week, not by date: estimates are per week of the year, so one file
+serves every year. Tiers that depend on the date (seasonal windows) are evaluated for the
+``year_basis`` year and are rebuilt with each baseline.
 """
 
 from __future__ import annotations
@@ -25,18 +28,28 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from datetime import date, datetime, timedelta
+from concurrent.futures import ProcessPoolExecutor
+from datetime import datetime
+from multiprocessing import get_context
 from pathlib import Path
 
 import duckdb
 
+from wildlife_radar.baseline.effort import method_for
 from wildlife_radar.policy.statuses import TierService
 from wildlife_radar.policy.tiers import PolicyTier
 from wildlife_radar.regions import Region
-from wildlife_radar.serving.queries import BaselineQueries, NotAvailable, week_thursday
+from wildlife_radar.serving.queries import (
+    LEVEL0_LABEL,
+    BaselineQueries,
+    NotAvailable,
+    week_thursday,
+)
 
-FORMAT = 1
+FORMAT = 2
 """Bump when the shape of a static file changes, so every file is regenerated."""
+P_SCALE = 100_000
+"""Probabilities are stored as integers: ``p = value / P_SCALE``."""
 STATIC_DIR = "static"
 INDEX = "index.json"
 
@@ -53,9 +66,8 @@ def _write(path: Path, doc) -> None:
     os.replace(tmp, path)
 
 
-def years_for(now: date) -> list[int]:
-    """The current year, plus the next one during the last eight weeks of the year."""
-    return sorted({now.year, (now + timedelta(weeks=8)).year})
+def _q(v: float | None) -> int | None:
+    return None if v is None else int(round(v * P_SCALE))
 
 
 def _weekly_tiers(q: BaselineQueries, taxon_id: str, year: int) -> list[int]:
@@ -68,49 +80,81 @@ def _weekly_tiers(q: BaselineQueries, taxon_id: str, year: int) -> list[int]:
     return out
 
 
-def _map_doc(q: BaselineQueries, taxon_id: str, year: int) -> dict | None:
-    maps = q.species_maps(taxon_id, year)
-    if not maps:
+def map_doc(q: BaselineQueries, taxon_id: str, year: int, meta: dict) -> dict | None:
+    """Format 2: per segment (weeks sharing a tier), cells × periods integer matrices."""
+    segments = q.species_matrix(taxon_id, year)
+    if not segments:
         return None
-    first = maps[0]
     return {
         "format": FORMAT,
-        "taxon": first.taxon.model_dump(mode="json"),
-        "year": year,
-        "effort_group": first.effort_group,
-        "method": first.method,
-        "label": first.label,
-        "license": first.license.model_dump(mode="json"),
-        "periods": [
+        **meta,
+        "year_basis": year,
+        "p_scale": P_SCALE,
+        "segments": [
             {
-                "start": m.time_window.start.date().isoformat(),
-                "end": (m.time_window.end - timedelta(seconds=1)).date().isoformat(),
-                "tier": m.taxon.tier,
-                "resolution_km": m.resolution_km,
-                "cells": [
-                    [c.cell, c.p, c.lift, c.seasonal_index, c.confidence.value] for c in m.cells
-                ],
+                "tier": s.tier,
+                "granularity": s.granularity,
+                "resolution": s.resolution,
+                "resolution_km": s.resolution_km,
+                "periods": s.periods,
+                "cells": s.cells,
+                "p": [[_q(v) for v in row] for row in s.p],
+                "confidence": s.confidence,
+                "ref": {
+                    "resolution": s.ref_resolution,
+                    "p": {k: [_q(v) for v in vs] for k, vs in s.ref_p.items()},
+                },
+                "region_p": [_q(v) for v in s.region_p],
             }
-            for m in sorted(maps, key=lambda m: m.time_window.start)
+            for s in segments
         ],
     }
 
 
-def _place_doc(q: BaselineQueries, place, year: int) -> dict:
+def place_doc(q: BaselineQueries, place, year: int) -> dict:
     lat, lon = place.footprint.lat, place.footprint.lon
     weeks = []
     for w in range(1, 53):
-        lists = q.place_lists(lat, lon, week_thursday(year, w))
-        doc = lists.model_dump(mode="json")
+        doc = q.place_lists(lat, lon, week_thursday(year, w)).model_dump(mode="json")
+        doc.pop("date", None)  # weeks, not dates: the file serves every year
         for g in doc["groups"]:
             g.pop("new_for_you", None)  # needs a life list: API only
         weeks.append(doc)
     return {
         "format": FORMAT,
         "place": place.model_dump(mode="json"),
-        "year": year,
+        "year_basis": year,
         "weeks": weeks,
     }
+
+
+# -- Parallel workers: each opens the bundle read-only once. ----------------------------------
+
+_WORKER: dict = {}
+
+
+def _open(bundle: str, region: Region, now: datetime, profiles) -> BaselineQueries:
+    conn = duckdb.connect(bundle, read_only=True)
+    tiers = TierService(conn, region.id, profiles=profiles, now=now)
+    return BaselineQueries(conn, region, tiers, profiles=profiles)
+
+
+def _init_worker(bundle: str, region: Region, now: datetime, profiles) -> None:
+    _WORKER["q"] = _open(bundle, region, now, profiles)
+    _WORKER["region"] = region
+
+
+def _run_job(job: tuple) -> tuple[str, str, bool]:
+    kind, ident, year, path, meta = job
+    q = _WORKER["q"]
+    if kind == "map":
+        doc = map_doc(q, ident, year, meta)
+    else:
+        doc = place_doc(q, _WORKER["region"].place(ident), year)
+    if doc is None:
+        return kind, ident, False
+    _write(Path(path), doc)
+    return kind, ident, True
 
 
 def build_static(
@@ -123,16 +167,17 @@ def build_static(
     profiles=None,
     log=lambda _m: None,
     version: str | None = None,
+    workers: int | None = None,
 ) -> dict:
     """Write the static products of ``bundle`` (reusing unchanged content-addressed files).
 
     Shared files go under ``region_dir/static``; the index and search index under
-    ``version_dir/static`` (``version`` names it, if ``version_dir`` is a temporary folder)."""
-    conn = duckdb.connect(str(bundle), read_only=True)
+    ``version_dir/static`` (``version`` names it, if ``version_dir`` is a temporary folder).
+    ``workers`` processes build new files (default: one per CPU; 0 builds in this process)."""
+    q = _open(str(bundle), region, now, profiles)
     try:
-        tiers = TierService(conn, region.id, profiles=profiles, now=now)
-        q = BaselineQueries(conn, region, tiers, profiles=profiles)
         today = now.date()
+        year = today.year
         build = [q.model_version, q.as_of.isoformat()]
         taxa = q.list_taxa(today, limit=1_000_000)
         aliases: dict[str, list[str]] = {}
@@ -153,52 +198,67 @@ def build_static(
         ]
         stats = {"maps": 0, "maps_reused": 0, "places": 0, "places_reused": 0}
         files: dict = {"maps": {}, "places": {}}
-        all_tiers: dict[int, dict[str, list[int]]] = {}
+        jobs: list[tuple] = []
+        all_tiers: dict[str, list[int]] = {}
         # Every taxon with a baseline (not just those visible today): a taxon withheld this
         # week may be shown in others.
         for taxon_id in sorted(q._taxa):
-            for year in years_for(today):
-                weekly = _weekly_tiers(q, taxon_id, year)
-                all_tiers.setdefault(year, {})[taxon_id] = weekly
-                if all(t >= PolicyTier.WITHHELD for t in weekly):
-                    continue
-                first_visible = week_thursday(year, weekly.index(min(weekly)) + 1)
-                try:
-                    summary = q.taxon_summary(taxon_id, first_visible)
-                    group = q._choose_group(taxon_id, None)
-                except NotAvailable:
-                    continue
-                key = _key(
-                    FORMAT,
-                    build,
-                    year,
-                    weekly,
-                    summary.model_dump(mode="json"),
-                    q.license_for([group]).model_dump(mode="json"),
-                )
-                rel = f"{STATIC_DIR}/maps/{taxon_id}/{year}.{key}.json"
-                if (region_dir / rel).exists():
-                    stats["maps_reused"] += 1
-                else:
-                    doc = _map_doc(q, taxon_id, year)
-                    if doc is None:
-                        continue
-                    _write(region_dir / rel, doc)
-                    stats["maps"] += 1
-                files["maps"].setdefault(taxon_id, {})[str(year)] = rel
+            weekly = _weekly_tiers(q, taxon_id, year)
+            all_tiers[taxon_id] = weekly
+            if all(t >= PolicyTier.WITHHELD for t in weekly):
+                continue
+            first_visible = week_thursday(year, weekly.index(min(weekly)) + 1)
+            try:
+                summary = q.taxon_summary(taxon_id, first_visible)
+                group = q._choose_group(taxon_id, None)
+            except NotAvailable:
+                continue
+            meta = {
+                "taxon": summary.model_dump(mode="json"),
+                "effort_group": group,
+                "method": method_for(group),
+                "label": LEVEL0_LABEL,
+                "license": q.license_for([group]).model_dump(mode="json"),
+            }
+            key = _key(FORMAT, build, year, weekly, meta)
+            rel = f"{STATIC_DIR}/maps/{taxon_id}.{key}.json"
+            files["maps"][taxon_id] = rel
+            if (region_dir / rel).exists():
+                stats["maps_reused"] += 1
+            else:
+                jobs.append(("map", taxon_id, year, str(region_dir / rel), meta))
         names = {t: (q._taxa[t].name, q.common_name(t)) for t in sorted(q._taxa)}
         for place in region.places:
-            for year in years_for(today):
-                key = _key(
-                    FORMAT, build, year, place.model_dump(mode="json"), all_tiers[year], names
-                )
-                rel = f"{STATIC_DIR}/places/{place.place_id}/{year}.{key}.json"
-                if (region_dir / rel).exists():
-                    stats["places_reused"] += 1
-                else:
-                    _write(region_dir / rel, _place_doc(q, place, year))
-                    stats["places"] += 1
-                files["places"].setdefault(place.place_id, {})[str(year)] = rel
+            key = _key(FORMAT, build, year, place.model_dump(mode="json"), all_tiers, names)
+            rel = f"{STATIC_DIR}/places/{place.place_id}.{key}.json"
+            files["places"][place.place_id] = rel
+            if (region_dir / rel).exists():
+                stats["places_reused"] += 1
+            else:
+                jobs.append(("place", place.place_id, year, str(region_dir / rel), None))
+        if workers is None:
+            workers = os.cpu_count() or 1
+        if jobs and workers > 0:
+            log(f"static: building {len(jobs)} files in {workers} processes")
+            with ProcessPoolExecutor(
+                max_workers=workers,
+                mp_context=get_context("spawn"),
+                initializer=_init_worker,
+                initargs=(str(bundle), region, now, profiles),
+            ) as pool:
+                # Slow jobs (place lists) first, small chunks: no worker ends up with a long
+                # tail while the others idle.
+                ordered = sorted(jobs, key=lambda j: j[0] != "place")
+                chunk = max(1, len(ordered) // (workers * 16))
+                results = list(pool.map(_run_job, ordered, chunksize=chunk))
+        else:
+            _WORKER.update(q=q, region=region)
+            results = [_run_job(j) for j in jobs]
+        for kind, ident, written in results:
+            if written:
+                stats["maps" if kind == "map" else "places"] += 1
+            elif kind == "map":
+                files["maps"].pop(ident, None)  # nothing visible after all
         out_dir = version_dir / STATIC_DIR
         _write(out_dir / "taxa.json", search)
         version = version or version_dir.name.removeprefix("version=")
@@ -208,6 +268,8 @@ def build_static(
             "version": version,
             "baseline": {"model_version": q.model_version, "built_at": q.as_of.isoformat()},
             "published_at": now.isoformat(),
+            "year_basis": year,
+            "p_scale": P_SCALE,
             "paths_relative_to": f"region={region.id}/",
             "taxa": f"version={version}/{STATIC_DIR}/taxa.json",
             "maps": files["maps"],
@@ -215,7 +277,9 @@ def build_static(
                 p.place_id: {
                     "name": p.name,
                     "kind": p.kind.value,
-                    "files": files["places"].get(p.place_id, {}),
+                    "lat": p.footprint.lat,
+                    "lon": p.footprint.lon,
+                    "file": files["places"].get(p.place_id),
                 }
                 for p in region.places
             },
@@ -225,7 +289,7 @@ def build_static(
         log(f"static: {stats}")
         return stats
     finally:
-        conn.close()
+        q._conn.close()
 
 
 def before_swap(region: Region, now: datetime, profiles=None, log=lambda _m: None):
@@ -252,7 +316,13 @@ def before_swap(region: Region, now: datetime, profiles=None, log=lambda _m: Non
 
 
 def referenced(index: dict) -> set[str]:
-    """Shared static files (paths relative to the region folder) an index points at."""
-    out = {rel for years in index.get("maps", {}).values() for rel in years.values()}
-    out |= {rel for p in index.get("places", {}).values() for rel in p["files"].values()}
+    """Shared static files (paths relative to the region folder) an index points at
+    (format 2; format-1 indexes nested files by year)."""
+    out: set[str] = set()
+    for entry in index.get("maps", {}).values():
+        out |= set(entry.values()) if isinstance(entry, dict) else {entry}
+    for p in index.get("places", {}).values():
+        if p.get("file"):
+            out.add(p["file"])
+        out |= set((p.get("files") or {}).values())
     return out

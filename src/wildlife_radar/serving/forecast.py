@@ -17,7 +17,8 @@ from __future__ import annotations
 
 import json
 import math
-from datetime import date, timedelta
+from collections import defaultdict
+from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
 from pydantic import BaseModel, Field
@@ -25,13 +26,15 @@ from pydantic import BaseModel, Field
 from wildlife_radar.baseline.builder import BaselineConfig, create_training_view
 from wildlife_radar.baseline.effort import DatasetRegistry, method_for, split_egroup
 from wildlife_radar.conditions.levels import SignalLookup, stations_in_store
-from wildlife_radar.conditions.model import OffsetLogit, TermSpec
+from wildlife_radar.conditions.model import OffsetLogit, model_from_dict
 from wildlife_radar.core import spatial
 from wildlife_radar.policy.tiers import PolicyTier
 from wildlife_radar.serving.queries import BaselineQueries, NotAvailable, TaxonSummary
 from wildlife_radar.storage.observations import week_of
 
 PERSIST_DAYS = 7
+TIDE_REACH_KM = 40
+"""Hourly tide factors use the nearest station within this distance."""
 
 
 class Driver(BaseModel):
@@ -91,15 +94,33 @@ class RecentActivity(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class HourSlot(BaseModel):
+    start: datetime
+    """Local start of the hour (region time zone)."""
+    p: float
+    multiplier: float
+    """Odds relative to a typical hour of the day (1 = typical)."""
+    factors: dict[str, str] = Field(default_factory=dict)
+    """The hour's level of each factor the model uses (e.g. diel phase, tide stage)."""
+
+
+class HourlyForecast(BaseModel):
+    taxon: TaxonSummary
+    day: date
+    timezone: str
+    p_day: float
+    """The daily forecast (per outing), which the hours redistribute."""
+    level: int
+    hours: list[HourSlot] = Field(default_factory=list)
+    best: list[datetime] = Field(default_factory=list)
+    """Starts of the three best hours."""
+    factors: dict[str, dict[str, float]] = Field(default_factory=dict)
+    """Per factor, each level's odds multiplier relative to its reference level."""
+    notes: list[str] = Field(default_factory=list)
+
+
 def _model(raw: str) -> OffsetLogit:
-    d = json.loads(raw)
-    model = OffsetLogit([TermSpec(**t) for t in d["terms"]])
-    model.coef = np.array(d["coef"])
-    model.intercept = d["intercept"]
-    model.means = np.array(d["means"])
-    model.sds = np.array(d["sds"])
-    model.converged = d["converged"]
-    return model
+    return model_from_dict(json.loads(raw))
 
 
 class ForecastService:
@@ -144,6 +165,20 @@ class ForecastService:
                 ok = (t, g, lv) in passed
                 if ok and lv > self._models.get((t, g), (0, None))[0]:
                     self._models[(t, g)] = (lv, _model(raw))
+        self._hourly: dict[str, tuple[OffsetLogit, float]] = {}
+        if "hourly_models" in tables:
+            for t, raw, log_norm in self.conn.execute(
+                "SELECT taxon_id, model, log_norm FROM hourly_models WHERE region_id = ? "
+                "AND passes AND model IS NOT NULL",
+                [queries.region.id],
+            ).fetchall():
+                self._hourly[t] = (_model(raw), log_norm)
+        self._hilo: dict[str, list] = defaultdict(list)
+        if "tide_hilo" in tables:
+            for sid, t, kind, h in self.conn.execute(
+                "SELECT station_id, t, kind, height_m FROM tide_hilo ORDER BY t"
+            ).fetchall():
+                self._hilo[sid].append((t.replace(tzinfo=UTC), kind, h))
 
     def _level0(self, taxon_id: str, group_id: str, lat: float, lon: float, on: date, tier):
         level0 = self.q._level_for(tier)
@@ -274,6 +309,93 @@ class ForecastService:
             key=lambda d: -abs(d.contribution),
         )
         out.notes += notes
+        return out
+
+    def hourly(
+        self, taxon_id: str, lat: float, lon: float, on: date, method: str | None = None
+    ) -> HourlyForecast:
+        """The day's forecast spread over its local hours by the taxon's gated hourly model
+        (conditions/hourly.py). Openly mapped taxa only: other tiers aren't shown by hour."""
+        from zoneinfo import ZoneInfo
+
+        from wildlife_radar.conditions.hourly import multiplier
+        from wildlife_radar.conditions.timed import HourSignals
+        from wildlife_radar.core.spatial import haversine_km
+
+        day = self.forecast(taxon_id, lat, lon, on, method)
+        tz_name = self.q.region.timezone or "UTC"
+        tz = ZoneInfo(tz_name)
+        out = HourlyForecast(
+            taxon=day.taxon,
+            day=on,
+            timezone=tz_name,
+            p_day=day.p,
+            level=day.level,
+            notes=list(day.notes),
+        )
+        if PolicyTier(day.taxon.tier) != PolicyTier.OPEN:
+            out.notes.append("hourly detail is shown only for openly mapped species")
+            return out
+        start = datetime(on.year, on.month, on.day, tzinfo=tz)
+        hours_local = []
+        t = start
+        while t.date() == on:
+            hours_local.append(t)
+            t = (t.astimezone(UTC) + timedelta(hours=1)).astimezone(tz)
+        entry = self._hourly.get(day.taxon.taxon_id)
+        if entry is None:
+            out.notes.append("no hourly pattern has passed its backtest gate for this species")
+            out.hours = [HourSlot(start=h, p=day.p, multiplier=1.0) for h in hours_local]
+            return out
+        model, log_norm = entry
+        # Tides at the nearest station within reach (the factors were fitted the same way).
+        hilo: list = []
+        best = None
+        for sid, (slat, slon) in self.stations.items():
+            d = haversine_km(lat, lon, slat, slon)
+            if sid in self._hilo and d <= TIDE_REACH_KM and (best is None or d < best[0]):
+                best = (d, sid)
+        if best:
+            hilo = self._hilo[best[1]]
+        signals = HourSignals(lat, lon, hilo)
+        utc_hours = [h.astimezone(UTC) for h in hours_local]
+        values = {
+            term.signal: [signals.value(term.signal, h, []) for h in utc_hours]
+            for term in model.terms
+        }
+        known = [all(values[s][i] is not None for s in values) for i in range(len(utc_hours))]
+        arrays = {
+            s: np.array([v if v is not None else 0.0 for v in vs]) for s, vs in values.items()
+        }
+        mult = multiplier(model, log_norm, arrays)
+        if not all(known):
+            out.notes.append("some hours lack a factor (e.g. no tide station nearby): shown flat")
+        base = math.log(max(day.p, 1e-9) / max(1 - day.p, 1e-9))
+        for i, h in enumerate(hours_local):
+            m = float(mult[i]) if known[i] else 1.0
+            p = 1 / (1 + math.exp(-(base + math.log(m))))
+            levels = {}
+            for term in model.terms:
+                v = values[term.signal][i]
+                if term.shape == "categorical" and v is not None:
+                    levels[term.name] = term.categories[int(v)]
+                elif v is not None:
+                    levels[term.name] = f"{v:.2f}"
+            out.hours.append(
+                HourSlot(start=h, p=round(p, 6), multiplier=round(m, 3), factors=levels)
+            )
+        out.best = [h.start for h in sorted(out.hours, key=lambda x: -x.p)[:3]]
+        out.factors = {
+            term.name: {
+                c: round(math.exp(e), 3) for c, e in model.category_effects(term.name).items()
+            }
+            for term in model.terms
+            if term.shape == "categorical"
+        }
+        out.notes.append(
+            "hours redistribute the daily chance: averaged over when people usually go out, "
+            "they equal it"
+        )
         return out
 
 

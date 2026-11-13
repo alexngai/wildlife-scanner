@@ -223,6 +223,37 @@ class PlaceLists(BaseModel):
         return next((g for g in self.groups if g.group == name), None)
 
 
+#: One-character confidence codes, worst first (static map files).
+_CONF_CODES = "ilmh"
+_CONF_RANK = {
+    Confidence.INSUFFICIENT: 0,
+    Confidence.LOW: 1,
+    Confidence.MEDIUM: 2,
+    Confidence.HIGH: 3,
+}
+
+
+@dataclass
+class MapSegment:
+    """Weeks of a year sharing one tier, as a cells × periods matrix (static products)."""
+
+    tier: int
+    granularity: str
+    """``week`` (periods are ISO weeks) or ``month`` (periods are months)."""
+    resolution: int
+    resolution_km: float
+    periods: list[int]
+    cells: list[str]
+    p: list[list[float | None]]
+    """``p[cell][period]``; ``None`` where the cell has no estimate in that period."""
+    confidence: list[str]
+    """Per cell, one character per period: i(nsufficient), l(ow), m(edium), h(igh), - none."""
+    ref_resolution: int | None
+    """Lift reference: the parent cell at this resolution, or the region when ``None``."""
+    ref_p: dict[str, list[float | None]]
+    region_p: list[float | None]
+
+
 @dataclass(frozen=True)
 class _TaxonInfo:
     name: str | None
@@ -491,6 +522,103 @@ class BaselineQueries:
                 self._build_map(summary, group_id, tier, on, yr, list(weeks), monthly, found)
             )
         return out
+
+    def species_matrix(
+        self, taxon_id: str, year: int, method: str | None = None
+    ) -> list[MapSegment]:
+        """A year of maps as compact matrices, with the same policy as ``species_maps``.
+
+        Weeks are grouped into **segments** sharing a tier (usually one). In each segment, a
+        cell has one value per period (ISO week, or month for monthly tiers): the mean
+        weekly ``p`` over the period's weeks and the lowest confidence among them, as
+        ``EgressFilter`` aggregates predictions. Withheld weeks are absent. Built from one
+        estimate query per tier with no per-cell objects, so a region's maps build in
+        minutes (``species_maps`` stays the reference; tests check they agree).
+        """
+        taxon_id = self._canon(taxon_id)
+        group_id = self._choose_group(taxon_id, method)
+        # Periods, as species_maps forms them: a monthly tier covers every week of its month.
+        periods: dict[tuple[PolicyTier, int, tuple[int, ...]], int] = {}
+        for w in range(1, 53):
+            on = week_thursday(year, w)
+            try:
+                tier = self._tier(taxon_id, on)
+            except NotAvailable:
+                continue
+            yr, weeks, monthly = self._map_period(tier, on)
+            periods.setdefault((tier, yr, tuple(weeks)), on.month if monthly else w)
+        by_tier: dict[PolicyTier, dict[int, tuple[int, ...]]] = defaultdict(dict)
+        for (tier, _yr, weeks), label in periods.items():
+            by_tier[tier][label] = weeks
+        segments = []
+        for tier, labelled in sorted(by_tier.items()):
+            level = self._level_for(tier)
+            monthly = rule_for(tier).time_granularity is Granularity.MONTH
+            wanted = sorted({w for weeks in labelled.values() for w in weeks})
+            rows = self._estimate(level, taxon_ids=[taxon_id], groups=[group_id], weeks=wanted)
+            by_week: dict[int, list[Estimate]] = defaultdict(list)
+            for e in rows:
+                by_week[e.week].append(e)
+            labels = sorted(labelled)
+            n = len(labels)
+            p_sum: dict[str, list[float]] = defaultdict(lambda n=n: [0.0] * n)
+            p_n: dict[str, list[int]] = defaultdict(lambda n=n: [0] * n)
+            conf: dict[str, list[int]] = defaultdict(lambda n=n: [len(_CONF_CODES)] * n)
+            ref_res = self.level_res["context"] if level != "context" else None
+            ref_sum: dict[str, list[float]] = defaultdict(lambda n=n: [0.0] * n)
+            ref_n: dict[str, list[int]] = defaultdict(lambda n=n: [0] * n)
+            region = [0.0] * len(labels)
+            region_n = [0] * len(labels)
+            for i, label in enumerate(labels):
+                for w in labelled[label]:
+                    for e in by_week.get(w, ()):
+                        p = min(max(e.p, 0.0), 1.0)
+                        p_sum[e.cell][i] += p
+                        p_n[e.cell][i] += 1
+                        c = _CONF_RANK[confidence_for(e.n_eff, e.n_region)]
+                        conf[e.cell][i] = min(conf[e.cell][i], c)
+                        ref_key = h3.cell_to_parent(e.cell, ref_res) if ref_res else "region"
+                        ref = e.p_context if ref_res else e.p_region
+                        if ref is not None:
+                            ref_sum[ref_key][i] += ref
+                            ref_n[ref_key][i] += 1
+                        region[i] += e.p_region
+                        region_n[i] += 1
+            cells = sorted(p_sum)
+            segments.append(
+                MapSegment(
+                    tier=int(tier),
+                    granularity="month" if monthly else "week",
+                    resolution=self.level_res[level],
+                    resolution_km=spatial.edge_km(self.level_res[level]),
+                    periods=labels,
+                    cells=cells,
+                    p=[
+                        [
+                            round(p_sum[c][i] / p_n[c][i], 6) if p_n[c][i] else None
+                            for i in range(len(labels))
+                        ]
+                        for c in cells
+                    ],
+                    confidence=[
+                        "".join(_CONF_CODES[k] if k < len(_CONF_CODES) else "-" for k in conf[c])
+                        for c in cells
+                    ],
+                    ref_resolution=ref_res,
+                    ref_p={
+                        k: [
+                            round(ref_sum[k][i] / ref_n[k][i], 6) if ref_n[k][i] else None
+                            for i in range(len(labels))
+                        ]
+                        for k in sorted(ref_sum)
+                    },
+                    region_p=[
+                        round(region[i] / region_n[i], 6) if region_n[i] else None
+                        for i in range(len(labels))
+                    ],
+                )
+            )
+        return segments
 
     @staticmethod
     def _map_period(tier: PolicyTier, on: date) -> tuple[int, list[int], bool]:

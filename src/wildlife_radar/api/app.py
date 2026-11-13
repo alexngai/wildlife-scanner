@@ -28,6 +28,7 @@ from wildlife_radar.regions import load_region, pack_file, region_dir
 from wildlife_radar.serving.forecast import (
     Forecast,
     ForecastService,
+    HourlyForecast,
     RecentActivity,
     recent_activity,
 )
@@ -381,6 +382,25 @@ def create_app(
         lat, lon, target = _location(lat, lon, place_id)
         try:
             return target.forecasts.forecast(taxon_id, lat, lon, _parse_date(date), method=method)
+        except NotAvailable:
+            raise HTTPException(status_code=404, detail=NOT_AVAILABLE) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+
+    @app.get("/species/{taxon_id}/forecast/hourly", response_model=HourlyForecast)
+    def forecast_hourly(
+        taxon_id: str,
+        lat: float | None = None,
+        lon: float | None = None,
+        place_id: str | None = None,
+        date: str | None = None,
+        method: str | None = None,
+    ):
+        """The day's forecast by local hour: when in the day (and on which tide, under which
+        moon) the species is recorded relatively more often. Openly mapped species only."""
+        lat, lon, target = _location(lat, lon, place_id)
+        try:
+            return target.forecasts.hourly(taxon_id, lat, lon, _parse_date(date), method=method)
         except NotAvailable:
             raise HTTPException(status_code=404, detail=NOT_AVAILABLE) from None
         except ValueError as exc:
