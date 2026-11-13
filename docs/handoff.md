@@ -4,7 +4,9 @@ For the next working session. Start here, then read the files it points to.
 
 ## 1. Where things stand
 
-- **Branch** `claude/brave-newton-ui859d`, **PR** [alexngai/wildlife-radar#1](https://github.com/alexngai/wildlife-radar/pull/1), open against `main`, which has only the initial commit. All work is committed and CI is green.
+- **Branch** `claude/brave-newton-ui859d`. **PR** [#1](https://github.com/alexngai/wildlife-radar/pull/1) was merged on 2026-11-13 (up to `534b5d3`). `main` has since been merged back into the branch without rewriting it. Later commits (deploy, Monterey Bay, static format 2, hourly factors, …) are not on `main` yet; open a new PR only when the owner asks.
+- **Web app:** a parallel session builds it on `claude/web-app` (React + Vite + TypeScript, MapLibre). It owns `web/` and `.github/workflows/web.yml`; don't edit them. Its change requests go in `web/NEEDS.md` on that branch.
+- **Contracts:** `docs/design/static-products.md` (static formats, with a changelog; bump `format` for breaking changes) and the API's `/openapi.json`.
 - **Done:**
   - research and design (`docs/research/00–07`, `docs/design/*`);
   - Phases 0–2;
@@ -77,8 +79,8 @@ Cloudflare; hook them up later), with the housekeeping quick fixes; then a secon
    - schedule `run publish` every 30 min (live), signals daily, full rebuild monthly;
    - static products for the TypeScript app: PMTiles maps, place lists, calendars, a name-search index.
 
-   The owner has fly.io and Cloudflare accounts. Build and test locally; don't create services
-   or ask for keys until they say so.
+   The owner has fly.io and Cloudflare accounts. **Hosting is deferred** until the app is more
+   mature: no fly.io or Cloudflare resources and no credential requests.
    - **Done locally** ([`deploy.md`](deploy.md)): an object-store layer (folder or S3/R2),
      `worker` (scheduled ticks, audit-gated push, pruning), `push-publish`,
      `serve --bundle-url` (mirrors `CURRENT`), opt-in CORS, `deploy/Dockerfile` (builds and

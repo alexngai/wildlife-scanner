@@ -50,10 +50,13 @@ Built by `publish` from the finished bundle, through the same query layer as the
 - `version=<v>/static/index.json`: the entry point. The frontend reads `CURRENT`, then this
   index, which lists every other file's path (relative to `region=<id>/`).
 - `version=<v>/static/taxa.json`: search index (names, aliases, group, tier, records).
-- `static/maps/<taxon>/<year>.<key>.json`: the year's maps as H3 cells, weekly for openly
-  mapped taxa, monthly at landscape scale for coarse ones. Weeks a taxon is withheld are
-  absent. Withheld taxa are absent everywhere.
-- `static/places/<place>/<year>.<key>.json`: weekly place lists for the region pack's places.
+- `static/maps/<taxon>.<key>.json`: the species' year of maps by ISO week, as H3 cells × weeks
+  matrices (weekly for openly mapped taxa, monthly at landscape scale for coarse ones). Weeks
+  a taxon is withheld are absent. Withheld taxa are absent everywhere.
+- `static/places/<place>.<key>.json`: weekly place lists for the region pack's places.
+
+The formats (currently format 2) are specified in
+[`design/static-products.md`](design/static-products.md), which the web app relies on.
 
 Maps and place lists are content-addressed, so a live publish rebuilds only the index and
 search index. Only files whose inputs changed (a new baseline, a tier change) are regenerated
@@ -149,10 +152,13 @@ command as `app`.
 
 ## Not done yet
 
-- **Static product sizes on real data:** a demo map is ~250 KB per species-year (43 KB
-  gzipped). Common San Diego species cover many more cells. Measure and, if needed, split maps
-  by month or quantize probabilities. PMTiles was skipped: H3 cells render directly in the
-  browser.
+- **Static products on real data** (format 2, Monterey Bay, 4,866 species):
+  - maps total 256 MB (50 MB gzipped), at most 166 KB per species;
+  - place lists are about 2 MB each;
+  - a full rebuild runs in parallel processes, and publishes between baseline rebuilds reuse
+    the files.
+
+  PMTiles was skipped: H3 cells render directly in the browser.
 - **Raw, norm and derived layers stay on the worker's volume.** Only `publish` (and `ref`, with
   a lake bucket) is in R2. If the
   volume is lost, the worker rebuilds from scratch (~1.5 h per region), and the API keeps
