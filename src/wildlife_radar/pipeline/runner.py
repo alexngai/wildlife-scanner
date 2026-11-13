@@ -380,6 +380,8 @@ def _live(ctx: JobContext) -> dict:
     from wildlife_radar.connectors.gbif import GBIFConnector
     from wildlife_radar.connectors.inaturalist import INaturalistConnector
 
+    if ctx.region.coverage:
+        return _live_from_log(ctx)
     previous = latest(ctx.lake, ctx.region.id, "live")
     ok = bool(previous and previous.get("status") == "complete")
     prev_out = (previous or {}).get("outputs") or {}
@@ -425,6 +427,56 @@ def _live(ctx: JobContext) -> dict:
         except Exception as exc:
             out["gbif_error"] = f"{type(exc).__name__}: {exc}"
             out["gbif_cursor"] = gbif_cursor.isoformat()
+    return out
+
+
+LIVE_PULL_EVERY = timedelta(minutes=25)
+"""A region's live job pulls the coverage area's stream if it is older than this (the first
+region of a tick pulls; the others only load)."""
+
+
+def _live_from_log(ctx: JobContext) -> dict:
+    """Live records for a region inside a coverage area: pull the area's stream if due, check
+    recent iNaturalist records still exist (daily), load new parts (pipeline/livelog.py)."""
+    from wildlife_radar.pipeline import livelog
+    from wildlife_radar.regions import load_region
+
+    cov = load_region(ctx.region.coverage)
+    cursor = livelog.read_cursor(ctx.lake, cov.id)
+    out: dict = {"coverage": cov.id}
+    pulled = cursor.get("pulled_at")
+    if pulled is None or ctx.now - datetime.fromisoformat(pulled) >= LIVE_PULL_EVERY:
+        out["pull"] = livelog.pull(
+            cov,
+            ctx.lake,
+            ctx.now,
+            live_keys=ctx.registry().live_keys(),
+            inat=ctx.params.get("_inaturalist"),
+            gbif=ctx.params.get("_gbif"),
+        )
+        cursor = livelog.read_cursor(ctx.lake, cov.id)
+    if not ctx.params.get("skip_existence_check") and livelog.check_due(cursor, ctx.now):
+        try:
+            out["existence"] = livelog.check_existence(ctx.lake, cov.id, ctx.now)
+            livelog.mark_checked(ctx.lake, cov.id, ctx.now)
+        except Exception as exc:  # retried next tick
+            out["existence_error"] = f"{type(exc).__name__}: {exc}"
+    previous = latest(ctx.lake, ctx.region.id, "live")
+    after = ((previous or {}).get("outputs") or {}).get("log_after")
+    with ctx.store() as store:
+        loaded = livelog.load_region(store.conn, ctx.region, ctx.lake, cov.id, after)
+    out.update(
+        {
+            "records": loaded["rows_added"],
+            "parts": loaded["parts"],
+            "removed": loaded["removed"],
+            "log_after": loaded["after"],
+            "cursor": cursor.get("inaturalist"),
+            "gbif_cursor": cursor.get("gbif"),
+        }
+    )
+    if not loaded["parts"] and not loaded["removed"] and previous:
+        out["unchanged"] = True
     return out
 
 
