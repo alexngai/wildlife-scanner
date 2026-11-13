@@ -196,3 +196,19 @@ def test_coverage_snapshot_tiles_delta_and_reconciliation(tmp_path, monkeypatch)
         keys = {k for (k,) in store.conn.execute("SELECT dedupe_key FROM observations").fetchall()}
     assert second["removed"] == 2  # record 2 (gone from GBIF) and the old live-dataset row
     assert "live-new" in keys and "live-old" not in keys and len(keys) == 2
+
+
+def test_big_files_are_cut_into_row_ranges(tmp_path):
+    path = tmp_path / "tile.parquet"
+    _write_snapshot(path)
+    whole = remote._segments([str(path)])
+    assert len(whole) == 1 and whole[0][0][1] == 0
+    cut = remote._segments([str(path)], rows_per_chunk=1)
+    n_rows = whole[0][-1][2]
+    assert len(cut) == n_rows and all(len(c) == 1 for c in cut)
+    parsed = [
+        remote._parse_chunk((str(tmp_path / f"c{i}.parquet"), segs, SOCAL))[1]
+        for i, segs in enumerate(cut)
+    ]
+    assert sum(parsed) == remote._parse_chunk((str(tmp_path / "w.parquet"), whole[0], SOCAL))[1]
+    assert sum(parsed) == 2

@@ -20,6 +20,7 @@ import csv
 import glob
 import os
 import re
+import shutil
 import struct
 import tempfile
 import threading
@@ -285,17 +286,60 @@ def extract_region(
 # -- Ingestion ----------------------------------------------------------------------------------
 
 
-def _parse_chunk(args: tuple[str, list[str], Bbox]) -> tuple[str, int]:
+ROWS_PER_CHUNK = 500_000
+
+# A slice of one staged file: (path, first row, end row).
+Segment = tuple[str, int, int]
+
+
+def _segments(files: list[str], rows_per_chunk: int = ROWS_PER_CHUNK) -> list[list[Segment]]:
+    """Work units of about ``rows_per_chunk`` rows: big files (a coverage tile can hold tens of
+    millions of rows) are cut into row ranges; small files are grouped."""
+    con = duckdb.connect()
+    chunks: list[list[Segment]] = []
+    current: list[Segment] = []
+    size = 0
+    for f in files:
+        quoted = "'" + f.replace("'", "''") + "'"
+        (n,) = con.execute(
+            f"SELECT coalesce(sum(row_group_num_rows), 0) FROM "
+            f"(SELECT DISTINCT row_group_id, row_group_num_rows FROM parquet_metadata({quoted}))"
+        ).fetchone()
+        for start in range(0, max(int(n), 1), rows_per_chunk):
+            end = min(start + rows_per_chunk, int(n))
+            current.append((f, start, end))
+            size += end - start
+            if size >= rows_per_chunk:
+                chunks.append(current)
+                current, size = [], 0
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _parse_chunk(args: tuple[str, list[Segment], Bbox]) -> tuple[str, int]:
+    """Parse one work unit into store rows, written as a compressed Parquet part (the CSV is
+    only a step and is deleted at once, so scratch space stays small)."""
     from wildlife_radar.connectors.gbif_snapshot import snapshot_observations
+    from wildlife_radar.storage import ObservationStore
     from wildlife_radar.storage.observations import _csv_value, observation_row
 
-    out, files, bbox = args
+    out, segments, bbox = args
+    tmp = out + ".csv"
     n = 0
-    with open(out, "w", newline="", encoding="utf-8") as fh:
+    with open(tmp, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
-        for obs in snapshot_observations(files, bbox):
-            w.writerow("" if v is None else _csv_value(v) for v in observation_row(obs))
-            n += 1
+        for path, start, end in segments:
+            for obs in snapshot_observations(path, bbox, row_range=(start, end)):
+                w.writerow("" if v is None else _csv_value(v) for v in observation_row(obs))
+                n += 1
+    if n == 0:  # nothing of this slice inside the box
+        os.remove(tmp)
+        return out, 0
+    with ObservationStore() as mem:
+        mem.conn.execute(f"COPY observations FROM '{tmp}' (FORMAT csv, HEADER false, NULLSTR '')")
+        mem.conn.execute(f"COPY observations TO '{out}' (FORMAT parquet, COMPRESSION zstd)")
+    os.remove(tmp)
     return out, n
 
 
@@ -326,37 +370,40 @@ def ingest_staged(
     if not files:
         raise RuntimeError(f"no staged rows in {staging}")
     tmpdir = tempfile.mkdtemp(prefix="ingest-", dir=os.path.dirname(os.path.abspath(db)))
-    n_chunks = workers * 4
     chunks = [
-        (os.path.join(tmpdir, f"rows-{i}.csv"), files[i::n_chunks], bbox) for i in range(n_chunks)
+        (os.path.join(tmpdir, f"rows-{i}.parquet"), segs, bbox)
+        for i, segs in enumerate(_segments(files))
     ]
-    chunks = [c for c in chunks if c[1]]
     t0 = time.time()
     with get_context("spawn").Pool(workers) as pool:
-        results = pool.map(_parse_chunk, chunks)
+        results = []
+        for i, res in enumerate(pool.imap_unordered(_parse_chunk, chunks), 1):
+            results.append(res)
+            if i % 20 == 0 or i == len(chunks):
+                log(f"parsed {i}/{len(chunks)} chunks ({time.time() - t0:.0f}s)")
     parsed = sum(n for _, n in results)
     log(f"parsed {parsed:,} rows in {time.time() - t0:.0f}s")
     t1 = time.time()
     with ObservationStore(db) as store:
         conn = store.conn
-        conn.execute("CREATE OR REPLACE TEMP TABLE _staging AS SELECT * FROM observations LIMIT 0")
-        for path, _ in results:
-            conn.execute(f"COPY _staging FROM '{path}' (FORMAT csv, HEADER false, NULLSTR '')")
-            os.remove(path)
-        conn.execute(
-            "INSERT OR REPLACE INTO observations SELECT * FROM _staging QUALIFY "
-            "row_number() OVER (PARTITION BY dedupe_key ORDER BY ingested_at DESC) = 1"
-        )
+        parts = [p for p, n in results if n]
+        src = "[" + ", ".join(f"'{p}'" for p in parts) + "]"
+        if parts:
+            conn.execute(
+                f"INSERT OR REPLACE INTO observations BY NAME SELECT * FROM read_parquet({src}) "
+                "QUALIFY row_number() OVER (PARTITION BY dedupe_key ORDER BY ingested_at DESC) = 1"
+            )
         removed = 0
-        if reconcile_taken is not None:
+        # No rows at all is more likely a failed extract than an empty area: delete nothing.
+        if reconcile_taken is not None and parts:
             lon_min, lat_min, lon_max, lat_max = bbox
             before = conn.execute("SELECT count(*) FROM observations").fetchone()[0]
             conn.execute(
-                """
+                f"""
                 DELETE FROM observations
                 WHERE source_id = 'gbif' AND ingested_at < ?
                   AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?
-                  AND dedupe_key NOT IN (SELECT dedupe_key FROM _staging)
+                  AND dedupe_key NOT IN (SELECT dedupe_key FROM read_parquet({src}))
                   AND (coalesce(dataset_key, '') NOT IN (SELECT unnest(?)) OR ingested_at < ?)
                 """,
                 [
@@ -371,8 +418,7 @@ def ingest_staged(
             )
             removed = before - conn.execute("SELECT count(*) FROM observations").fetchone()[0]
             log(f"reconciled: {removed:,} GBIF rows no longer in the snapshot removed")
-        conn.execute("DROP TABLE _staging")
         total = store.count()
-    os.rmdir(tmpdir)
+    shutil.rmtree(tmpdir, ignore_errors=True)
     log(f"loaded in {time.time() - t1:.0f}s; store has {total:,} rows")
     return {"parsed": parsed, "total": total, "removed": removed}
