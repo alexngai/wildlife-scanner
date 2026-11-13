@@ -56,6 +56,9 @@ class Region(BaseModel):
     tide_stations: list[TideStation] = Field(default_factory=list)
     places: list[Place] = Field(default_factory=list)
     pipeline: PipelineSettings = Field(default_factory=PipelineSettings)
+    coverage: str | None = None
+    """A larger region pack whose snapshot tiles this region reads (one GBIF snapshot pass
+    for every region inside it; pipeline/coverage.py)."""
     timezone: str | None = None
     """IANA time zone for local times in outputs (e.g. hourly forecasts)."""
     inherits: str | None = None

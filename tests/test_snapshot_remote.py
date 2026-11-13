@@ -138,3 +138,56 @@ def test_snapshot_job_without_ingest_registers_store(tmp_path):
     with ObservationStore(c.db) as store:
         store.add(SyntheticWorld(observers=2, visits_per_observer=2).generate()[:3])
     assert run("snapshot", c, jobs=jobs)[0]["outcome"]["observations"] == 3
+
+
+def test_coverage_snapshot_tiles_delta_and_reconciliation(tmp_path, monkeypatch):
+    import duckdb
+
+    from wildlife_radar.pipeline import coverage
+
+    oct_file, nov_file = tmp_path / "oct.parquet", tmp_path / "nov.parquet"
+    _write_snapshot(oct_file)
+    duckdb.connect().execute(
+        f"COPY (SELECT * FROM read_parquet('{oct_file}') WHERE gbifid <> '2') "
+        f"TO '{nov_file}' (FORMAT parquet)"
+    )
+    files = {
+        "occurrence/2026-10-01/occurrence.parquet/000000": oct_file.read_bytes(),
+        "occurrence/2026-11-01/occurrence.parquet/000000": nov_file.read_bytes(),
+    }
+    monkeypatch.setattr(
+        remote,
+        "make_client",
+        lambda timeout=30.0: httpx.Client(
+            transport=_bucket(files, ["2026-10-01", "2026-11-01"], {"2026-10-01", "2026-11-01"})
+        ),
+    )
+    california = load_region("california")
+    lake = tmp_path / "lake"
+    quiet = {"log": lambda _m: None}
+    built = coverage.build(california, "2026-10-01", lake, workers=2, **quiet)
+    assert built["rows"] == 2 and built["tiles"] == {"32_-118": 2}  # the Dakota row is outside
+    assert coverage.build(california, "2026-10-01", lake, **quiet)["reused"]
+    region = load_region("sandiego")
+    assert region.coverage == "california"
+    db = tmp_path / "sd.duckdb"
+    first = coverage.ingest_region(region, db, lake, "california", "2026-10-01", workers=1, **quiet)
+    assert first["total"] == 2
+    # Live-dataset rows: one pulled before the next snapshot was taken, one after.
+    with ObservationStore(db) as store:
+        for key, when in (("live-old", "2026-10-15"), ("live-new", "2026-11-05")):
+            store.conn.execute(
+                "INSERT INTO observations (dedupe_key, obs_id, source_id, dataset_key, lat, lon, "
+                "ingested_at) VALUES (?, ?, 'gbif', 'whale-feed', 32.8, -117.3, ?)",
+                [key, key, when],
+            )
+    nov = coverage.build(california, "2026-11-01", lake, workers=2, **quiet)
+    assert nov["delta"]["totals"]["removed"] == 1
+    assert nov["delta"]["datasets"]["ds-1"]["removed"] == 1
+    second = coverage.ingest_region(
+        region, db, lake, "california", "2026-11-01", workers=1, live_keys=["whale-feed"], **quiet
+    )
+    with ObservationStore(db) as store:
+        keys = {k for (k,) in store.conn.execute("SELECT dedupe_key FROM observations").fetchall()}
+    assert second["removed"] == 2  # record 2 (gone from GBIF) and the old live-dataset row
+    assert "live-new" in keys and "live-old" not in keys and len(keys) == 2
