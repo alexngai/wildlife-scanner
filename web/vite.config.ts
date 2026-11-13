@@ -11,7 +11,7 @@ import react from "@vitejs/plugin-react";
  * fixtures (tests/fixtures/bucket) for e2e runs.
  */
 function folderBucket(): Plugin {
-  const root = resolve(process.env.WR_BUCKET_DIR ?? resolve(__dirname, "../data/bucket"));
+  const root = resolve(process.env.WR_BUCKET_DIR ?? resolve(import.meta.dirname, "../data/bucket"));
   const handler: Connect.NextHandleFunction = (req, res, next) => {
     const url = decodeURIComponent((req.url ?? "/").split("?")[0] ?? "/");
     const file = normalize(resolve(root, "." + url));

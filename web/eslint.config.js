@@ -17,6 +17,10 @@ export default tseslint.config(
     },
   },
   {
+    files: ["**/*.test.{ts,tsx}", "tests/**", "e2e/**"],
+    rules: { "@typescript-eslint/no-non-null-assertion": "off" },
+  },
+  {
     files: ["scripts/**/*.mjs"],
     extends: [js.configs.recommended],
     languageOptions: { globals: globals.node },

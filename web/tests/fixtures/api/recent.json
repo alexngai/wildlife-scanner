@@ -1,0 +1,40 @@
+{
+ "day": "2026-05-20",
+ "cell": "832834fffffffff",
+ "resolution_km": 9.85,
+ "window_days": 14,
+ "data_through": "2026-05-19",
+ "picking_up": [
+  {
+   "taxon_id": "testus-primus",
+   "scientific_name": "Testus primus",
+   "common_name": "Common Testbird",
+   "effort_group": "birds:casual",
+   "method": "observer_visit",
+   "recent_detections": 9,
+   "recent_outings": 20,
+   "p_usual": 0.3,
+   "p_now": 0.45,
+   "level": 2,
+   "odds_boost": 1.9,
+   "drivers": []
+  }
+ ],
+ "reported_recently": [
+  {
+   "taxon_id": "testus-primus",
+   "scientific_name": "Testus primus",
+   "common_name": "Common Testbird",
+   "effort_group": "birds:casual",
+   "method": "observer_visit",
+   "recent_detections": 9,
+   "recent_outings": 20,
+   "p_usual": 0.3,
+   "p_now": 0.45,
+   "level": 2,
+   "odds_boost": null,
+   "drivers": []
+  }
+ ],
+ "notes": []
+}
