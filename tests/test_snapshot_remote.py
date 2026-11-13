@@ -186,6 +186,15 @@ def test_coverage_snapshot_tiles_delta_and_reconciliation(tmp_path, monkeypatch)
                 "ingested_at) VALUES (?, ?, 'gbif', 'whale-feed', 32.8, -117.3, ?)",
                 [key, key, when],
             )
+        # A live copy of snapshot record 1, pulled after the next snapshot was taken.
+        (key,) = store.conn.execute(
+            "SELECT dedupe_key FROM observations WHERE source_record_id = '1'"
+        ).fetchone()
+        store.conn.execute(
+            "UPDATE observations SET source_id = 'inaturalist', ingested_at = '2026-11-06' "
+            "WHERE dedupe_key = ?",
+            [key],
+        )
     nov = coverage.build(california, "2026-11-01", lake, workers=2, **quiet)
     assert nov["delta"]["totals"]["removed"] == 1
     assert nov["delta"]["datasets"]["ds-1"]["removed"] == 1
@@ -196,6 +205,11 @@ def test_coverage_snapshot_tiles_delta_and_reconciliation(tmp_path, monkeypatch)
         keys = {k for (k,) in store.conn.execute("SELECT dedupe_key FROM observations").fetchall()}
     assert second["removed"] == 2  # record 2 (gone from GBIF) and the old live-dataset row
     assert "live-new" in keys and "live-old" not in keys and len(keys) == 2
+    with ObservationStore(db) as store:
+        kept = store.conn.execute(
+            "SELECT source_id FROM observations WHERE dedupe_key = ?", [key]
+        ).fetchone()
+    assert kept == ("inaturalist",)  # the newer live row wins over the snapshot's copy
 
 
 def test_big_files_are_cut_into_row_ranges(tmp_path):

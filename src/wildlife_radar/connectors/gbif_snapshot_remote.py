@@ -421,13 +421,25 @@ def ingest_staged(
                 removed = before - conn.execute("SELECT count(*) FROM observations").fetchone()[0]
                 log(f"reconciled: {removed:,} GBIF rows no longer in the snapshot removed")
             if parts:
+                # A record pulled live (e.g. from iNaturalist) after the snapshot was taken is
+                # newer than the snapshot's copy of it: keep the live row.
+                keep = (
+                    "source_id <> 'gbif' AND ingested_at >= ?"
+                    if reconcile_taken is not None
+                    else "false AND ?::TIMESTAMP IS NULL"
+                )
+                taken = reconcile_taken.replace(tzinfo=None) if reconcile_taken else None
                 conn.execute(
                     "DELETE FROM observations WHERE dedupe_key IN "
-                    f"(SELECT dedupe_key FROM read_parquet({src}))"
+                    f"(SELECT dedupe_key FROM read_parquet({src})) AND NOT ({keep})",
+                    [taken],
                 )
                 conn.execute(
-                    f"INSERT INTO observations BY NAME SELECT * FROM read_parquet({src}) QUALIFY "
-                    "row_number() OVER (PARTITION BY dedupe_key ORDER BY ingested_at DESC) = 1"
+                    f"INSERT INTO observations BY NAME SELECT * FROM read_parquet({src}) "
+                    "WHERE dedupe_key NOT IN (SELECT dedupe_key FROM observations "
+                    f"WHERE {keep}) QUALIFY "
+                    "row_number() OVER (PARTITION BY dedupe_key ORDER BY ingested_at DESC) = 1",
+                    [taken],
                 )
             conn.commit()
         except BaseException:
