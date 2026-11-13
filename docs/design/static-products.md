@@ -10,6 +10,7 @@ fields they don't know.
 | Date | Change | Breaking |
 |---|---|---|
 | 2026-11-13 | **Format 2.** Maps: one file per species for any year (ISO weeks), `segments` of cells × periods integer matrices (`p_scale`), lift via `ref`; paths `static/maps/<taxon>.<key>.json`. Places: names and groups once, list items as rows (`item_fields`); paths `static/places/<place>.<key>.json`. Index: `maps` is `{taxon: path}`, places carry `file`, `lat`, `lon`. | yes (format 1 → 2) |
+| 2026-11-13 | API: `/health` regions carry `freshness` (per source: `last_update`, `newest_record`, `age_hours`, `target_hours`, `status` ok/stale/unknown); a region's `status` is `stale` when any source misses its target. | no (addition; `status` may now be `stale`) |
 | 2026-11-13 | API: `GET /species/{id}/forecast/hourly` (hourly spread of the daily forecast, OPEN species only); `GET /species/{id}/timing` (descriptive time-of-day/tide indices, OPEN and GENERALIZED). | no (additions) |
 | 2026-11-12 | API: several regions per process. `GET /regions`; `region=` on `/taxa`, `/taxa/{id}`, `/species/{id}/map` (required when more than one region is served); `/health` lists `regions` (single-region fields kept at the top level). | no for one region |
 | 2026-11-12 | Format 1 (first static products): per species and year, rows of `[cell, p, lift, seasonal_index, confidence]`. | — |

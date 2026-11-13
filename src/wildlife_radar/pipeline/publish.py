@@ -93,6 +93,7 @@ def publish_bundle(
     allow_findings: bool = False,
     inputs: dict[str, str] | None = None,
     before_swap=None,
+    freshness: list[tuple] | None = None,
 ) -> PublishResult:
     """``before_swap(bundle_path, version_dir, final_dir)`` may add files (static products) to
     the version before it becomes current; whatever it returns is recorded in the manifest."""
@@ -214,6 +215,12 @@ def publish_bundle(
             ).fetchone()[0]
         if "observations" in present:
             result.rows.update(_recent(conn, region, registry, config or BaselineConfig(), now))
+        if freshness is not None:
+            from wildlife_radar.pipeline.freshness import FRESHNESS_SCHEMA
+
+            conn.execute(FRESHNESS_SCHEMA.replace("TABLE IF NOT EXISTS ", "TABLE bundle."))
+            if freshness:
+                conn.executemany("INSERT INTO bundle.freshness VALUES (?, ?, ?, ?, ?)", freshness)
         conn.execute(
             "CREATE TABLE bundle.bundle_info AS SELECT ? AS region_id, ? AS version, "
             "?::TIMESTAMP AS published_at, ? AS inputs",

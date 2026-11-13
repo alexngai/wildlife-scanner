@@ -797,6 +797,7 @@ def _publish(ctx: JobContext) -> dict:
     if statuses:
         doc = yaml.safe_load(statuses.read_text(encoding="utf-8")) or {}
         curated = [e["taxon_id"] for e in doc.get("statuses", [])]
+    from wildlife_radar.pipeline.freshness import collect as collect_freshness
     from wildlife_radar.pipeline.static import before_swap
 
     hook = None if ctx.params.get("no_static") else before_swap(ctx.region, ctx.now, log=ctx.log)
@@ -812,6 +813,9 @@ def _publish(ctx: JobContext) -> dict:
             allow_findings=bool(ctx.params.get("allow_findings")),
             inputs=ctx.params.get("_inputs"),
             before_swap=hook,
+            freshness=collect_freshness(
+                store.conn, ctx.region, ctx.lake, ctx.registry().live_keys()
+            ),
         )
     return {"version": result.version, "rows": result.rows, "audit": result.findings}
 

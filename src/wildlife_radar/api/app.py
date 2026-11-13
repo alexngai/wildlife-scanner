@@ -217,19 +217,30 @@ def create_app(
             except NotPublished:
                 regions.append({"region": h.region.id, "status": "not published"})
                 continue
+            fresh = _freshness(s)
             regions.append(
                 {
                     "region": h.region.id,
-                    "status": "ok",
+                    "status": "stale" if any(f["status"] == "stale" for f in fresh) else "ok",
                     "model_version": s.queries.model_version,
                     "built_at": s.queries.as_of.isoformat(),
                     "bundle": s.db_path.parent.name,
+                    "freshness": fresh,
                 }
             )
         out = {"status": "ok", "version": __version__, "regions": regions}
         if len(regions) == 1:
             out.update(regions[0])  # single-region fields at the top level, as before
         return out
+
+    def _freshness(s: _Services) -> list[dict]:
+        from wildlife_radar.pipeline.freshness import report
+
+        tables = {r[0] for r in s.conn.execute("SHOW TABLES").fetchall()}
+        if "freshness" not in tables:
+            return []
+        rows = s.conn.cursor().execute("SELECT * FROM freshness").fetchall()
+        return report(rows, now or datetime.now(UTC))
 
     @app.get("/regions")
     def regions() -> list[dict]:
