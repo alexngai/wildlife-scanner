@@ -406,6 +406,7 @@ function SpeciesView({
               bounds={bounds}
               theme={theme}
               basemap={config.basemap}
+              layers={config.layers}
               selectedCell={selectedCell}
               label={mapLabel}
               metric={showLift ? "lift" : "chance"}

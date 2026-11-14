@@ -107,6 +107,10 @@ export function AboutPage() {
       <ul>
         <li>Your life list is stored only in this browser. It is never sent to our service or anyone else.</li>
         <li>"Nearby" asks for your location only when you press the button, rounds it to about 100 m, and doesn't keep it.</li>
+        <li>
+          Map images (base map, satellite imagery, terrain and depth layers) load from the providers credited on each map,
+          so they see which area you're looking at, as with any web map.
+        </li>
         <li>No accounts, no tracking, no ads.</li>
       </ul>
       <p>

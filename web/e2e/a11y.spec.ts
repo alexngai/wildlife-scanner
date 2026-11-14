@@ -28,7 +28,8 @@ for (const theme of ["light", "dark"] as const) {
         await compare.click();
         await expect(page.locator(".hotspot-list")).toBeVisible();
       }
-      for (const summary of await page.locator("details.data-table > summary").all()) await summary.click();
+      for (const summary of await page.locator("details.data-table > summary, details.layer-picker > summary").all())
+        await summary.click();
       // The map canvas is described by its aria-label; MapLibre's own controls are third-party.
       const results = await new AxeBuilder({ page }).exclude(".maplibregl-ctrl").analyze();
       const serious = results.violations.filter((v) => v.impact === "serious" || v.impact === "critical");

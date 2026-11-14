@@ -104,6 +104,7 @@ species and numbers. It covers:
   "apiBase": "https://api.example.org",
   "regions": ["sandiego", "montereybay"],
   "basemap": { "light": "https://…/style.json", "dark": "https://…/style.json", "attribution": "…" },
+  "layers": [{ "id": "satellite", "name": "Satellite", "kind": "base", "type": "raster", "tiles": ["https://…/{z}/{x}/{y}.jpg"], "attribution": "…" }],
   "sourceUrl": "https://github.com/alexngai/wildlife-radar"
 }
 ```
@@ -112,6 +113,17 @@ species and numbers. It covers:
 - `apiBase`: `""` turns off the API panels; they then say the live service isn't connected.
   Set `WILDLIFE_RADAR_CORS_ORIGINS` on the API to the site's origin.
 - `regions`: empty means ask the API's `/regions`.
+- `layers`: extra base maps and overlays offered in every map's **Layers** picker. Each is
+  `{id, name, kind: "base" | "overlay", type: "raster" | "hillshade", tiles, tileSize?, maxzoom?,
+  encoding?, opacity?, attribution}`. `[]` turns the picker down to Map / Plain. The defaults
+  need no key:
+  - Satellite: EOX Sentinel-2 cloudless 2021 (CC BY-NC-SA 4.0, fine for this non-commercial
+    project; replace it for any commercial use);
+  - Terrain shading: Mapzen terrain tiles on AWS Open Data (`raster-dem`, terrarium encoding);
+  - Ocean depth: GEBCO's WMS (`GEBCO_LATEST`), drawn at 55% under the data.
+
+  Overlays draw between the base map and the data. The viewer's choice, including a data-opacity
+  slider, is remembered in their browser only.
 - `basemap`: defaults to OpenFreeMap (no API key; attribution comes with the style). Use
   `"none"` for a plain background. If the basemap can't load, the map falls back to a plain
   background and the data still shows.
