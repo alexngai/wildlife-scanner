@@ -190,3 +190,7 @@ wildlife-radar lake-sync --pull --pull-prefix ref --pull-prefix norm/observation
 ```
 
 Region work stores are not synced: they are rebuilt from the tiles and the live log.
+
+After a new monthly snapshot is built, `wildlife-radar lake-prune` (add `--dry-run` to see the
+list) drops snapshots older than the previous one and live-log days the snapshot has
+absorbed, locally and in the bucket. This keeps the bucket at about 12–15 GB for California.
