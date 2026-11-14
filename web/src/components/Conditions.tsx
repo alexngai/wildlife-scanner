@@ -1,7 +1,13 @@
 import { cellToLatLng } from "h3-js";
 import { useMemo } from "react";
 import { useServices } from "../context";
-import { directionOf, summarizeConditions, todayRatio, type CellForecast, type ConditionsSummary } from "../lib/conditions";
+import {
+  directionOf,
+  summarizeConditions,
+  todayRatio,
+  type CellForecast,
+  type ConditionsSummary,
+} from "../lib/conditions";
 import { percent, shortDate, times } from "../lib/format";
 import type { FeatureCollection } from "../lib/maps";
 import { useAsync, type AsyncState } from "../lib/useAsync";
@@ -38,7 +44,9 @@ export function useConditions(
   const state = useAsync(
     load && api.enabled && cells.length > 0
       ? async () => {
-          const settled = await Promise.allSettled(cells.map((c) => api.forecast(taxonId, { lat: c.lat, lon: c.lon }, date)));
+          const settled = await Promise.allSettled(
+            cells.map((c) => api.forecast(taxonId, { lat: c.lat, lon: c.lon }, date)),
+          );
           const ok = cells.flatMap((c, i): CellForecast[] => {
             const r = settled[i];
             return r?.status === "fulfilled" ? [{ ...c, forecast: r.value }] : [];
@@ -71,12 +79,13 @@ export function useConditions(
 }
 
 export function ConditionsSummaryView({ summary, date }: { summary: ConditionsSummary; date: string }) {
-  if (summary.cells === 0) return <p className="muted small">No forecast is available for these cells on {shortDate(date)}.</p>;
+  if (summary.cells === 0)
+    return <p className="muted small">No forecast is available for these cells on {shortDate(date)}.</p>;
   if (summary.baselineOnly === summary.cells) {
     return (
       <p className="muted small">
-        No daily factors are modelled for this species yet, so {shortDate(date)} looks like a usual day for this week. That
-        doesn't mean conditions don't matter.
+        No daily factors are modelled for this species yet, so {shortDate(date)} looks like a usual day for this week.
+        That doesn't mean conditions don't matter.
       </p>
     );
   }
@@ -99,7 +108,11 @@ export function ConditionsSummaryView({ summary, date }: { summary: ConditionsSu
                 </span>
                 <span className="driver-name">{humanize(f.signal)}</span>
                 <span className="driver-effect">
-                  {up ? `raises the odds about ${times(f.multiplier)}` : down ? `lowers the odds about ${times(f.multiplier)}` : "little effect"}
+                  {up
+                    ? `raises the odds about ${times(f.multiplier)}`
+                    : down
+                      ? `lowers the odds about ${times(f.multiplier)}`
+                      : "little effect"}
                   {f.up > 0 && f.down > 0 && ` (up in ${f.up}, down in ${f.down} cells)`}
                 </span>
                 {f.hypothesis && <span className="badge">expected from species profile</span>}

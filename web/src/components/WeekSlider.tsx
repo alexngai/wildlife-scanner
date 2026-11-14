@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import { monthLabel, monthOfWeek, weekLabel, weekOf } from "../lib/weeks";
+import { ChevronLeftIcon, ChevronRightIcon, PauseIcon, PlayIcon } from "./Icons";
 
 const STEP_MS = 700;
 
@@ -27,21 +28,33 @@ export function WeekSlider({
   }, [playing, week, onChange]);
   return (
     <div className="week-slider">
-      <label htmlFor={id} className="label">
-        Time of year: <strong>{text}</strong>
-      </label>
+      <div className="week-label">
+        <label htmlFor={id} className="label">
+          Time of year: <strong>{text}</strong>
+        </label>
+        {week !== thisWeek && (
+          <button type="button" className="link-button small" onClick={() => onChange(thisWeek)}>
+            Back to this week
+          </button>
+        )}
+      </div>
       <div className="week-row">
         <button
           type="button"
-          className="play"
+          className="icon-button"
           onClick={() => setPlaying((p) => !p)}
           aria-pressed={playing}
           aria-label={playing ? "Pause the weeks" : "Play through the weeks"}
         >
-          <span aria-hidden="true">{playing ? "❚❚" : "▶"}</span>
+          {playing ? <PauseIcon /> : <PlayIcon />}
         </button>
-        <button type="button" onClick={() => onChange(week <= 1 ? 52 : week - 1)} aria-label="Previous week">
-          ‹
+        <button
+          type="button"
+          className="icon-button"
+          onClick={() => onChange(week <= 1 ? 52 : week - 1)}
+          aria-label="Previous week"
+        >
+          <ChevronLeftIcon />
         </button>
         <input
           id={id}
@@ -56,15 +69,15 @@ export function WeekSlider({
             onChange(Number(e.target.value));
           }}
         />
-        <button type="button" onClick={() => onChange(week >= 52 ? 1 : week + 1)} aria-label="Next week">
-          ›
+        <button
+          type="button"
+          className="icon-button"
+          onClick={() => onChange(week >= 52 ? 1 : week + 1)}
+          aria-label="Next week"
+        >
+          <ChevronRightIcon />
         </button>
       </div>
-      {week !== thisWeek && (
-        <button type="button" className="link-button" onClick={() => onChange(thisWeek)}>
-          Back to this week
-        </button>
-      )}
     </div>
   );
 }

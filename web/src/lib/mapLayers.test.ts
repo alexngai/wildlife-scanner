@@ -5,7 +5,9 @@ describe("map layers", () => {
   beforeEach(() => resetLayerChoice());
 
   it("keeps the choice to what the deployment offers", () => {
-    expect(effectiveChoice({ base: "satellite", overlays: ["terrain", "gone"], dataOpacity: 0.5 }, DEFAULT_LAYERS, true)).toEqual({
+    expect(
+      effectiveChoice({ base: "satellite", overlays: ["terrain", "gone"], dataOpacity: 0.5 }, DEFAULT_LAYERS, true),
+    ).toEqual({
       base: "satellite",
       overlays: ["terrain"],
       dataOpacity: 0.5,
@@ -21,7 +23,14 @@ describe("map layers", () => {
   });
 
   it("takes layers from config.json, dropping malformed ones", () => {
-    const good = { id: "x", name: "X", kind: "overlay", type: "raster", tiles: ["https://t/{z}/{x}/{y}.png"], attribution: "X" };
+    const good = {
+      id: "x",
+      name: "X",
+      kind: "overlay",
+      type: "raster",
+      tiles: ["https://t/{z}/{x}/{y}.png"],
+      attribution: "X",
+    };
     const c = mergeConfig(DEFAULT_CONFIG, { layers: [good, { id: "bad" }] });
     expect(c.layers).toEqual([good]);
     expect(mergeConfig(DEFAULT_CONFIG, {}).layers).toBe(DEFAULT_LAYERS);

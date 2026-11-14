@@ -7,6 +7,7 @@ import { searchTaxa } from "../lib/search";
 import { useAsync } from "../lib/useAsync";
 import { weekOf } from "../lib/weeks";
 import type { TaxonEntry } from "../products/types";
+import { SearchIcon } from "./Icons";
 import { SeasonRibbon } from "./SeasonRibbon";
 
 /** Ribbons are drawn for this many results, each from its species map file. */
@@ -41,7 +42,16 @@ function useRibbons(region: string, ids: string[]): Map<string, RibbonWeek[]> {
 }
 const EMPTY = new Map<string, RibbonWeek[]>();
 
-export function SpeciesSearch({ region, taxa }: { region: string; taxa: TaxonEntry[] }) {
+export function SpeciesSearch({
+  region,
+  taxa,
+  popular = [],
+}: {
+  region: string;
+  taxa: TaxonEntry[];
+  /** Shown as quick picks while the search box is empty. */
+  popular?: TaxonEntry[];
+}) {
   const [q, setQ] = useState("");
   const id = useId();
   const results = useMemo(() => searchTaxa(taxa, q), [taxa, q]);
@@ -65,18 +75,33 @@ export function SpeciesSearch({ region, taxa }: { region: string; taxa: TaxonEnt
       <label htmlFor={id} className="label">
         Search species
       </label>
-      <input
-        id={id}
-        type="search"
-        value={q}
-        placeholder="Common or scientific name"
-        autoComplete="off"
-        onChange={(e) => setQ(e.target.value)}
-        aria-describedby={`${id}-count`}
-      />
+      <div className="search-box">
+        <SearchIcon />
+        <input
+          id={id}
+          type="search"
+          value={q}
+          placeholder="Search by common or scientific name"
+          autoComplete="off"
+          onChange={(e) => setQ(e.target.value)}
+          aria-describedby={`${id}-count`}
+        />
+      </div>
       <p id={`${id}-count`} className="sr-only" aria-live="polite">
         {q ? `${results.length} ${results.length === 1 ? "result" : "results"}` : ""}
       </p>
+      {!q && popular.length > 0 && (
+        <div className="popular">
+          <p className="muted small">Most recorded here</p>
+          <ul className="chip-list">
+            {popular.map((t) => (
+              <li key={t.id}>
+                <Link to={`/r/${region}/species/${encodeURIComponent(t.id)}`}>{displayName(t)}</Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {q && results.length === 0 && (
         <p className="muted">
           No match. Some species are not shown at all to protect them; others may have too few records.

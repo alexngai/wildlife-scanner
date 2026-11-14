@@ -13,9 +13,17 @@ Cloudflare Pages. AGPL-3.0, like the rest of the repository.
 | `/` | region picker | `/config.json` regions (or API `/regions`) → each region's `index.json` |
 | `/r/:region` | species search with a 52-week season ribbon per result; "Where to go": places compared within one effort group by likely species per outing (week slider, map, ranked list; loaded on request); places, "near me" | `taxa.json`, `index.json`, species map files (ribbons), place files (hotspots) |
 | `/r/:region/species/:id` | week map + slider (with play), coloured by chance or by chance compared with the wider area; "Today's conditions" over the 12 highest cells (better / about / worse than usual, with the factors); cell details on hover/tap; named places on the map; the map as a table (keyboard alternative to tapping); calendar (region or a tapped cell / place), what the number means, confidence, daily forecast + drivers, hourly timing, licence | species map file; API `forecast`, `forecast/hourly`, `timing` |
-| `/r/:region/places/:id` | most likely / special here / peaking now / new for you, awareness species, picking up now / reported recently with data delay | place file; API `places/{id}/recent` |
+| `/r/:region/places/:id` | one effort group at a time (busiest first) with tabs for most likely / special here / peaking now / new for you (top 10, then "Show all"); awareness species; picking up now / reported recently with data delay | place file; API `places/{id}/recent` |
 | `/r/:region/nearby` | geolocation (on request, rounded to ~100 m) → closest places, lists, recent activity | `index.json`; API `nearby`, `nearby/recent` |
 | `/about` | AGPL source link, non-commercial notice, licences, privacy | API `/sources` |
+
+## Look and feel
+
+One token system in `src/styles/app.css` (colour, type, spacing, radii, shadows), redefined for
+dark mode. The theme follows the system unless the viewer picks Light or Dark in the header
+(saved in their browser). Pages share one structure: a page header (back link, title, chips),
+then cards with a heading and optional actions. Navigation is in the header on wide screens and
+a bottom tab bar on phones. Icons are inline SVG (`src/components/Icons.tsx`).
 
 ## Policy in the UI
 
@@ -72,6 +80,7 @@ Or point the dev server at the test fixtures, with no Python needed:
 | Script | |
 |---|---|
 | `npm run lint` | ESLint (typescript-eslint strict, react-hooks, jsx-a11y) |
+| `npm run format` | Prettier (120 columns); CI runs `format:check` |
 | `npm run typecheck` | `tsc -b` |
 | `npm test` | Vitest unit and component tests (jsdom; MapLibre is mocked) |
 | `npm run e2e` | Playwright smoke test against the production build (`vite preview`), mobile + desktop; run `npx vite build` first |

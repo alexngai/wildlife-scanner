@@ -8,7 +8,13 @@ import { weekOf } from "../src/lib/weeks";
 
 // MapLibre needs WebGL; unit tests check what the map is given instead.
 vi.mock("../src/components/MapView", () => ({
-  default: (props: { label: string; data: { features: unknown[] }; metric?: string; places?: unknown[]; markers?: unknown[] }) => (
+  default: (props: {
+    label: string;
+    data: { features: unknown[] };
+    metric?: string;
+    places?: unknown[];
+    markers?: unknown[];
+  }) => (
     <div
       data-testid="map"
       aria-label={props.label}
@@ -61,7 +67,10 @@ describe("species page", () => {
 
   it("shows the daily forecast with its drivers for a chosen place", async () => {
     renderApp("/r/testland/species/testus-primus?place=test-cove", {
-      api: { "/species/testus-primus/forecast": fixtureApi("forecast"), "/species/testus-primus/forecast/hourly": fixtureApi("hourly") },
+      api: {
+        "/species/testus-primus/forecast": fixtureApi("forecast"),
+        "/species/testus-primus/forecast/hourly": fixtureApi("hourly"),
+      },
     });
     expect(await screen.findByText("42%")).toBeInTheDocument();
     expect(screen.getByText("Adjusted for today's conditions")).toBeInTheDocument();
@@ -89,7 +98,7 @@ describe("species page", () => {
     expect(choose.length).toBe(15);
     await user.click(choose[0]!);
     expect(router.state.location.search).toMatch(/lat=.*lon=/);
-    expect(await screen.findByText(/Calendar here/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/At the point you chose/)).length).toBe(2); // calendar and forecast
   });
 
   it("overlays today's conditions on the highest cells, on request", async () => {
@@ -101,7 +110,9 @@ describe("species page", () => {
     await screen.findByTestId("map");
     expect(requested.some((u) => u.includes("/forecast"))).toBe(false); // nothing until asked
     await user.click(screen.getByRole("button", { name: "Today's conditions", pressed: false }));
-    expect(await screen.findByText(/conditions raise the chance in/)).toHaveTextContent(/raise the chance in 12, lower it in 0/);
+    expect(await screen.findByText(/conditions raise the chance in/)).toHaveTextContent(
+      /raise the chance in 12, lower it in 0/,
+    );
     expect(screen.getByTestId("map")).toHaveAttribute("data-markers", "12");
     expect(screen.getByText("Water temperature")).toBeInTheDocument();
     expect(requested.filter((u) => u.includes("/forecast")).length).toBe(12);
@@ -122,20 +133,27 @@ describe("species page", () => {
 });
 
 describe("place page", () => {
-  it("lists species, awareness species without numbers, and keeps a local life list", async () => {
+  it("lists species one group at a time, awareness species without numbers, and keeps a local life list", async () => {
     const user = userEvent.setup();
     const { requested } = renderApp("/r/testland/places/test-cove?week=20");
     expect(await screen.findByRole("heading", { level: 1, name: "Test Cove" })).toBeInTheDocument();
     const aware = screen.getByRole("heading", { name: "Also in the wider area" }).closest("section")!;
     expect(within(aware).getByText("Shy Testcat")).toBeInTheDocument();
     expect(aware.textContent).not.toMatch(/\d+%/);
-    expect(screen.getAllByText("not enough data").length).toBeGreaterThan(0);
 
-    const newSection = screen.getAllByRole("heading", { name: "New for you" })[0]!.closest("section")!;
-    expect(within(newSection).getByRole("link", { name: "Common Testbird" })).toBeInTheDocument();
-    await user.click(within(newSection).getByRole("button", { name: "Seen Common Testbird", pressed: false }));
+    // The busiest group is shown first; others are a choice away.
+    const group = screen.getByLabelText("Group");
+    expect(group).toHaveDisplayValue(/birds/);
+    await user.selectOptions(group, "fishes:casual");
+    expect(screen.getAllByText("not enough data").length).toBeGreaterThan(0);
+    await user.selectOptions(group, "birds:casual");
+
+    await user.click(screen.getByRole("button", { name: /New for you/ }));
+    const list = document.querySelector(".item-list") as HTMLElement;
+    expect(within(list).getByRole("link", { name: "Common Testbird" })).toBeInTheDocument();
+    await user.click(within(list).getByRole("button", { name: "Seen Common Testbird", pressed: false }));
     expect(JSON.parse(localStorage.getItem("wildlife-radar:life-list:v1")!)).toEqual(["testus-primus"]);
-    expect(within(newSection).queryByRole("link", { name: "Common Testbird" })).toBeNull();
+    expect(screen.getByText(/You've seen everything on these lists/)).toBeInTheDocument();
     expect(requested.join()).not.toContain("testus-primus,"); // life list never sent
   });
 
@@ -154,7 +172,10 @@ describe("region and search", () => {
     await user.type(await screen.findByLabelText("Search species"), "testf");
     const results = document.querySelector(".result-list") as HTMLElement;
     expect(within(results).getAllByRole("link")).toHaveLength(1);
-    expect(within(results).getByRole("link", { name: /Seasonal Testfish/ })).toHaveAttribute("href", "/r/testland/species/testus-secundus");
+    expect(within(results).getByRole("link", { name: /Seasonal Testfish/ })).toHaveAttribute(
+      "href",
+      "/r/testland/species/testus-secundus",
+    );
   });
 
   it("shows a season ribbon on search results, but not for awareness species", async () => {
@@ -173,7 +194,9 @@ describe("region and search", () => {
     const { requested } = renderApp("/r/testland");
     await user.click(await screen.findByRole("button", { name: "Compare places" }));
     expect(requested.join()).toContain("places/test-park");
-    expect(await screen.findByLabelText(/Compare for/)).toHaveDisplayValue(/(birds|fishes) · casual sightings \(2 places\)/);
+    expect(await screen.findByLabelText(/Compare for/)).toHaveDisplayValue(
+      /(birds|fishes) · casual sightings \(2 places\)/,
+    );
     const list = document.querySelector(".hotspot-list") as HTMLElement;
     expect(within(list).getAllByRole("link")).toHaveLength(2);
     expect(within(list).getAllByText(/species per outing/).length).toBeGreaterThan(0);

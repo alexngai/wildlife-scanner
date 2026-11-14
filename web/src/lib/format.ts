@@ -26,8 +26,18 @@ export function oddsMultiplier(contribution: number): number {
   return Math.exp(contribution);
 }
 
-export function displayName(t: { common_name?: string | null; scientific_name?: string | null; id?: string; taxon_id?: string }): string {
-  return t.common_name || t.scientific_name || t.id || t.taxon_id || "Unnamed";
+/** Sentence case for display: published names mix "coyote brush" and "Coyote Brush". */
+export function capitalize(name: string): string {
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+export function displayName(t: {
+  common_name?: string | null;
+  scientific_name?: string | null;
+  id?: string;
+  taxon_id?: string;
+}): string {
+  return capitalize(t.common_name || t.scientific_name || t.id || t.taxon_id || "Unnamed");
 }
 
 const dateFmt = new Intl.DateTimeFormat("en", { year: "numeric", month: "short", day: "numeric" });

@@ -17,7 +17,10 @@ import {
 
 const load = (id: string) =>
   JSON.parse(
-    readFileSync(resolve(__dirname, `../../tests/fixtures/bucket/region=testland/static/maps/${id}.fixture.json`), "utf8"),
+    readFileSync(
+      resolve(__dirname, `../../tests/fixtures/bucket/region=testland/static/maps/${id}.fixture.json`),
+      "utf8",
+    ),
   ) as SpeciesMapFile;
 
 describe("species maps", () => {

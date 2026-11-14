@@ -1,10 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import * as maplibregl from "maplibre-gl";
-import type {
-  GeoJSONSource,
-  MapLayerMouseEvent,
-  StyleSpecification,
-} from "maplibre-gl";
+import type { GeoJSONSource, MapLayerMouseEvent, StyleSpecification } from "maplibre-gl";
 
 // MapLibre's worker is a separate, self-contained file; ship it as an asset and point at it.
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
@@ -15,11 +11,7 @@ type GeoData = Parameters<GeoJSONSource["setData"]>[0];
 type Expr = maplibregl.ExpressionSpecification;
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { BasemapConfig, MapLayerConfig } from "../config";
-import {
-  effectiveChoice,
-  useLayerChoice,
-  type LayerChoice,
-} from "../lib/mapLayers";
+import { effectiveChoice, useLayerChoice, type LayerChoice } from "../lib/mapLayers";
 import { LayerPicker } from "./LayerPicker";
 import type { CellFeatureProps, FeatureCollection } from "../lib/maps";
 import { liftRampFor, rampFor, type MapMetric } from "./mapColors";
@@ -100,10 +92,7 @@ function blankStyle(theme: "light" | "dark"): StyleSpecification {
   };
 }
 
-function basemapUrl(
-  basemap: BasemapConfig,
-  theme: "light" | "dark",
-): string | null {
+function basemapUrl(basemap: BasemapConfig, theme: "light" | "dark"): string | null {
   const url = theme === "dark" ? basemap.dark : basemap.light;
   return !url || url === "none" ? null : url;
 }
@@ -183,12 +172,7 @@ function addOverlays(map: maplibregl.Map, s: Latest) {
 }
 
 function matchBins(prop: string, ramp: string[], fallback: string): Expr {
-  return [
-    "match",
-    ["get", prop],
-    ...ramp.flatMap((color, bin) => [bin, color]),
-    fallback,
-  ] as unknown as Expr;
+  return ["match", ["get", prop], ...ramp.flatMap((color, bin) => [bin, color]), fallback] as unknown as Expr;
 }
 
 /** Fill colour by metric; presence and "not enough data" look the same in both. */
@@ -255,12 +239,7 @@ function placeRadius(selected: string | null): Expr {
   return [
     "+",
     ["case", ["==", ["get", "id"], selected ?? ""], 2, 0],
-    [
-      "case",
-      [">=", ["get", "value"], 0],
-      ["+", 6, ["*", 16, ["sqrt", ["get", "value"]]]],
-      5,
-    ],
+    ["case", [">=", ["get", "value"], 0], ["+", 6, ["*", 16, ["sqrt", ["get", "value"]]]], 5],
   ] as unknown as Expr;
 }
 
@@ -270,17 +249,7 @@ function placeColor(theme: "light" | "dark"): Expr {
   return [
     "case",
     [">=", ["get", "value"], 0],
-    [
-      "interpolate",
-      ["linear"],
-      ["get", "value"],
-      0,
-      ramp[1] ?? plain,
-      0.5,
-      ramp[3] ?? plain,
-      1,
-      ramp[5] ?? plain,
-    ],
+    ["interpolate", ["linear"], ["get", "value"], 0, ramp[1] ?? plain, 0.5, ramp[3] ?? plain, 1, ramp[5] ?? plain],
     plain,
   ] as unknown as Expr;
 }
@@ -448,10 +417,7 @@ export default function MapView({
 }: MapViewProps) {
   const stored = useLayerChoice();
   const hasBasemap = basemapUrl(basemap, theme) !== null;
-  const choice = useMemo(
-    () => effectiveChoice(stored, layers, hasBasemap),
-    [stored, layers, hasBasemap],
-  );
+  const choice = useMemo(() => effectiveChoice(stored, layers, hasBasemap), [stored, layers, hasBasemap]);
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const latest = useRef<Latest>({
@@ -501,10 +467,7 @@ export default function MapView({
       cooperativeGestures: true,
     });
     mapRef.current = map;
-    map.addControl(
-      new maplibregl.NavigationControl({ showCompass: false }),
-      "top-right",
-    );
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     const popup = new maplibregl.Popup({
       closeButton: false,
       closeOnClick: false,
@@ -518,10 +481,7 @@ export default function MapView({
     });
     // If the basemap can't be reached, fall back to a plain background so the data still shows.
     map.on("error", (e: { error?: { message?: string } }) => {
-      if (
-        !styleLoaded &&
-        /style|fetch|Failed/i.test(String(e.error?.message ?? ""))
-      ) {
+      if (!styleLoaded && /style|fetch|Failed/i.test(String(e.error?.message ?? ""))) {
         styleLoaded = true;
         map.setStyle(blankStyle(latest.current.theme));
       }
@@ -530,9 +490,7 @@ export default function MapView({
     // Points drawn over the cells (places, markers) take hover and taps before the cell under them.
     const overlayAt = (e: MapLayerMouseEvent) => {
       const layers = ["wr-places", "wr-markers"].filter((l) => map.getLayer(l));
-      return layers.length > 0
-        ? map.queryRenderedFeatures(e.point, { layers })[0]
-        : undefined;
+      return layers.length > 0 ? map.queryRenderedFeatures(e.point, { layers })[0] : undefined;
     };
     const showCell = (e: MapLayerMouseEvent) => {
       const props = e.features?.[0]?.properties as CellFeatureProps | undefined;
@@ -571,11 +529,7 @@ export default function MapView({
       if (text) popup.setLngLat(e.lngLat).setText(text).addTo(map);
     });
     for (const layer of ["wr-fill", "wr-places"]) {
-      map.on(
-        "mouseenter",
-        layer,
-        () => (map.getCanvas().style.cursor = "pointer"),
-      );
+      map.on("mouseenter", layer, () => (map.getCanvas().style.cursor = "pointer"));
       map.on("mouseleave", layer, () => (map.getCanvas().style.cursor = ""));
     }
     return () => {
@@ -603,11 +557,7 @@ export default function MapView({
     for (const l of layers) {
       const id = `wr-ov-${l.id}`;
       if (l.kind === "overlay" && map.getLayer(id))
-        map.setLayoutProperty(
-          id,
-          "visibility",
-          choice.overlays.includes(l.id) ? "visible" : "none",
-        );
+        map.setLayoutProperty(id, "visibility", choice.overlays.includes(l.id) ? "visible" : "none");
     }
   }, [choice.overlays, layers]);
 
@@ -620,19 +570,13 @@ export default function MapView({
     const map = mapRef.current;
     if (!map?.getLayer("wr-fill")) return;
     map.setPaintProperty("wr-fill", "fill-color", fillColor(theme, metric));
-    map.setPaintProperty(
-      "wr-fill",
-      "fill-opacity",
-      fillOpacity(metric, choice.dataOpacity),
-    );
-    if (map.getLayer("wr-hatch"))
-      map.setPaintProperty("wr-hatch", "fill-opacity", choice.dataOpacity);
+    map.setPaintProperty("wr-fill", "fill-opacity", fillOpacity(metric, choice.dataOpacity));
+    if (map.getLayer("wr-hatch")) map.setPaintProperty("wr-hatch", "fill-opacity", choice.dataOpacity);
   }, [metric, theme, choice.dataOpacity]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (map?.getLayer("wr-selected"))
-      map.setFilter("wr-selected", ["==", ["get", "cell"], selectedCell ?? ""]);
+    if (map?.getLayer("wr-selected")) map.setFilter("wr-selected", ["==", ["get", "cell"], selectedCell ?? ""]);
   }, [selectedCell]);
 
   useEffect(() => {
@@ -647,17 +591,11 @@ export default function MapView({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (map?.getLayer("wr-places"))
-      map.setPaintProperty(
-        "wr-places",
-        "circle-radius",
-        placeRadius(selectedPlace),
-      );
+    if (map?.getLayer("wr-places")) map.setPaintProperty("wr-places", "circle-radius", placeRadius(selectedPlace));
   }, [selectedPlace]);
 
   useEffect(() => {
-    if (bounds && mapRef.current)
-      mapRef.current.fitBounds(bounds, { padding: 24, duration: 0 });
+    if (bounds && mapRef.current) mapRef.current.fitBounds(bounds, { padding: 24, duration: 0 });
   }, [bounds]);
 
   // MapLibre's canvas is focusable (keyboard pan and zoom), so the description goes on it
@@ -668,11 +606,7 @@ export default function MapView({
 
   return (
     <div className="map-frame">
-      <div
-        ref={container}
-        className={short ? "map map-short" : "map"}
-        data-testid="map"
-      />
+      <div ref={container} className={short ? "map map-short" : "map"} data-testid="map" />
       <LayerPicker layers={layers} hasBasemap={hasBasemap} choice={choice} />
     </div>
   );

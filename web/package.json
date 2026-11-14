@@ -14,7 +14,9 @@
     "test:watch": "vitest",
     "e2e": "playwright test --trace off",
     "gen:api": "openapi-typescript api/openapi.json -o src/api/schema.d.ts",
-    "fixtures": "node scripts/make-fixtures.mjs"
+    "fixtures": "node scripts/make-fixtures.mjs",
+    "format": "prettier --write src tests e2e scripts",
+    "format:check": "prettier --check src tests e2e scripts"
   },
   "engines": {
     "node": ">=20"
@@ -44,6 +46,7 @@
     "globals": "^17.14.0",
     "jsdom": "^31.0.1",
     "openapi-typescript": "^7.13.0",
+    "prettier": "3.8.1",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.72.2",
     "vite": "^8.3.8",

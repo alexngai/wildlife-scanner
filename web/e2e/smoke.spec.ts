@@ -34,7 +34,10 @@ test("region → search → species map, calendar and forecast", async ({ page }
   await page.goto("/");
   await page.getByRole("link", { name: /Testland/ }).click();
   await page.getByLabel("Search species").fill("testbird");
-  await page.locator(".result-list").getByRole("link", { name: /Common Testbird/ }).click();
+  await page
+    .locator(".result-list")
+    .getByRole("link", { name: /Common Testbird/ })
+    .click();
   await expect(page.getByRole("heading", { level: 1, name: "Common Testbird" })).toBeVisible();
   await expect(page.locator(".map canvas")).toBeVisible();
   await expect(page.getByRole("img", { name: /Seasonal calendar/ })).toBeVisible();
@@ -44,7 +47,7 @@ test("region → search → species map, calendar and forecast", async ({ page }
   await expect(page).toHaveURL(/week=\d+/);
 
   // Choose a place for the daily forecast and its drivers.
-  await page.getByLabel("Place").selectOption("test-cove");
+  await page.getByLabel("Location").selectOption("test-cove");
   await expect(page.getByText("42%")).toBeVisible();
   await expect(page.getByText("Water temperature")).toBeVisible();
   await expect(page.getByText(/Best hours/)).toBeVisible();
@@ -59,13 +62,15 @@ test("awareness species never show numbers", async ({ page }) => {
 });
 
 test("place page: lists, life list, recent activity with delay", async ({ page }) => {
-  await page.goto("/r/testland/places/test-cove");
+  await page.goto("/r/testland/places/test-cove?week=20");
   await expect(page.getByRole("heading", { level: 1, name: "Test Cove" })).toBeVisible();
-  await expect(page.getByText(/Sightings through/)).toBeVisible();
   const seen = page.getByRole("button", { name: "Seen Common Testbird", pressed: false }).first();
   await seen.click();
   await page.reload();
   await expect(page.getByRole("button", { name: "Seen Common Testbird", pressed: true }).first()).toBeVisible();
+  // Recent activity (with its delay) shows for the current week.
+  await page.goto("/r/testland/places/test-cove");
+  await expect(page.getByText(/Sightings through/)).toBeVisible();
 });
 
 test("unknown species and deep links work (SPA routing)", async ({ page }) => {
@@ -73,12 +78,18 @@ test("unknown species and deep links work (SPA routing)", async ({ page }) => {
   await expect(page.getByText("This species: not available")).toBeVisible();
 });
 
-test("dark theme toggle", async ({ page }) => {
+test("light, dark and system themes", async ({ page }) => {
   await page.goto("/about");
-  await page.getByRole("button", { name: /Theme: system/ }).click();
+  const theme = page.getByRole("group", { name: "Theme" });
+  await expect(theme.getByRole("button", { name: "System theme" })).toHaveAttribute("aria-pressed", "true");
+  await theme.getByRole("button", { name: "Light theme" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-  await page.getByRole("button", { name: /Theme: light/ }).click();
+  await theme.getByRole("button", { name: "Dark theme" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.getByRole("group", { name: "Theme" }).getByRole("button", { name: "System theme" }).click();
+  await expect(page.locator("html")).not.toHaveAttribute("data-theme", /.+/);
 });
 
 test("nearby uses (rounded) geolocation", async ({ page, context }) => {

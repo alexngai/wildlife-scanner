@@ -29,7 +29,9 @@ describe("StaticClient", () => {
 
   it("refuses formats it doesn't know", async () => {
     const fetcher = (async (u: string) =>
-      u.endsWith("CURRENT") ? new Response("v1") : new Response(JSON.stringify({ format: 3 }))) as unknown as typeof fetch;
+      u.endsWith("CURRENT")
+        ? new Response("v1")
+        : new Response(JSON.stringify({ format: 3 }))) as unknown as typeof fetch;
     await expect(new StaticClient("/data", fetcher).index("x")).rejects.toBeInstanceOf(FormatError);
   });
 });

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { Driver, Forecast, HourlyForecast, RecentActivity, RecentItem, Timing, Where } from "../api/client";
 import { useServices } from "../context";
-import { km, oddsMultiplier, percent, shortDate, times } from "../lib/format";
+import { capitalize, km, oddsMultiplier, percent, shortDate, times } from "../lib/format";
 import { LEVEL_TEXT, delayText } from "../lib/policy";
 import { useAsync } from "../lib/useAsync";
 import { Async } from "./Status";
@@ -13,11 +13,7 @@ export function humanize(s: string): string {
 }
 
 function NoApi({ what }: { what: string }) {
-  return (
-    <p className="muted">
-      {what} come from the live service, which this site isn't connected to right now.
-    </p>
-  );
+  return <p className="muted">{what} come from the live service, which this site isn't connected to right now.</p>;
 }
 
 function DriverList({ drivers }: { drivers: Driver[] }) {
@@ -35,7 +31,9 @@ function DriverList({ drivers }: { drivers: Driver[] }) {
               {up ? "▲" : down ? "▼" : "•"}
             </span>
             <span className="driver-name">{humanize(d.signal)}</span>
-            {d.value !== null && d.value !== undefined && <span className="muted small"> ({Number(d.value.toFixed(2))})</span>}
+            {d.value !== null && d.value !== undefined && (
+              <span className="muted small"> ({Number(d.value.toFixed(2))})</span>
+            )}
             <span className="driver-effect">
               {up ? `raises the odds ${times(m)}` : down ? `lowers the odds ${times(m)}` : "little effect"}
             </span>
@@ -120,7 +118,9 @@ export function HourlyPanel({ taxonId, where, date }: { taxonId: string; where: 
         if (hours.length === 0 || flat) {
           return (
             <>
-              <p className="muted">No time-of-day pattern is known for this species here, so every hour looks the same.</p>
+              <p className="muted">
+                No time-of-day pattern is known for this species here, so every hour looks the same.
+              </p>
               <Notes notes={h.notes} />
             </>
           );
@@ -170,6 +170,27 @@ export function HourlyPanel({ taxonId, where, date }: { taxonId: string; where: 
 }
 
 /** When in the day (and tide) a species is recorded, relative to its group (region-wide). */
+/** Readable names for the timing signals; anything else is humanized. */
+const SIGNAL_LABELS: Record<string, string> = {
+  "astro.diel_phase": "Time of day",
+  "astro.hours_since_sunset": "Hours since sunset",
+  "astro.moonlight": "Moonlight",
+  "tide.height_m": "Tide height",
+  "tide.stage": "Tide stage",
+};
+
+function signalLabel(signal: string): string {
+  return SIGNAL_LABELS[signal] ?? humanize(signal.replace(/^[a-z]+\./, ""));
+}
+
+function categoryLabel(signal: string, category: string): string {
+  const q = /^Q(\d)$/.exec(category);
+  if (q && signal.startsWith("tide.height")) {
+    return { "1": "Lowest", "2": "Low", "3": "Middle", "4": "High", "5": "Highest" }[q[1] ?? ""] ?? category;
+  }
+  return humanize(category);
+}
+
 export function TimingPanel({ taxonId, region }: { taxonId: string; region: string }) {
   const { api } = useServices();
   const state = useAsync(api.enabled ? () => api.timing(taxonId, region) : null, [api, taxonId, region]);
@@ -178,19 +199,31 @@ export function TimingPanel({ taxonId, region }: { taxonId: string; region: stri
     <Async state={state} notAvailable={<p className="muted">No time-of-day records are published for this species.</p>}>
       {(t: Timing) => (
         <div className="timing">
-          {Object.entries(t.signals).map(([signal, cats]) => (
-            <div key={signal}>
-              <h4>{humanize(signal)}</h4>
-              <ul className="index-list">
-                {cats.map((c) => (
-                  <li key={c.category}>
-                    <span className="index-name">{humanize(c.category)}</span>
-                    <span className="index-value">{c.index === null ? "not enough data" : times(c.index)}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
+          <div className="timing-grid">
+            {Object.entries(t.signals).map(([signal, cats]) => (
+              <div key={signal}>
+                <h4>{signalLabel(signal)}</h4>
+                <ul className="index-list">
+                  {cats.map((c) => (
+                    <li key={c.category}>
+                      <span className="index-name">{categoryLabel(signal, c.category)}</span>
+                      <span className="index-value">
+                        {c.index !== null && (
+                          <span className="index-bar" aria-hidden="true">
+                            <span
+                              className={c.index > 1.1 ? "up" : c.index < 0.9 ? "down" : undefined}
+                              style={{ width: `${Math.min(100, (c.index / 2) * 100)}%` }}
+                            />
+                          </span>
+                        )}
+                        {c.index === null ? "not enough data" : times(c.index)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
           <p className="muted small">{t.note}</p>
         </div>
       )}
@@ -203,21 +236,23 @@ function RecentList({ region, items, kind }: { region: string; items: RecentItem
     <ul className="item-list">
       {items.map((it) => (
         <li key={`${it.taxon_id}-${it.effort_group}`} className="item">
-          <Link to={`/r/${region}/species/${encodeURIComponent(it.taxon_id)}`} className="item-name">
-            {it.common_name || it.scientific_name || it.taxon_id}
-          </Link>
-          <span className="item-meta">
-            {kind === "up" ? (
-              <>
-                {percent(it.p_now)} today <span className="muted">(usually {percent(it.p_usual)})</span>
-                {it.odds_boost ? <span className="muted"> · odds {times(it.odds_boost)}</span> : null}
-              </>
-            ) : (
-              <>
-                reported on {it.recent_detections} of {it.recent_outings} outings
-              </>
-            )}
-          </span>
+          <div className="item-main">
+            <Link to={`/r/${region}/species/${encodeURIComponent(it.taxon_id)}`} className="item-name">
+              {capitalize(it.common_name || it.scientific_name || it.taxon_id)}
+            </Link>
+            <span className="item-meta">
+              {kind === "up" ? (
+                <>
+                  {percent(it.p_now)} today <span className="muted">(usually {percent(it.p_usual)})</span>
+                  {it.odds_boost ? <span className="muted"> · odds {times(it.odds_boost)}</span> : null}
+                </>
+              ) : (
+                <>
+                  reported on {it.recent_detections} of {it.recent_outings} outings
+                </>
+              )}
+            </span>
+          </div>
         </li>
       ))}
     </ul>
@@ -225,7 +260,15 @@ function RecentList({ region, items, kind }: { region: string; items: RecentItem
 }
 
 /** "Picking up now" and "reported recently", with the publication delay always shown. */
-export function RecentPanel({ region, load, deps }: { region: string; load: () => Promise<RecentActivity>; deps: unknown[] }) {
+export function RecentPanel({
+  region,
+  load,
+  deps,
+}: {
+  region: string;
+  load: () => Promise<RecentActivity>;
+  deps: unknown[];
+}) {
   const { api } = useServices();
   const state = useAsync(api.enabled ? load : null, [api, ...deps]);
   if (!api.enabled) return <NoApi what="Recent sightings" />;
@@ -235,20 +278,20 @@ export function RecentPanel({ region, load, deps }: { region: string; load: () =
         const pickingUp = r.picking_up ?? [];
         const reported = r.reported_recently ?? [];
         return (
-        <div className="recent">
-          <p className="delay-note">
-            Sightings through <strong>{shortDate(r.data_through)}</strong> (last {r.window_days} days, {km(r.resolution_km)} area).
-            Recent records are published with a delay: at least {delayText(0)} for openly mapped species, longer for
-            sensitive ones, which never appear here.
-          </p>
-          <Section title="Picking up now" empty="Nothing is picking up beyond its usual level right now.">
-            {pickingUp.length > 0 && <RecentList region={region} items={pickingUp} kind="up" />}
-          </Section>
-          <Section title="Reported recently" empty="No recent reports published for this area.">
-            {reported.length > 0 && <RecentList region={region} items={reported} kind="recent" />}
-          </Section>
-          <Notes notes={r.notes} />
-        </div>
+          <div className="recent">
+            <p className="delay-note">
+              Sightings through <strong>{shortDate(r.data_through)}</strong> (last {r.window_days} days,{" "}
+              {km(r.resolution_km)} area). Recent records are published with a delay: at least {delayText(0)} for openly
+              mapped species, longer for sensitive ones, which never appear here.
+            </p>
+            <Section title="Picking up now" empty="Nothing is picking up beyond its usual level right now.">
+              {pickingUp.length > 0 && <RecentList region={region} items={pickingUp} kind="up" />}
+            </Section>
+            <Section title="Reported recently" empty="No recent reports published for this area.">
+              {reported.length > 0 && <RecentList region={region} items={reported} kind="recent" />}
+            </Section>
+            <Notes notes={r.notes} />
+          </div>
         );
       }}
     </Async>
@@ -263,4 +306,3 @@ function Section({ title, empty, children }: { title: string; empty: string; chi
     </section>
   );
 }
-

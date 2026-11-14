@@ -1,0 +1,4 @@
+tests/fixtures/
+src/api/schema.d.ts
+api/
+dist/

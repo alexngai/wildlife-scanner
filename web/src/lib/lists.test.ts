@@ -6,7 +6,10 @@ import { listsFromApi, listsFromPlaceFile, newForYou } from "./lists";
 import type { PlaceLists } from "../api/client";
 
 const file = JSON.parse(
-  readFileSync(resolve(__dirname, "../../tests/fixtures/bucket/region=testland/static/places/test-cove.fixture.json"), "utf8"),
+  readFileSync(
+    resolve(__dirname, "../../tests/fixtures/bucket/region=testland/static/places/test-cove.fixture.json"),
+    "utf8",
+  ),
 ) as PlaceFile;
 
 describe("place lists", () => {
@@ -48,7 +51,17 @@ describe("place lists", () => {
           label: "birds",
           method: "observer_visit",
           most_likely: [
-            { taxon_id: "x", scientific_name: "X x", common_name: null, group: "birds", p: 0.5, lift: null, seasonal_index: null, confidence: "medium", resolution_km: 3.7 },
+            {
+              taxon_id: "x",
+              scientific_name: "X x",
+              common_name: null,
+              group: "birds",
+              p: 0.5,
+              lift: null,
+              seasonal_index: null,
+              confidence: "medium",
+              resolution_km: 3.7,
+            },
           ],
         },
       ],

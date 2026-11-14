@@ -49,7 +49,10 @@ export function MapTable({
             lift: f.properties.lift,
             lat,
             lon,
-            where: near && near.km <= NEAR_KM ? `Near ${near.place.name} (${km(near.km)})` : `${lat.toFixed(2)}, ${lon.toFixed(2)}`,
+            where:
+              near && near.km <= NEAR_KM
+                ? `Near ${near.place.name} (${km(near.km)})`
+                : `${lat.toFixed(2)}, ${lon.toFixed(2)}`,
           };
         }),
     [data, places, limit, sortBy],
@@ -62,8 +65,8 @@ export function MapTable({
     <details className="data-table map-table">
       <summary>Show the map as a table</summary>
       <p className="muted small">
-        {rows.length < total ? `The ${rows.length} cells ${ranked}, of ${total}.` : `All ${total} cells.`}{" "}
-        Choose one to see its calendar and forecast.
+        {rows.length < total ? `The ${rows.length} cells ${ranked}, of ${total}.` : `All ${total} cells.`} Choose one to
+        see its calendar and forecast.
       </p>
       <table>
         <thead>

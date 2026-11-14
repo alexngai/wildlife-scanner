@@ -14,7 +14,9 @@ describe("ApiClient", () => {
 
   it("maps 404 to not available, and is disabled without a base URL", async () => {
     const { fetcher } = makeFixtureFetch();
-    await expect(new ApiClient("/api", fetcher).forecast("x", { placeId: "p" })).rejects.toBeInstanceOf(NotAvailableError);
+    await expect(new ApiClient("/api", fetcher).forecast("x", { placeId: "p" })).rejects.toBeInstanceOf(
+      NotAvailableError,
+    );
     const off = new ApiClient("", fetcher);
     expect(off.enabled).toBe(false);
     await expect(off.regions()).rejects.toBeInstanceOf(NotAvailableError);
