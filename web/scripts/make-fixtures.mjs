@@ -78,6 +78,19 @@ function monthSegment({ tier, months }) {
   };
 }
 
+// Synthetic "photos" (simple drawings, no real images) to exercise thumbnails, credits and the
+// placeholder fallback: one good, one whose file is missing, one with a licence we can't show.
+const photo = (id, license, url = `static/photos/${id}.svg`) => ({
+  url,
+  url_medium: url,
+  license,
+  attribution: `(c) Synthetic Fixture, some rights reserved (${String(license).toUpperCase().replace("CC-", "CC ")})`,
+  source: "Synthetic",
+  source_url: "https://example.org/photos/" + id,
+});
+const PHOTO_SVG = (hue) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="hsl(${hue} 45% 82%)"/><circle cx="32" cy="34" r="16" fill="hsl(${hue} 45% 40%)"/><circle cx="38" cy="29" r="3" fill="#fff"/></svg>`;
+
 const species = [
   {
     id: "testus-primus",
@@ -88,6 +101,7 @@ const species = [
     tier: 0,
     mode: "forecast",
     records: 5000,
+    photo: photo("testus-primus", "cc-by"),
     segments: [weekSegment({ periods: weeks, peak: 20, width: 6, max: 0.7, insufficientEvery: 9 })],
   },
   {
@@ -101,6 +115,7 @@ const species = [
     tier: 0,
     mode: "forecast",
     records: 800,
+    photo: photo("testus-secundus", "cc-by-nc", "static/photos/gone.svg"),
     segments: [
       weekSegment({ periods: weeks.filter((w) => w >= 5 && (w < 23 || w > 35)), peak: 40, width: 5, max: 0.3 }),
       monthSegment({ tier: 2, months: [6, 7, 8] }),
@@ -115,6 +130,7 @@ const species = [
     tier: 2,
     mode: "awareness",
     records: 120,
+    photo: photo("rarus-tertius", null),
     segments: [monthSegment({ tier: 2, months: weeks.slice(0, 12) })],
   },
 ];
@@ -208,6 +224,9 @@ for (const [id, p] of Object.entries(places)) {
     })),
   });
 }
+
+write("static/photos/testus-primus.svg", PHOTO_SVG(140));
+write("static/photos/rarus-tertius.svg", PHOTO_SVG(30));
 
 write("CURRENT", `${VERSION}\n`);
 write(`version=${VERSION}/static/index.json`, {

@@ -49,6 +49,9 @@ Data arrives policy-filtered, and the app adds display rules on top. See
 - "Likely species per outing" adds up the published chances in a place's top list for one effort
   group. Places are only compared within a group, because chances from different methods don't
   mix.
+- Species photos are chosen when the data is published ([NEEDS.md](NEEDS.md) §15). Only openly
+  licensed ones are shown (CC0, BY, BY-SA, BY-NC, BY-NC-SA; never "all rights reserved" or ND),
+  always with their credit. An image that fails to load falls back to a group placeholder.
 - Licence and attribution appear with every map and list, alongside a non-commercial notice
   and the source link.
 

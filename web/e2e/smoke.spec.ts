@@ -106,3 +106,18 @@ test("nearby uses (rounded) geolocation", async ({ page, context }) => {
   expect(sent.length).toBeGreaterThan(0);
   for (const u of sent) expect(u).toContain("lat=36.612&lon=-121.901");
 });
+
+test("species photos load, and a missing one falls back to the placeholder", async ({ page }) => {
+  await page.goto("/r/testland");
+  await page.getByLabel("Search species").fill("test");
+  const results = page.locator(".result-list");
+  const bird = results.getByRole("link", { name: /Common Testbird/ }).locator("img.thumb");
+  await expect(bird).toBeVisible();
+  await expect
+    .poll(() => bird.evaluate((img) => (img as unknown as { naturalWidth: number }).naturalWidth))
+    .toBeGreaterThan(0);
+  // Its file is gone (404): the image is replaced by the group placeholder.
+  const fish = results.getByRole("link", { name: /Seasonal Testfish/ });
+  await expect(fish.locator(".thumb-empty")).toBeVisible();
+  await expect(fish.locator("img")).toHaveCount(0);
+});

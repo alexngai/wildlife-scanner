@@ -93,6 +93,7 @@ export function AboutPage() {
             CC BY-NC 4.0
           </a>
           , so it may not be used commercially. Records come through GBIF and iNaturalist; condition signals from NOAA.
+          Species photos are openly licensed photos from iNaturalist contributors, credited with each photo.
         </p>
         <Async state={sources}>
           {(list) => (
@@ -123,7 +124,8 @@ export function AboutPage() {
           </li>
           <li>
             Map images (base map, satellite imagery, terrain and depth layers) load from the providers credited on each
-            map, so they see which area you're looking at, as with any web map.
+            map, so they see which area you're looking at, as with any web map. Species photos may likewise load from
+            where they're hosted (iNaturalist's open data on AWS).
           </li>
           <li>No accounts, no tracking, no ads.</li>
         </ul>

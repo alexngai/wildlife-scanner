@@ -1,3 +1,5 @@
+import { usablePhoto, type ShownPhoto } from "./lib/photos";
+import { useMemo } from "react";
 import { useServices } from "./context";
 import { useAsync } from "./lib/useAsync";
 import type { RegionInfo, StaticIndex } from "./products/types";
@@ -62,4 +64,19 @@ export function useRegionIndex(region: string) {
 export function useTaxa(region: string) {
   const { products } = useServices();
   return useAsync(() => products.taxa(region), [products, region]);
+}
+
+/** Usable photos by taxon id, from the region's taxa.json (empty until it loads). */
+export function usePhotos(region: string): Map<string, ShownPhoto> {
+  const { products } = useServices();
+  const taxa = useTaxa(region);
+  return useMemo(() => {
+    const out = new Map<string, ShownPhoto>();
+    if (taxa?.status !== "ok") return out;
+    for (const t of taxa.data) {
+      const p = usablePhoto(t.photo, (path) => products.assetUrl(region, path));
+      if (p) out.set(t.id, p);
+    }
+    return out;
+  }, [taxa, products, region]);
 }

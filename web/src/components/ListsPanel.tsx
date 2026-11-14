@@ -6,6 +6,9 @@ import { newForYou, type GroupView, type ListItem, type ListsView } from "../lib
 import { Chance, ConfidenceMeter } from "./Confidence";
 import { CheckIcon, PlusIcon } from "./Icons";
 import { LicenseNote } from "./License";
+import { PhotoCredits, SpeciesThumb } from "./SpeciesPhoto";
+import { usePhotos } from "../hooks";
+import type { ShownPhoto } from "../lib/photos";
 
 /** Rows shown before "Show all". */
 const FIRST = 10;
@@ -30,7 +33,21 @@ function SeenToggle({ id, name }: { id: string; name: string }) {
   );
 }
 
-function Item({ region, it, rank, extra }: { region: string; it: ListItem; rank?: number; extra?: ReactNode }) {
+function Item({
+  region,
+  it,
+  rank,
+  extra,
+  photo,
+  group,
+}: {
+  region: string;
+  it: ListItem;
+  rank?: number;
+  extra?: ReactNode;
+  photo?: ShownPhoto;
+  group?: string;
+}) {
   return (
     <li className="item">
       {rank !== undefined && (
@@ -38,6 +55,7 @@ function Item({ region, it, rank, extra }: { region: string; it: ListItem; rank?
           {rank}
         </span>
       )}
+      <SpeciesThumb photo={photo} group={group} />
       <div className="item-main">
         <Link to={`/r/${region}/species/${encodeURIComponent(it.taxonId)}`} className="item-name">
           {it.name}
@@ -92,6 +110,7 @@ const TABS: { id: Tab; label: string; hint: string; empty: string }[] = [
 export function ListsPanel({ region, view }: { region: string; view: ListsView }) {
   const selectId = useId();
   const { seen } = useLifeList();
+  const photos = usePhotos(region);
   const [groupId, setGroupId] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("likely");
   const [all, setAll] = useState(false);
@@ -173,6 +192,8 @@ export function ListsPanel({ region, view }: { region: string; view: ListsView }
                     key={it.taxonId}
                     region={region}
                     it={it}
+                    photo={photos.get(it.taxonId)}
+                    group={g.id.split(":")[0]}
                     rank={tab === "likely" ? i + 1 : undefined}
                     extra={extra(it)}
                   />
@@ -184,6 +205,12 @@ export function ListsPanel({ region, view }: { region: string; view: ListsView }
                 {all ? "Show fewer" : `Show all ${rows.length}`}
               </button>
             )}
+            <PhotoCredits
+              items={shown.flatMap((it) => {
+                const photo = photos.get(it.taxonId);
+                return photo ? [{ name: it.name, photo }] : [];
+              })}
+            />
             <LicenseNote license={g.license} />
           </section>
         </>

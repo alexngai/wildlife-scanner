@@ -20,7 +20,16 @@ function folderBucket(): Plugin {
       res.end("not found");
       return;
     }
-    res.setHeader("Content-Type", file.endsWith(".json") ? "application/json" : "text/plain");
+    const type: Record<string, string> = {
+      ".json": "application/json",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".png": "image/png",
+      ".webp": "image/webp",
+      ".svg": "image/svg+xml",
+    };
+    const ext = /\.[a-z0-9]+$/i.exec(file)?.[0].toLowerCase() ?? "";
+    res.setHeader("Content-Type", type[ext] ?? "text/plain");
     res.setHeader("Cache-Control", file.endsWith("CURRENT") ? "no-cache" : "max-age=60");
     createReadStream(file).pipe(res);
     void next;
