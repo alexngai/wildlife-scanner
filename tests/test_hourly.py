@@ -198,6 +198,27 @@ def test_hourly_forecast_end_to_end_and_policy(store, tmp_path):  # noqa: F811
     ).json()
     assert coarse["hours"] == [] and any("openly mapped" in n for n in coarse["notes"])
     assert json.dumps(body)  # serializable
+    # The batch daily forecast: every cell of the week's map, Level 0 without a model.
+    batch = client.get(
+        "/species/vernalis-litoralis/forecast/map", params={"date": "2026-01-19"}
+    ).json()
+    smap = client.get("/species/vernalis-litoralis/map", params={"date": "2026-01-19"}).json()
+    assert {c["cell"] for c in batch["cells"]} == {c["cell"] for c in smap["cells"]}
+    assert batch["level"] == 0 and all(c["p"] == c["p_level0"] for c in batch["cells"])
+    picked = smap["cells"][0]["cell"]
+    one = client.get(
+        "/species/vernalis-litoralis/forecast/map",
+        params={"date": "2026-01-19", "cells": f"{picked},not-a-cell"},
+    ).json()
+    assert [c["cell"] for c in one["cells"]] == [picked]
+    too_many = ",".join(["x"] * 2001)
+    r = client.get("/species/vernalis-litoralis/forecast/map", params={"cells": too_many})
+    assert r.status_code == 400
+    coarse_map = client.get(
+        "/species/raritas-orientalis/forecast/map", params={"date": "2026-01-19"}
+    ).json()
+    assert coarse_map["level"] == 0 and any("openly mapped" in n for n in coarse_map["notes"])
+    assert client.get("/species/secretus-maximus/forecast/map").status_code == 404
 
 
 def test_hourly_taxa_are_picked_across_groups():

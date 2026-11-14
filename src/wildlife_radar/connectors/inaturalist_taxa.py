@@ -110,6 +110,38 @@ def parse_taxon_statuses(
     )
 
 
+OPEN_PHOTO_LICENSES = ("cc0", "cc-by", "cc-by-sa", "cc-by-nc", "cc-by-nc-sa")
+"""Licences a representative photo may carry: open, attribution kept. All rights reserved
+(``license_code`` null) and the no-derivatives licences are skipped."""
+OPEN_DATA_HOST = "inaturalist-open-data.s3.amazonaws.com"
+
+
+def open_photo(record: dict) -> dict | None:
+    """The first openly licensed photo of an iNaturalist taxon record, as published in
+    ``taxa.json`` (hotlinked from iNaturalist's open-data bucket; docs/design/static-products.md).
+
+    Walks ``taxon_photos`` in iNaturalist's order: the default photo is often all rights
+    reserved. Only photos on the open-data bucket qualify."""
+    for tp in record.get("taxon_photos") or []:
+        photo = tp.get("photo") or {}
+        url = photo.get("url") or ""
+        if photo.get("license_code") not in OPEN_PHOTO_LICENSES:
+            continue
+        if not url.startswith(f"https://{OPEN_DATA_HOST}/photos/") or "/square." not in url:
+            continue
+        if not photo.get("attribution") or not photo.get("id"):
+            continue
+        return {
+            "url": url,
+            "url_medium": url.replace("/square.", "/small."),
+            "license": photo["license_code"],
+            "attribution": photo["attribution"],
+            "source": "iNaturalist",
+            "source_url": f"https://www.inaturalist.org/photos/{int(photo['id'])}",
+        }
+    return None
+
+
 RECORDS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS inat_taxon_records (
     taxon_id VARCHAR PRIMARY KEY, inat_id VARCHAR, record JSON, fetched_at TIMESTAMP

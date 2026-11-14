@@ -213,6 +213,21 @@ def publish_bundle(
             result.rows["taxon_names"] = conn.execute(
                 "SELECT count(*) FROM bundle.taxon_names"
             ).fetchone()[0]
+        if "inat_taxon_records" in present:
+            # One openly licensed photo per visible taxon, from the cached iNaturalist records.
+            from wildlife_radar.connectors.inaturalist_taxa import open_photo
+
+            conn.execute("CREATE TABLE bundle.taxon_photos (taxon_id VARCHAR, photo JSON)")
+            photos = []
+            for taxon_id, record in conn.execute(
+                f"SELECT taxon_id, record FROM inat_taxon_records WHERE taxon_id IN {visible}"
+            ).fetchall():
+                photo = open_photo(json.loads(record)) if record else None
+                if photo:
+                    photos.append((taxon_id, json.dumps(photo)))
+            if photos:
+                conn.executemany("INSERT INTO bundle.taxon_photos VALUES (?, ?)", photos)
+            result.rows["taxon_photos"] = len(photos)
         if "observations" in present:
             result.rows.update(_recent(conn, region, registry, config or BaselineConfig(), now))
         if freshness is not None:
