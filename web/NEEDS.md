@@ -124,3 +124,24 @@ finer is revealed. Until then the app fetches the map files for the first few re
 Real data mixes "coyote brush" and "coastal sagewort" with "European Searocket" and "Alkali
 Heath" in the same list. The app shows names as published. Normalising at ingest, or
 preferring a source with consistent case, would read better.
+
+## 13. A day's forecast for many cells in one call
+
+**What:** e.g. `GET /species/{id}/forecast/map?date=…&cells=…` (or for the whole map), returning each
+cell's `p`, `p_level0` and drivers for that day.
+
+**Why:** the species map's "Today's conditions" overlay compares the day's forecast with the usual
+chance in the week's 12 highest cells. Today that's 12 calls to `/species/{id}/forecast`, one per
+cell (about 0.2 s each locally). One call would let the overlay cover every cell and cost the API
+less.
+
+## 14. Monterey Bay build: the signals and conditions stages fail
+
+Seen in a full `run publish --region montereybay` (not app code, for the data session):
+- `signals`: `ConnectorError: No Predictions data was found. Please make sure the Datum input is
+  valid.` (tide predictions);
+- `conditions`: `CatalogException: Table with name signal_daily does not exist`, which follows
+  from the first error;
+- so `nowcast` and the final `publish` were skipped. Running `publish --region montereybay`
+  separately worked. Without conditions, every forecast is Level 0, with the note "no condition
+  model has passed its backtest gate".

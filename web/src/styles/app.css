@@ -16,6 +16,8 @@
   --na-bg: #eef0f3;
   --presence: #b4630e;
   --insufficient: #9aa1a9;
+  --lift-up: #e66101;
+  --lift-down: #5e3c99;
   --focus: #e07a00;
   --bar: #1fa187;
   --bar-current: #3a528b;
@@ -42,6 +44,8 @@
     --na-bg: #232830;
     --presence: #e0a458;
     --insufficient: #8a9099;
+    --lift-up: #ff8a3d;
+    --lift-down: #8e6cc9;
     --focus: #ffb347;
     --bar: #4ac16d;
     --bar-current: #fde725;
@@ -67,6 +71,8 @@
   --na-bg: #232830;
   --presence: #e0a458;
   --insufficient: #8a9099;
+  --lift-up: #ff8a3d;
+  --lift-down: #8e6cc9;
   --focus: #ffb347;
   --bar: #4ac16d;
   --bar-current: #fde725;
@@ -444,6 +450,29 @@ input[type="search"] {
   display: block;
 }
 
+.result-ribbon {
+  display: block;
+  margin-top: 4px;
+}
+
+.ribbon {
+  display: block;
+  overflow: visible;
+}
+
+.ribbon-bar {
+  fill: var(--accent);
+}
+
+.ribbon-presence {
+  fill: var(--presence);
+  opacity: 0.7;
+}
+
+.ribbon-now {
+  fill: var(--text);
+}
+
 .browse {
   margin-top: 12px;
 }
@@ -485,6 +514,39 @@ details.more > p {
   overflow: hidden;
   border: 1px solid var(--border);
   background: var(--surface-2);
+}
+
+.map.map-short {
+  height: 40vh;
+  min-height: 240px;
+  max-height: 380px;
+}
+
+.hotspot-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+  display: grid;
+  gap: 8px;
+}
+
+.hotspot {
+  display: grid;
+  gap: 4px;
+}
+
+.hotspot-bar {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.hotspot-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
 }
 
 .map-placeholder {
@@ -597,6 +659,48 @@ details.more > p {
 .segmented button[aria-pressed="true"] {
   background: var(--accent);
   color: var(--accent-text);
+}
+
+button.toggle {
+  min-height: 36px;
+  padding: 4px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+button.toggle[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.conditions-panel {
+  margin: 4px 0 8px;
+}
+
+.swatch-dot {
+  border-radius: 999px;
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.dot-up {
+  background: var(--lift-up);
+}
+
+.dot-down {
+  background: var(--lift-down);
+}
+
+.dot-same {
+  background: transparent;
+  border-color: var(--muted);
+  box-shadow: none;
 }
 
 .wr-popup .maplibregl-popup-content {

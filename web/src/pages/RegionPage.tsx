@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { Link, useParams } from "react-router";
+import { Hotspots } from "../components/Hotspots";
 import { SpeciesSearch } from "../components/SpeciesSearch";
 import { Async } from "../components/Status";
 import { rememberRegion, useRegionIndex, useTaxa } from "../hooks";
@@ -50,6 +51,7 @@ export function RegionPage() {
               )}
             </Async>
           </section>
+          <Hotspots region={region} index={idx} />
           <section aria-labelledby="places-h" className="section">
             <h2 id="places-h">Places</h2>
             <p>

@@ -19,6 +19,19 @@ export interface MapPlace {
   name: string;
   lat: number;
   lon: number;
+  /** 0-1: when given, the dot is sized and coloured by it (hotspots); null = no data. */
+  value?: number | null;
+  /** Extra text for the place's hover / tap popup. */
+  note?: string;
+}
+
+/** A point drawn over the cells, e.g. today's forecast against the usual chance. */
+export interface MapMarker {
+  lat: number;
+  lon: number;
+  /** -1 below usual, 0 about the same, 1 above. */
+  direction: -1 | 0 | 1;
+  text: string;
 }
 
 export interface MapViewProps {
@@ -39,10 +52,26 @@ export interface MapViewProps {
   describe?: (cell: CellFeatureProps) => string;
   /** Accessible description of what the map shows (the map itself isn't readable by screen readers). */
   label: string;
+  markers?: MapMarker[];
+  /** A shorter map, for overviews. */
+  short?: boolean;
 }
 
 const SRC = "wr-cells";
+const NO_MARKERS: MapMarker[] = [];
 const PLACES = "wr-places";
+const MARKERS = "wr-markers";
+
+function markersData(markers: MapMarker[]): GeoData {
+  return {
+    type: "FeatureCollection",
+    features: markers.map((m) => ({
+      type: "Feature",
+      properties: { direction: m.direction, popup: m.text },
+      geometry: { type: "Point", coordinates: [m.lon, m.lat] },
+    })),
+  } as GeoData;
+}
 
 function blankStyle(theme: "light" | "dark"): StyleSpecification {
   return {
@@ -112,12 +141,32 @@ function hatchImage(theme: "light" | "dark"): { width: number; height: number; d
   return { width: size, height: size, data };
 }
 
+/** Plain dots, or sized by value (5-22 px) when places carry one. */
+function placeRadius(selected: string | null): Expr {
+  return [
+    "+",
+    ["case", ["==", ["get", "id"], selected ?? ""], 2, 0],
+    ["case", [">=", ["get", "value"], 0], ["+", 6, ["*", 16, ["sqrt", ["get", "value"]]]], 5],
+  ] as unknown as Expr;
+}
+
+function placeColor(theme: "light" | "dark"): Expr {
+  const ramp = rampFor(theme);
+  const plain = theme === "dark" ? "#ffffff" : "#1b1f24";
+  return [
+    "case",
+    [">=", ["get", "value"], 0],
+    ["interpolate", ["linear"], ["get", "value"], 0, ramp[1] ?? plain, 0.5, ramp[3] ?? plain, 1, ramp[5] ?? plain],
+    plain,
+  ] as unknown as Expr;
+}
+
 function placesData(places: MapPlace[]): GeoData {
   return {
     type: "FeatureCollection",
     features: places.map((p) => ({
       type: "Feature",
-      properties: { id: p.id, name: p.name },
+      properties: { id: p.id, name: p.name, value: p.value ?? -1, popup: p.note ? `${p.name}: ${p.note}` : p.name },
       geometry: { type: "Point", coordinates: [p.lon, p.lat] },
     })),
   } as GeoData;
@@ -157,14 +206,43 @@ function addLayers(map: maplibregl.Map, s: Latest) {
     paint: { "line-color": dark ? "#ffffff" : "#111111", "line-width": 2.5 },
   });
 
+  const lift = liftRampFor(s.theme);
+  map.addSource(MARKERS, { type: "geojson", data: markersData(s.markers) });
+  map.addLayer({
+    id: "wr-markers",
+    type: "circle",
+    source: MARKERS,
+    paint: {
+      "circle-radius": ["case", ["==", ["get", "direction"], 0], 5, 8],
+      // "About usual" is a hollow ring, so it isn't mistaken for a place dot.
+      "circle-opacity": ["case", ["==", ["get", "direction"], 0], 0, 1],
+      "circle-color": [
+        "match",
+        ["get", "direction"],
+        1,
+        lift[4] ?? "#e66101",
+        -1,
+        lift[0] ?? "#5e3c99",
+        dark ? "#c3c8cf" : "#5b6168",
+      ] as unknown as Expr,
+      "circle-stroke-color": [
+        "case",
+        ["==", ["get", "direction"], 0],
+        dark ? "#c3c8cf" : "#5b6168",
+        dark ? "#1b1f24" : "#ffffff",
+      ] as unknown as Expr,
+      "circle-stroke-width": 2,
+    },
+  });
+
   map.addSource(PLACES, { type: "geojson", data: placesData(s.places) });
   map.addLayer({
     id: "wr-places",
     type: "circle",
     source: PLACES,
     paint: {
-      "circle-radius": ["case", ["==", ["get", "id"], s.selectedPlace ?? ""], 7, 5],
-      "circle-color": dark ? "#ffffff" : "#1b1f24",
+      "circle-radius": placeRadius(s.selectedPlace),
+      "circle-color": placeColor(s.theme),
       "circle-stroke-color": dark ? "#1b1f24" : "#ffffff",
       "circle-stroke-width": 2,
     },
@@ -197,6 +275,7 @@ interface Latest {
   metric: MapMetric;
   selectedCell: string | null;
   places: MapPlace[];
+  markers: MapMarker[];
   selectedPlace: string | null;
   onSelect?: MapViewProps["onSelect"];
   onPlace?: MapViewProps["onPlace"];
@@ -216,12 +295,14 @@ export default function MapView({
   onPlace,
   describe,
   label,
+  short = false,
+  markers = NO_MARKERS,
 }: MapViewProps) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
-  const latest = useRef<Latest>({ data, theme, metric, selectedCell, places, selectedPlace, onSelect, onPlace, describe });
+  const latest = useRef<Latest>({ data, theme, metric, selectedCell, places, markers, selectedPlace, onSelect, onPlace, describe });
   useLayoutEffect(() => {
-    latest.current = { data, theme, metric, selectedCell, places, selectedPlace, onSelect, onPlace, describe };
+    latest.current = { data, theme, metric, selectedCell, places, markers, selectedPlace, onSelect, onPlace, describe };
   });
 
   // Create the map once.
@@ -252,8 +333,11 @@ export default function MapView({
       }
     });
 
-    const placeAt = (e: MapLayerMouseEvent) =>
-      map.getLayer("wr-places") ? map.queryRenderedFeatures(e.point, { layers: ["wr-places"] })[0] : undefined;
+    // Points drawn over the cells (places, markers) take hover and taps before the cell under them.
+    const overlayAt = (e: MapLayerMouseEvent) => {
+      const layers = ["wr-places", "wr-markers"].filter((l) => map.getLayer(l));
+      return layers.length > 0 ? map.queryRenderedFeatures(e.point, { layers })[0] : undefined;
+    };
     const showCell = (e: MapLayerMouseEvent) => {
       const props = e.features?.[0]?.properties as CellFeatureProps | undefined;
       const text = props && latest.current.describe?.(props);
@@ -261,22 +345,30 @@ export default function MapView({
     };
 
     map.on("click", "wr-fill", (e: MapLayerMouseEvent) => {
-      if (placeAt(e)) return; // the place handles it
+      const over = overlayAt(e);
+      if (over?.layer.id === "wr-places") return; // the place handles it
       const f = e.features?.[0];
-      showCell(e);
+      const markerText = over?.properties?.popup as string | undefined;
+      if (markerText) popup.setLngLat(e.lngLat).setText(markerText).addTo(map);
+      else showCell(e);
       latest.current.onSelect?.({ lat: e.lngLat.lat, lon: e.lngLat.lng, cell: (f?.properties?.cell as string) ?? null });
     });
     map.on("mousemove", "wr-fill", (e: MapLayerMouseEvent) => {
-      if (!placeAt(e)) showCell(e);
+      if (!overlayAt(e)) showCell(e);
     });
     map.on("mouseleave", "wr-fill", () => popup.remove());
     map.on("click", "wr-places", (e: MapLayerMouseEvent) => {
       const id = e.features?.[0]?.properties?.id as string | undefined;
       if (id) latest.current.onPlace?.(id);
     });
+    map.on("mousemove", "wr-markers", (e: MapLayerMouseEvent) => {
+      const text = e.features?.[0]?.properties?.popup as string | undefined;
+      if (text) popup.setLngLat(e.lngLat).setText(text).addTo(map);
+    });
+    map.on("mouseleave", "wr-markers", () => popup.remove());
     map.on("mousemove", "wr-places", (e: MapLayerMouseEvent) => {
-      const name = e.features?.[0]?.properties?.name as string | undefined;
-      if (name) popup.setLngLat(e.lngLat).setText(name).addTo(map);
+      const text = e.features?.[0]?.properties?.popup as string | undefined;
+      if (text) popup.setLngLat(e.lngLat).setText(text).addTo(map);
     });
     for (const layer of ["wr-fill", "wr-places"]) {
       map.on("mouseenter", layer, () => (map.getCanvas().style.cursor = "pointer"));
@@ -319,6 +411,11 @@ export default function MapView({
   }, [selectedCell]);
 
   useEffect(() => {
+    const src = mapRef.current?.getSource(MARKERS) as GeoJSONSource | undefined;
+    src?.setData(markersData(markers));
+  }, [markers]);
+
+  useEffect(() => {
     const src = mapRef.current?.getSource(PLACES) as GeoJSONSource | undefined;
     src?.setData(placesData(places));
   }, [places]);
@@ -326,7 +423,7 @@ export default function MapView({
   useEffect(() => {
     const map = mapRef.current;
     if (map?.getLayer("wr-places"))
-      map.setPaintProperty("wr-places", "circle-radius", ["case", ["==", ["get", "id"], selectedPlace ?? ""], 7, 5]);
+      map.setPaintProperty("wr-places", "circle-radius", placeRadius(selectedPlace));
   }, [selectedPlace]);
 
   useEffect(() => {
@@ -339,5 +436,5 @@ export default function MapView({
     mapRef.current?.getCanvas().setAttribute("aria-label", label);
   }, [label]);
 
-  return <div ref={container} className="map" data-testid="map" />;
+  return <div ref={container} className={short ? "map map-short" : "map"} data-testid="map" />;
 }

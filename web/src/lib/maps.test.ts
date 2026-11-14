@@ -8,6 +8,8 @@ import {
   isPresenceOnly,
   liftBinFor,
   liftFor,
+  peakRuns,
+  seasonRibbon,
   presenceCells,
   segmentForWeek,
   toGeoJSON,
@@ -88,5 +90,23 @@ describe("species maps", () => {
     const insufficient = geo.features.filter((f) => f.properties.insufficient);
     expect(insufficient.every((f) => f.properties.lift === null && f.properties.liftBin === -1)).toBe(true);
     expect([0.3, 0.6, 1, 1.5, 3].map(liftBinFor)).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it("builds a 52-week season ribbon: values, presence-only and withheld weeks", () => {
+    const r = seasonRibbon(secundus);
+    expect(r).toHaveLength(52);
+    expect(r[1]).toEqual({ kind: "none" }); // week 2 withheld
+    expect(r[26]).toEqual({ kind: "presence" }); // week 27: awareness-only summer
+    expect(r[39]?.kind).toBe("value");
+    expect(seasonRibbon(rarus).every((w) => w.kind !== "value")).toBe(true);
+    const runs = peakRuns(seasonRibbon(primus));
+    expect(runs.length).toBe(1);
+    expect(runs[0]![0]).toBeLessThanOrEqual(20);
+    expect(runs[0]![1]).toBeGreaterThanOrEqual(20);
+  });
+
+  it("joins a peak across the new year into one run", () => {
+    const r = Array.from({ length: 52 }, (_, i) => ({ kind: "value" as const, p: i < 2 || i > 49 ? 1 : 0.1 }));
+    expect(peakRuns(r)).toEqual([[51, 2]]);
   });
 });
