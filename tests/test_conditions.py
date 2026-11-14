@@ -275,6 +275,26 @@ def test_forecast_uses_gated_levels_and_explains(world):
     flat = service.forecast("piscis-indifferens", *SITE, warm)
     assert flat.level == 0 and flat.p == flat.p_level0
     assert any("gate" in n for n in flat.notes)
+    # The batch form: every cell of the week's map, each equal to the single-cell forecast.
+    import h3
+
+    batch = service.forecast_map("piscis-calida", warm)
+    assert batch.level == hot.level and batch.cells
+    by_cell = {c.cell: c for c in batch.cells}
+    assert hot.cell in by_cell
+    # (The batch starts from the map's baseline, rounded to 6 decimals.)
+    assert abs(by_cell[hot.cell].p - hot.p) < 2e-6
+    assert abs(by_cell[hot.cell].p_level0 - hot.p_level0) < 2e-6
+    lat, lon = h3.cell_to_latlng(batch.cells[-1].cell)
+    one = service.forecast("piscis-calida", lat, lon, warm)
+    assert abs(by_cell[one.cell].p - one.p) < 2e-6
+    assert by_cell[one.cell].drivers == one.drivers
+    some = service.forecast_map("piscis-calida", warm, cells=[hot.cell, "8a2a1072b59ffff"])
+    assert [c.cell for c in some.cells] == [hot.cell] and any(
+        "not on this map" in n for n in some.notes
+    )
+    gated = service.forecast_map("piscis-indifferens", warm)
+    assert gated.level == 0 and all(c.p == c.p_level0 for c in gated.cells)
 
 
 def test_nowcast_for_open_taxa_without_profiles(world):

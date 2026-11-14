@@ -12,6 +12,7 @@ from test_publish import NOW, store  # noqa: F401  (fixture)
 from wildlife_radar.conditions import timed
 from wildlife_radar.connectors.astronomy import daily_events
 from wildlife_radar.pipeline.runner import Job, JobContext, run
+from wildlife_radar.policy.statuses import TIERS_SCHEMA
 from wildlife_radar.regions import load_region
 
 LA_JOLLA = (32.867, -117.257)
@@ -127,11 +128,18 @@ def test_timed_job_scores_profiled_species(tmp_path):
         work.conn.execute(
             "CREATE TABLE prior_taxa AS SELECT 'sandiego' AS region_id, "
             "'atractoscion-nobilis' AS taxon_id, 'fishes' AS taxon_group, "
-            "'Atractoscion nobilis' AS scientific_name, 50 AS n_visits"
+            "'Atractoscion nobilis' AS scientific_name, 50 AS n_visits "
+            "UNION ALL SELECT 'sandiego', 'larus-occidentalis', 'birds', 'Larus occidentalis', 900"
+        )
+        work.conn.execute(TIERS_SCHEMA)
+        work.conn.execute(
+            "INSERT INTO tiers (region_id, taxon_id, tier) "
+            "VALUES ('sandiego', 'larus-occidentalis', 0)"
         )
         work.conn.execute(
             "CREATE TABLE inat_taxon_records AS SELECT 'atractoscion-nobilis' AS taxon_id, "
-            "'9999' AS inat_id, '{}'::JSON AS record, now()::TIMESTAMP AS fetched_at"
+            "'9999' AS inat_id, '{}'::JSON AS record, now()::TIMESTAMP AS fetched_at "
+            "UNION ALL SELECT 'larus-occidentalis', '7777', '{}'::JSON, now()::TIMESTAMP"
         )
     s = timed.HourSignals(*LA_JOLLA)
     taxon, effort = _counts(s, 1.2)
@@ -150,7 +158,8 @@ def test_timed_job_scores_profiled_species(tmp_path):
     out = result["outcome"]
     assert isinstance(out, dict), out
     assert out["taxa"]["atractoscion-nobilis"]["verdicts"]["hours_after_sunset"] == "supported"
-    assert hist.calls == [("9999",), ("47178", "47273")]
+    assert "larus-occidentalis" in out["taxa"]  # picked by group, not only profiled species
+    assert set(hist.calls) == {("9999",), ("47178", "47273"), ("7777",), ("3",)}
     conn = duckdb.connect(str(db), read_only=True)
     signals = {r[0] for r in conn.execute("SELECT DISTINCT signal FROM timed_index").fetchall()}
     assert signals == {
@@ -163,7 +172,7 @@ def test_timed_job_scores_profiled_species(tmp_path):
     # The hourly model ran and was stored (gate outcome depends on the synthetic counts).
     assert "passes" in out["taxa"]["atractoscion-nobilis"]["hourly"]
     stored = conn.execute("SELECT count(*) FROM hourly_models").fetchone()[0]
-    assert stored == 1
+    assert stored == 2  # the profiled species and the group-picked one
 
 
 def test_timing_is_published_for_open_and_generalized_taxa_only(store, tmp_path):  # noqa: F811

@@ -24,3 +24,6 @@ secrets/
 .idea/
 .vscode/
 .DS_Store
+
+# DuckDB spill files (large sorts and partitioned writes)
+.tmp/

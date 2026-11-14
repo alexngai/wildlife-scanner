@@ -20,12 +20,14 @@ import csv
 import glob
 import os
 import re
+import shutil
 import struct
 import tempfile
 import threading
 import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import UTC, datetime
 from multiprocessing import get_context
 from pathlib import Path
 
@@ -60,6 +62,11 @@ KEEP = (
     "mediatype",
     "issue",
     "eventid",
+    # occurrenceid carries iNaturalist's observation URL: without it a snapshot row can't be
+    # matched with its live API copy (same dedupe key), and both are kept.
+    "occurrenceid",
+    "scientificname",
+    "lastinterpreted",
 )
 GAP = 512 * 1024
 """Coalesce byte ranges separated by less than this."""
@@ -235,8 +242,7 @@ class _Extractor:
                 cols = ", ".join(c if c in present else f"NULL::VARCHAR AS {c}" for c in KEEP)
                 out = self.staging / f"{name}.parquet"
                 db.execute(
-                    f"COPY (SELECT {cols}, NULL::VARCHAR AS occurrenceid, "
-                    f"NULL::VARCHAR AS scientificname FROM read_parquet('{path}') WHERE {where}) "
+                    f"COPY (SELECT {cols} FROM read_parquet('{path}') WHERE {where}) "
                     f"TO '{out}' (FORMAT parquet, COMPRESSION zstd)"
                 )
             done.write_text(str(n), encoding="utf-8")
@@ -280,53 +286,166 @@ def extract_region(
 # -- Ingestion ----------------------------------------------------------------------------------
 
 
-def _parse_chunk(args: tuple[str, list[str], Bbox]) -> tuple[str, int]:
-    from wildlife_radar.connectors.gbif_snapshot import snapshot_observations
-    from wildlife_radar.storage.observations import _csv_value, observation_row
+ROWS_PER_CHUNK = 500_000
 
-    out, files, bbox = args
+# A slice of one staged file: (path, first row, end row).
+Segment = tuple[str, int, int]
+
+
+def _segments(files: list[str], rows_per_chunk: int = ROWS_PER_CHUNK) -> list[list[Segment]]:
+    """Work units of about ``rows_per_chunk`` rows: big files (a coverage tile can hold tens of
+    millions of rows) are cut into row ranges; small files are grouped."""
+    con = duckdb.connect()
+    chunks: list[list[Segment]] = []
+    current: list[Segment] = []
+    size = 0
+    for f in files:
+        quoted = "'" + f.replace("'", "''") + "'"
+        (n,) = con.execute(
+            f"SELECT coalesce(sum(row_group_num_rows), 0) FROM "
+            f"(SELECT DISTINCT row_group_id, row_group_num_rows FROM parquet_metadata({quoted}))"
+        ).fetchone()
+        for start in range(0, max(int(n), 1), rows_per_chunk):
+            end = min(start + rows_per_chunk, int(n))
+            current.append((f, start, end))
+            size += end - start
+            if size >= rows_per_chunk:
+                chunks.append(current)
+                current, size = [], 0
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _parse_chunk(args: tuple[str, list[Segment], Bbox]) -> tuple[str, int]:
+    """Parse one work unit into store rows, written as a compressed Parquet part (the CSV is
+    only a step and is deleted at once, so scratch space stays small)."""
+    from wildlife_radar.connectors.gbif_snapshot import snapshot_observations
+    from wildlife_radar.storage import ObservationStore
+    from wildlife_radar.storage.observations import CSV_OPTIONS, _csv_value, observation_row
+
+    out, segments, bbox = args
+    tmp = out + ".csv"
     n = 0
-    with open(out, "w", newline="", encoding="utf-8") as fh:
+    with open(tmp, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
-        for obs in snapshot_observations(files, bbox):
-            w.writerow("" if v is None else _csv_value(v) for v in observation_row(obs))
-            n += 1
+        for path, start, end in segments:
+            for obs in snapshot_observations(path, bbox, row_range=(start, end)):
+                w.writerow("" if v is None else _csv_value(v) for v in observation_row(obs))
+                n += 1
+    if n == 0:  # nothing of this slice inside the box
+        os.remove(tmp)
+        return out, 0
+    with ObservationStore() as mem:
+        mem.conn.execute(f"COPY observations FROM '{tmp}' ({CSV_OPTIONS})")
+        mem.conn.execute(f"COPY observations TO '{out}' (FORMAT parquet, COMPRESSION zstd)")
+    os.remove(tmp)
     return out, n
 
 
 def ingest_staged(
-    db: str | Path, staging: str | Path, bbox: Bbox, workers: int = 4, log: Log = print
+    db: str | Path,
+    staging: str | Path | list[str],
+    bbox: Bbox,
+    workers: int = 4,
+    log: Log = print,
+    reconcile_taken: datetime | None = None,
+    live_keys: list[str] | None = None,
 ) -> dict:
-    """Parse staged rows in ``workers`` processes and bulk-load them into the store at ``db``."""
+    """Parse staged rows (a folder of Parquet files, or a list of files) in ``workers``
+    processes and bulk-load them into the store at ``db``.
+
+    With ``reconcile_taken`` (when the snapshot was taken), these rows are a complete
+    snapshot of ``bbox``: GBIF rows from earlier ingests that it lacks are deleted (deleted or
+    withdrawn at the source). Rows of ``live_keys`` datasets pulled from the API after the
+    snapshot was taken are kept: they may simply be newer than it."""
     from wildlife_radar.storage import ObservationStore
 
-    files = sorted(glob.glob(os.path.join(str(staging), "*.parquet")))
+    started = datetime.now(UTC).replace(tzinfo=None)
+
+    if isinstance(staging, list):
+        files = sorted(staging)
+    else:
+        files = sorted(glob.glob(os.path.join(str(staging), "*.parquet")))
     if not files:
         raise RuntimeError(f"no staged rows in {staging}")
     tmpdir = tempfile.mkdtemp(prefix="ingest-", dir=os.path.dirname(os.path.abspath(db)))
-    n_chunks = workers * 4
     chunks = [
-        (os.path.join(tmpdir, f"rows-{i}.csv"), files[i::n_chunks], bbox) for i in range(n_chunks)
+        (os.path.join(tmpdir, f"rows-{i}.parquet"), segs, bbox)
+        for i, segs in enumerate(_segments(files))
     ]
-    chunks = [c for c in chunks if c[1]]
     t0 = time.time()
     with get_context("spawn").Pool(workers) as pool:
-        results = pool.map(_parse_chunk, chunks)
+        results = []
+        for i, res in enumerate(pool.imap_unordered(_parse_chunk, chunks), 1):
+            results.append(res)
+            if i % 20 == 0 or i == len(chunks):
+                log(f"parsed {i}/{len(chunks)} chunks ({time.time() - t0:.0f}s)")
     parsed = sum(n for _, n in results)
     log(f"parsed {parsed:,} rows in {time.time() - t0:.0f}s")
     t1 = time.time()
     with ObservationStore(db) as store:
         conn = store.conn
-        conn.execute("CREATE OR REPLACE TEMP TABLE _staging AS SELECT * FROM observations LIMIT 0")
-        for path, _ in results:
-            conn.execute(f"COPY _staging FROM '{path}' (FORMAT csv, HEADER false, NULLSTR '')")
-            os.remove(path)
-        conn.execute(
-            "INSERT OR REPLACE INTO observations SELECT * FROM _staging QUALIFY "
-            "row_number() OVER (PARTITION BY dedupe_key ORDER BY ingested_at DESC) = 1"
-        )
-        conn.execute("DROP TABLE _staging")
+        parts = [p for p, n in results if n]
+        src = "[" + ", ".join(f"'{p}'" for p in parts) + "]"
+        removed = 0
+        # Order doesn't matter, and not keeping it lets DuckDB stream and spill.
+        conn.execute("SET preserve_insertion_order = false")
+        # One transaction: reconcile, drop the old versions of incoming keys, insert. Cheaper
+        # than INSERT OR REPLACE, which checks every row against the key index and ran out
+        # of memory re-loading 24 M rows into a store that already held them.
+        conn.begin()
+        try:
+            # No rows at all is more likely a failed extract than an empty area: delete nothing.
+            if reconcile_taken is not None and parts:
+                lon_min, lat_min, lon_max, lat_max = bbox
+                before = conn.execute("SELECT count(*) FROM observations").fetchone()[0]
+                conn.execute(
+                    f"""
+                    DELETE FROM observations
+                    WHERE source_id = 'gbif' AND ingested_at < ?
+                      AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?
+                      AND dedupe_key NOT IN (SELECT dedupe_key FROM read_parquet({src}))
+                      AND (coalesce(dataset_key, '') NOT IN (SELECT unnest(?)) OR ingested_at < ?)
+                    """,
+                    [
+                        started,
+                        lat_min,
+                        lat_max,
+                        lon_min,
+                        lon_max,
+                        list(live_keys or []),
+                        reconcile_taken.replace(tzinfo=None),
+                    ],
+                )
+                removed = before - conn.execute("SELECT count(*) FROM observations").fetchone()[0]
+                log(f"reconciled: {removed:,} GBIF rows no longer in the snapshot removed")
+            if parts:
+                # A record pulled live (e.g. from iNaturalist) after the snapshot was taken is
+                # newer than the snapshot's copy of it: keep the live row.
+                keep = (
+                    "source_id <> 'gbif' AND ingested_at >= ?"
+                    if reconcile_taken is not None
+                    else "false AND ?::TIMESTAMP IS NULL"
+                )
+                taken = reconcile_taken.replace(tzinfo=None) if reconcile_taken else None
+                conn.execute(
+                    "DELETE FROM observations WHERE dedupe_key IN "
+                    f"(SELECT dedupe_key FROM read_parquet({src})) AND NOT ({keep})",
+                    [taken],
+                )
+                conn.execute(
+                    f"INSERT INTO observations BY NAME SELECT * FROM read_parquet({src}) "
+                    "WHERE dedupe_key NOT IN (SELECT dedupe_key FROM observations "
+                    f"WHERE {keep}) QUALIFY "
+                    "row_number() OVER (PARTITION BY dedupe_key ORDER BY ingested_at DESC) = 1",
+                    [taken],
+                )
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
         total = store.count()
-    os.rmdir(tmpdir)
+    shutil.rmtree(tmpdir, ignore_errors=True)
     log(f"loaded in {time.time() - t1:.0f}s; store has {total:,} rows")
-    return {"parsed": parsed, "total": total}
+    return {"parsed": parsed, "total": total, "removed": removed}

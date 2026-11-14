@@ -368,11 +368,13 @@ class BaselineQueries:
         return estimate(self._conn.cursor(), self.region.id, level, self.shrinkage, **filters)
 
     def common_name(self, taxon_id: str) -> str | None:
+        from wildlife_radar.core.names import display_common_name
+
         if taxon_id in self._species_profiles:
             name = self.profiles.resolve(taxon_id).common_name
             if name:
-                return name
-        return self._names.get(taxon_id)
+                return display_common_name(name)
+        return display_common_name(self._names.get(taxon_id))
 
     def license_for(self, groups: list[str | None]) -> LicenseInfo:
         infos = [self._licenses[g] for g in groups if g in self._licenses]

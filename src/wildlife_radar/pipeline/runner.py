@@ -98,9 +98,13 @@ def _snapshot(ctx: JobContext) -> dict:
     """Register the store's GBIF snapshot ingest; with ``ingest_snapshots``, first ingest the
     newest complete monthly snapshot if it is newer than the last one ingested.
 
+    A region inside a coverage area (``coverage:`` in its pack) reads that area's snapshot
+    tiles, built once for all its regions, and drops GBIF rows the new snapshot no longer has
+    (deleted or withdrawn at the source; pipeline/coverage.py). Other regions extract their
+    own bounding box.
+
     Reports ``unchanged`` when nothing new arrived, so downstream jobs keep their inputs and a
-    weekly check costs one bucket listing, not a rebuild. Records deleted upstream stay in the
-    store until a full rebuild (takedowns are handled then).
+    weekly check costs one bucket listing, not a rebuild.
     """
     prev = latest(ctx.lake, ctx.region.id, "snapshot")
     prev_out = (prev or {}).get("outputs") or {}
@@ -113,7 +117,38 @@ def _snapshot(ctx: JobContext) -> dict:
         available = ctx.params.get("snapshot_date") or remote.latest_snapshot()
         if available is None:
             raise RuntimeError("no complete GBIF snapshot found")
-        if ingested is None or available > ingested:
+        newer = ingested is None or available > ingested
+        if ctx.params.get("reingest_snapshot"):
+            newer = True
+        if newer and ctx.region.coverage:
+            # One pass for the whole coverage area (shared by its regions), then this
+            # region's tiles; rows the new snapshot lacks are reconciled away.
+            from wildlife_radar.pipeline import coverage
+            from wildlife_radar.regions import load_region
+
+            ctx.log(f"GBIF snapshot {available} via coverage {ctx.region.coverage}")
+            workers = int(ctx.params.get("snapshot_workers") or 10)
+            built = coverage.build(
+                load_region(ctx.region.coverage),
+                available,
+                ctx.lake,
+                workers=workers,
+                keep_staging=bool(ctx.params.get("keep_staging")),
+                log=ctx.log,
+            )
+            out["coverage"] = {k: built.get(k) for k in ("coverage", "rows", "reused", "delta")}
+            out["ingest"] = coverage.ingest_region(
+                ctx.region,
+                ctx.db,
+                ctx.lake,
+                ctx.region.coverage,
+                available,
+                workers=max(1, workers // 2),
+                log=ctx.log,
+                live_keys=ctx.registry().live_keys(),
+            )
+            ingested = available
+        elif newer:
             ctx.log(f"ingesting GBIF snapshot {available} (previous: {ingested or 'none'})")
             work = (
                 ctx.lake / "raw" / "gbif-snapshot" / f"date={available}" / f"region={ctx.region.id}"
@@ -160,22 +195,29 @@ def _repairs(ctx: JobContext) -> dict:
     """Re-date records a dataset stamped with a placeholder date, from their event ids.
 
     Event ids come from the GBIF API (snapshots don't carry them), event by event, in chunks
-    checkpointed in ``repair_events``. Work is **budgeted**: a run stops after
-    ``repair_budget_s`` (default 30 min) or when GBIF rate-limits it, and completes with what
-    it has; records not yet re-dated stay excluded. The job reruns daily and continues where
-    it stopped; a run that makes no progress reports ``unchanged``, so nothing downstream
-    rebuilds. Requests share one rate limiter (default 4/s over 4 threads).
+    of ``REPAIR_CHUNK`` events. Each chunk's ids are kept in ``gbif_event_ids`` and exported
+    to the shared reference store, so a rebuild re-applies them instead of re-fetching.
+    Work is **budgeted**: a run stops after ``repair_budget_s`` (default 30 min) or when GBIF
+    rate-limits it, and completes with what it has; records not yet re-dated stay excluded.
+    The job reruns daily and continues where it stopped; a run that changes nothing reports
+    ``unchanged``, so nothing downstream rebuilds. Requests share one rate limiter (default
+    4/s over 4 threads).
     """
     import time
 
     from wildlife_radar.connectors.base import ConnectorError, RateLimiter, make_client
     from wildlife_radar.connectors.gbif_events import event_ids, fetch_events
     from wildlife_radar.storage.repair import (
+        adopt_event_ids,
+        apply_event_ids,
+        fetched_events,
         missing_event_ids,
         redate_from_event_ids,
-        set_event_ids,
+        store_event_ids,
     )
 
+    started = utcnow()
+    ref = ctx.ref()
     workers = int(ctx.params.get("repair_workers") or 4)
     limiter = RateLimiter(float(ctx.params.get("repair_interval_s") or 0.25))
     deadline = time.monotonic() + float(ctx.params.get("repair_budget_s") or 1800)
@@ -183,58 +225,55 @@ def _repairs(ctx: JobContext) -> dict:
     stopped: str | None = None
     with ctx.store() as store:
         conn = store.conn
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS repair_events (dataset_key VARCHAR, event_date DATE, "
-            "event_id VARCHAR, done_at TIMESTAMP)"
-        )
+        # Ids fetched before (by any region or earlier store) come from the reference store.
+        out["ids_from_ref"] = ref.import_into(conn, "gbif_event_ids")
         client = make_client(timeout=60)
-        for key, entry in ctx.registry().datasets.items():
-            if not (entry.event_id_date and entry.placeholder_dates):
-                continue
-            for d in entry.placeholder_dates:
-                if not missing_event_ids(conn, key, [d]):
+        try:
+            for key, entry in ctx.registry().datasets.items():
+                if not (entry.event_id_date and entry.placeholder_dates):
                     continue
-                done = {
-                    e
-                    for (e,) in conn.execute(
-                        "SELECT event_id FROM repair_events WHERE dataset_key = ? "
-                        "AND event_date = ?",
-                        [key, d],
-                    ).fetchall()
-                }
-                try:
-                    listed = event_ids(client, key, d.isoformat(), ctx.region.bbox, limiter)
-                except ConnectorError as exc:
-                    stopped = str(exc)
-                    break
-                events = [e for e in listed if e[0] not in done]
-                for i in range(0, len(events), REPAIR_CHUNK):
-                    if stopped or time.monotonic() > deadline:
-                        stopped = stopped or "time budget used"
-                        out["remaining_events"] += len(events) - i
-                        break
-                    chunk = events[i : i + REPAIR_CHUNK]
+                out["ids_adopted"] = adopt_event_ids(conn, key, utcnow())
+                apply_event_ids(conn, key)
+                done = fetched_events(conn, key)
+                for d in entry.placeholder_dates:
+                    if stopped or not missing_event_ids(conn, key, [d]):
+                        continue
                     try:
-                        pairs = fetch_events(
-                            key, chunk, client=client, limiter=limiter, workers=workers
-                        )
-                    except ConnectorError as exc:  # e.g. HTTP 429: continue next run
+                        listed = event_ids(client, key, d.isoformat(), ctx.region.bbox, limiter)
+                    except ConnectorError as exc:
                         stopped = str(exc)
-                        out["remaining_events"] += len(events) - i
                         break
-                    set_event_ids(conn, key, pairs)
-                    conn.executemany(
-                        "INSERT INTO repair_events VALUES (?, ?, ?, now()::TIMESTAMP)",
-                        [(key, d, name) for name, _ in chunk],
-                    )
-                    out["events_done"] += len(chunk)
-                    ctx.log(
-                        f"repairs {key[:8]} {d}: {min(i + REPAIR_CHUNK, len(events))}/"
-                        f"{len(events)} events"
-                    )
-            out["redated"][key] = redate_from_event_ids(
-                conn, key, entry.event_id_date, entry.placeholder_dates
-            )
+                    events = [e for e in listed if e[0] not in done]
+                    for i in range(0, len(events), REPAIR_CHUNK):
+                        if time.monotonic() > deadline:
+                            stopped = "time budget used"
+                        if stopped:
+                            out["remaining_events"] += len(events) - i
+                            break
+                        chunk = events[i : i + REPAIR_CHUNK]
+                        try:
+                            pairs = fetch_events(
+                                key, chunk, client=client, limiter=limiter, workers=workers
+                            )
+                        except ConnectorError as exc:  # e.g. HTTP 429: continue next run
+                            stopped = str(exc)
+                            out["remaining_events"] += len(events) - i
+                            break
+                        # Stored per completed chunk: an event is either fully known or absent.
+                        store_event_ids(conn, key, pairs, utcnow())
+                        apply_event_ids(conn, key)
+                        done.update(name for name, _ in chunk)
+                        out["events_done"] += len(chunk)
+                        ctx.log(
+                            f"repairs {key[:8]} {d}: {min(i + REPAIR_CHUNK, len(events))}/"
+                            f"{len(events)} events"
+                        )
+                out["redated"][key] = redate_from_event_ids(
+                    conn, key, entry.event_id_date, entry.placeholder_dates
+                )
+        finally:
+            part = ref.export_from(conn, "gbif_event_ids", started)
+            out["ref_part"] = part and part.name
     if stopped:
         out["stopped"] = stopped
     if not out["events_done"] and not any(out["redated"].values()):
@@ -304,9 +343,11 @@ def _signals(ctx: JobContext) -> dict:
         store_rows,
     )
 
-    fetcher = CoopsDailyFetcher()
+    fetcher = ctx.params.get("_coops") or CoopsDailyFetcher()
     end = ctx.now.date()
     n = 0
+    errors: dict[str, str] = {}
+    attempts = 0
     with ctx.store() as store:
         ensure_schema(store.conn)
         for st in ctx.region.tide_stations:
@@ -314,14 +355,24 @@ def _signals(ctx: JobContext) -> dict:
                 "SELECT max(day) FROM signal_daily WHERE station_id = ?", [st.station_id]
             ).fetchone()[0]
             start = (last - timedelta(days=3)) if last else date(2010, 1, 1)
-            for product in COOPS_PRODUCTS:
-                n += store_rows(
-                    store.conn, fetcher.observations(st.station_id, st.lon, product, start, end)
-                )
-            n += store_rows(
-                store.conn, fetcher.tides(st.station_id, st.lon, start, end + timedelta(days=30))
-            )
-    return {"daily_values": n}
+            # One station or product failing (e.g. NOAA has no data for it) must not block the
+            # region: record it and keep the rest; the next run retries.
+            for name in (*COOPS_PRODUCTS, "tides"):
+                attempts += 1
+                try:
+                    if name == "tides":
+                        rows = fetcher.tides(st.station_id, st.lon, start, end + timedelta(days=30))
+                    else:
+                        rows = fetcher.observations(st.station_id, st.lon, name, start, end)
+                    n += store_rows(store.conn, rows)
+                except Exception as exc:
+                    errors[f"{st.station_id}:{name}"] = f"{type(exc).__name__}: {exc}"[:300]
+    if errors and len(errors) == attempts:
+        raise RuntimeError(f"every signal fetch failed: {errors}")
+    out: dict = {"daily_values": n}
+    if errors:
+        out["errors"] = errors
+    return out
 
 
 LIVE_WINDOW_DAYS = 60
@@ -344,6 +395,8 @@ def _live(ctx: JobContext) -> dict:
     from wildlife_radar.connectors.gbif import GBIFConnector
     from wildlife_radar.connectors.inaturalist import INaturalistConnector
 
+    if ctx.region.coverage:
+        return _live_from_log(ctx)
     previous = latest(ctx.lake, ctx.region.id, "live")
     ok = bool(previous and previous.get("status") == "complete")
     prev_out = (previous or {}).get("outputs") or {}
@@ -389,6 +442,56 @@ def _live(ctx: JobContext) -> dict:
         except Exception as exc:
             out["gbif_error"] = f"{type(exc).__name__}: {exc}"
             out["gbif_cursor"] = gbif_cursor.isoformat()
+    return out
+
+
+LIVE_PULL_EVERY = timedelta(minutes=25)
+"""A region's live job pulls the coverage area's stream if it is older than this (the first
+region of a tick pulls; the others only load)."""
+
+
+def _live_from_log(ctx: JobContext) -> dict:
+    """Live records for a region inside a coverage area: pull the area's stream if due, check
+    recent iNaturalist records still exist (daily), load new parts (pipeline/livelog.py)."""
+    from wildlife_radar.pipeline import livelog
+    from wildlife_radar.regions import load_region
+
+    cov = load_region(ctx.region.coverage)
+    cursor = livelog.read_cursor(ctx.lake, cov.id)
+    out: dict = {"coverage": cov.id}
+    pulled = cursor.get("pulled_at")
+    if pulled is None or ctx.now - datetime.fromisoformat(pulled) >= LIVE_PULL_EVERY:
+        out["pull"] = livelog.pull(
+            cov,
+            ctx.lake,
+            ctx.now,
+            live_keys=ctx.registry().live_keys(),
+            inat=ctx.params.get("_inaturalist"),
+            gbif=ctx.params.get("_gbif"),
+        )
+        cursor = livelog.read_cursor(ctx.lake, cov.id)
+    if not ctx.params.get("skip_existence_check") and livelog.check_due(cursor, ctx.now):
+        try:
+            out["existence"] = livelog.check_existence(ctx.lake, cov.id, ctx.now)
+            livelog.mark_checked(ctx.lake, cov.id, ctx.now)
+        except Exception as exc:  # retried next tick
+            out["existence_error"] = f"{type(exc).__name__}: {exc}"
+    previous = latest(ctx.lake, ctx.region.id, "live")
+    after = ((previous or {}).get("outputs") or {}).get("log_after")
+    with ctx.store() as store:
+        loaded = livelog.load_region(store.conn, ctx.region, ctx.lake, cov.id, after)
+    out.update(
+        {
+            "records": loaded["rows_added"],
+            "parts": loaded["parts"],
+            "removed": loaded["removed"],
+            "log_after": loaded["after"],
+            "cursor": cursor.get("inaturalist"),
+            "gbif_cursor": cursor.get("gbif"),
+        }
+    )
+    if not loaded["parts"] and not loaded["removed"] and previous:
+        out["unchanged"] = True
     return out
 
 
@@ -596,15 +699,7 @@ def _timed(ctx: JobContext) -> dict:
         ).fetchall()
         info = {t: (g, name, n, tier) for t, g, name, n, tier in rows}
         profiled = [t for t in lib.ids(kind="species") if t in info]
-        ranked = sorted(
-            (
-                t
-                for t, (g, _n, _v, tier) in info.items()
-                if tier is not None and tier <= 1 and g in GROUP_TAXA
-            ),
-            key=lambda t: -info[t][2],
-        )
-        taxa = list(dict.fromkeys([*profiled, *ranked[:top]]))
+        taxa = list(dict.fromkeys([*profiled, *pick_timed_taxa(info, set(GROUP_TAXA), top)]))
         # Where the sun and tides are evaluated: the primary tide station, else the centre.
         lon_min, lat_min, lon_max, lat_max = ctx.region.bbox
         lat, lon = (lat_min + lat_max) / 2, (lon_min + lon_max) / 2
@@ -735,10 +830,13 @@ def _timed(ctx: JobContext) -> dict:
 
 def _conditions(ctx: JobContext) -> dict:
     from wildlife_radar.conditions import terms_from_profile
+    from wildlife_radar.conditions.daily import ensure_schema
     from wildlife_radar.conditions.levels import run_conditions
     from wildlife_radar.profiles import ProfileLibrary
 
     lib = ProfileLibrary()
+    with ctx.store() as store:  # no signals yet (e.g. NOAA was down): fit nothing, don't fail
+        ensure_schema(store.conn)
     specs = {}
     for pid in lib.ids(kind="species"):
         terms, _ = terms_from_profile(lib.resolve(pid))
@@ -801,6 +899,7 @@ def _publish(ctx: JobContext) -> dict:
     if statuses:
         doc = yaml.safe_load(statuses.read_text(encoding="utf-8")) or {}
         curated = [e["taxon_id"] for e in doc.get("statuses", [])]
+    from wildlife_radar.pipeline.freshness import collect as collect_freshness
     from wildlife_radar.pipeline.static import before_swap
 
     hook = None if ctx.params.get("no_static") else before_swap(ctx.region, ctx.now, log=ctx.log)
@@ -816,6 +915,9 @@ def _publish(ctx: JobContext) -> dict:
             allow_findings=bool(ctx.params.get("allow_findings")),
             inputs=ctx.params.get("_inputs"),
             before_swap=hook,
+            freshness=collect_freshness(
+                store.conn, ctx.region, ctx.lake, ctx.registry().live_keys()
+            ),
         )
     return {"version": result.version, "rows": result.rows, "audit": result.findings}
 
