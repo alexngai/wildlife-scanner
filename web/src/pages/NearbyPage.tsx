@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { RecentPanel } from "../components/ApiPanels";
 import { ListsPanel } from "../components/ListsPanel";
+import { ArrowLeftIcon, LocateIcon } from "../components/Icons";
+import { kindLabel, PlaceCard } from "../components/PlaceCard";
 import { Async, Loading } from "../components/Status";
 import { useServices } from "../context";
 import { useRegionIndex, useRegions } from "../hooks";
@@ -14,7 +16,11 @@ import type { StaticIndex } from "../products/types";
 import { usePageTitle } from "../lib/usePageTitle";
 
 type Pos = { lat: number; lon: number };
-type GeoState = { status: "idle" } | { status: "locating" } | { status: "ok"; pos: Pos } | { status: "error"; message: string };
+type GeoState =
+  | { status: "idle" }
+  | { status: "locating" }
+  | { status: "ok"; pos: Pos }
+  | { status: "error"; message: string };
 
 /** Places within this distance count as "here" when there is no API to ask about the exact point. */
 const NEAR_KM = 15;
@@ -48,18 +54,30 @@ export function NearbyPage() {
   return (
     <div className="page">
       <p className="crumbs">
-        <Link to={`/r/${region}`}>← {index?.status === "ok" ? index.data.region.name : "Region"}</Link>
+        <Link to={`/r/${region}`}>
+          <ArrowLeftIcon />
+          {index?.status === "ok" ? index.data.region.name : "Region"}
+        </Link>
       </p>
-      <h1>Nearby</h1>
-      <p className="muted small">
-        Your location is rounded to about 100 m and used only to answer this request. It isn't stored.
-      </p>
+      <header className="page-head">
+        <h1>Nearby</h1>
+        <p className="subtitle small">
+          Your location is rounded to about 100 m and used only to answer this request. It isn't stored.
+        </p>
+      </header>
       {geo.status !== "ok" && (
-        <p>
+        <section className="card locate-card">
+          <span className="place-icon">
+            <LocateIcon />
+          </span>
+          <div className="card-body">
+            <p className="card-title">See what's around you</p>
+            <p className="muted small">The closest places, their lists for this week and recent sightings.</p>
+          </div>
           <button type="button" className="button" onClick={locate} disabled={geo.status === "locating"}>
             {geo.status === "locating" ? "Locating…" : "Use my location"}
           </button>
-        </p>
+        </section>
       )}
       {geo.status === "error" && (
         <p className="notice notice-error" role="alert">
@@ -67,7 +85,13 @@ export function NearbyPage() {
         </p>
       )}
       <Async state={index} what="This region">
-        {(idx) => (geo.status === "ok" ? <NearbyResults region={region} index={idx} pos={geo.pos} /> : <PlaceLinks region={region} index={idx} />)}
+        {(idx) =>
+          geo.status === "ok" ? (
+            <NearbyResults region={region} index={idx} pos={geo.pos} />
+          ) : (
+            <PlaceLinks region={region} index={idx} />
+          )
+        }
       </Async>
     </div>
   );
@@ -75,12 +99,14 @@ export function NearbyPage() {
 
 function PlaceLinks({ region, index }: { region: string; index: StaticIndex }) {
   return (
-    <section className="section">
-      <h2>Places in {index.region.name}</h2>
-      <ul className="plain-list">
+    <section className="card" aria-labelledby="all-places-h">
+      <div className="card-head">
+        <h2 id="all-places-h">Or pick a place in {index.region.name}</h2>
+      </div>
+      <ul className="card-list two">
         {Object.entries(index.places).map(([id, p]) => (
           <li key={id}>
-            <Link to={`/r/${region}/places/${encodeURIComponent(id)}`}>{p.name}</Link>
+            <PlaceCard to={`/r/${region}/places/${encodeURIComponent(id)}`} name={p.name} kind={p.kind} />
           </li>
         ))}
       </ul>
@@ -96,17 +122,30 @@ function NearbyResults({ region, index, pos }: { region: string; index: StaticIn
   const closest = near[0] && near[0].km <= NEAR_KM ? near[0] : null;
   const week = weekOf(new Date());
 
-  const apiLists = useAsync(api.enabled && inside ? () => api.nearbyLists(pos.lat, pos.lon) : null, [api, inside, pos.lat, pos.lon]);
-  const placeFile = useAsync(
-    !api.enabled && closest ? () => products.place(region, closest.id) : null,
-    [api.enabled, products, region, closest?.id],
-  );
+  const apiLists = useAsync(api.enabled && inside ? () => api.nearbyLists(pos.lat, pos.lon) : null, [
+    api,
+    inside,
+    pos.lat,
+    pos.lon,
+  ]);
+  const placeFile = useAsync(!api.enabled && closest ? () => products.place(region, closest.id) : null, [
+    api.enabled,
+    products,
+    region,
+    closest?.id,
+  ]);
 
   if (!inside) {
     const other =
-      regions?.status === "ok" ? regionForPoint(regions.data.flatMap((r) => (r.info ? [r.info] : [])), pos.lat, pos.lon) : null;
+      regions?.status === "ok"
+        ? regionForPoint(
+            regions.data.flatMap((r) => (r.info ? [r.info] : [])),
+            pos.lat,
+            pos.lon,
+          )
+        : null;
     return (
-      <div className="notice" role="status">
+      <div className="notice card" role="status">
         <p>You're outside {index.region.name}.</p>
         {regions?.status === "loading" && <Loading />}
         {other ? (
@@ -122,21 +161,27 @@ function NearbyResults({ region, index, pos }: { region: string; index: StaticIn
 
   return (
     <>
-      <section className="section" aria-labelledby="near-places-h">
-        <h2 id="near-places-h">Closest places</h2>
-        <ul className="card-list">
+      <section className="card" aria-labelledby="near-places-h">
+        <div className="card-head">
+          <h2 id="near-places-h">Closest places</h2>
+        </div>
+        <ul className="card-list two">
           {near.map(({ id, place, km: d }) => (
             <li key={id}>
-              <Link className="card card-link" to={`/r/${region}/places/${encodeURIComponent(id)}`}>
-                <span className="card-title">{place.name}</span>
-                <span className="muted small">{km(d)} away</span>
-              </Link>
+              <PlaceCard
+                to={`/r/${region}/places/${encodeURIComponent(id)}`}
+                name={place.name}
+                kind={place.kind}
+                detail={`${kindLabel(place.kind)} · ${km(d)} away`}
+              />
             </li>
           ))}
         </ul>
       </section>
-      <section className="section" aria-labelledby="near-lists-h">
-        <h2 id="near-lists-h">What you might see here this week</h2>
+      <section className="card" aria-labelledby="near-lists-h">
+        <div className="card-head">
+          <h2 id="near-lists-h">What you might see here this week</h2>
+        </div>
         {api.enabled ? (
           <Async state={apiLists} what="Lists here">
             {(l) => <ListsPanel region={region} view={listsFromApi(l)} />}
@@ -155,8 +200,10 @@ function NearbyResults({ region, index, pos }: { region: string; index: StaticIn
           <p className="muted">No published place is close to you. Choose one of the places above.</p>
         )}
       </section>
-      <section className="section" aria-labelledby="near-recent-h">
-        <h2 id="near-recent-h">Right now</h2>
+      <section className="card" aria-labelledby="near-recent-h">
+        <div className="card-head">
+          <h2 id="near-recent-h">Right now</h2>
+        </div>
         <RecentPanel region={region} load={() => api.nearbyRecent(pos.lat, pos.lon)} deps={[pos.lat, pos.lon]} />
       </section>
     </>

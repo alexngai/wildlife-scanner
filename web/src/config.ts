@@ -104,7 +104,10 @@ export const DEFAULT_LAYERS: MapLayerConfig[] = [
 export const DEFAULT_CONFIG: AppConfig = {
   staticBase: env.VITE_STATIC_BASE ?? "/data",
   apiBase: env.VITE_API_BASE ?? "/api",
-  regions: (env.VITE_REGIONS ?? "").split(",").map((s: string) => s.trim()).filter(Boolean),
+  regions: (env.VITE_REGIONS ?? "")
+    .split(",")
+    .map((s: string) => s.trim())
+    .filter(Boolean),
   basemap:
     env.VITE_BASEMAP_STYLE === "none"
       ? { light: "none", dark: "none" }
@@ -133,7 +136,10 @@ function validLayer(v: unknown): v is MapLayerConfig {
 
 export function mergeConfig(base: AppConfig, override: unknown): AppConfig {
   if (!override || typeof override !== "object") return base;
-  const o = override as Partial<Omit<AppConfig, "layers">> & { basemap?: Partial<BasemapConfig> | "none"; layers?: unknown };
+  const o = override as Partial<Omit<AppConfig, "layers">> & {
+    basemap?: Partial<BasemapConfig> | "none";
+    layers?: unknown;
+  };
   const str = (v: unknown, d: string) => (typeof v === "string" ? v : d);
   let basemap = base.basemap;
   if (o.basemap === "none") basemap = { light: "none", dark: "none" };

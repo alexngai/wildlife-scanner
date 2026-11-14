@@ -26,7 +26,8 @@ export function CalendarChart({
   const max = Math.max(0.05, ...series.points.map((p) => p.p ?? 0));
   const bw = (W - PAD.l - PAD.r) / n;
   const y = (v: number) => PAD.t + (H - PAD.t - PAD.b) * (1 - v / max);
-  const periodName = (p: number) => (series.granularity === "month" ? monthLabel(p) : `Week ${p} (${weekLabel(year, p)})`);
+  const periodName = (p: number) =>
+    series.granularity === "month" ? monthLabel(p) : `Week ${p} (${weekLabel(year, p)})`;
   const ticks = [0, max / 2, max];
   const monthStarts =
     series.granularity === "month"
@@ -58,7 +59,15 @@ export function CalendarChart({
           if (pt.presenceOnly) return null;
           if (pt.confidence === "insufficient") {
             return (
-              <rect key={pt.period} x={x + 0.5} y={PAD.t} width={bw - 1} height={H - PAD.t - PAD.b} fill="url(#hatch)" className="bar-na">
+              <rect
+                key={pt.period}
+                x={x + 0.5}
+                y={PAD.t}
+                width={bw - 1}
+                height={H - PAD.t - PAD.b}
+                fill="url(#hatch)"
+                className="bar-na"
+              >
                 <title>{`${periodName(pt.period)}: not enough data`}</title>
               </rect>
             );

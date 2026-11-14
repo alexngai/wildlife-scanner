@@ -12,7 +12,9 @@ describe("useFreshness", () => {
     const fetcher = (async () => new Response(version)) as unknown as typeof fetch;
     const services = makeServices({ ...DEFAULT_CONFIG, staticBase: "/data" }, fetcher);
     await services.products.current("r"); // the version the page loaded
-    const wrapper = ({ children }: { children: ReactNode }) => <ServicesProvider services={services}>{children}</ServicesProvider>;
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <ServicesProvider services={services}>{children}</ServicesProvider>
+    );
     const { result } = renderHook(() => useFreshness("r", 1000), { wrapper });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000);

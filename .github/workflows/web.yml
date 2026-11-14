@@ -34,6 +34,8 @@ jobs:
           npm run gen:api
           npm run fixtures
           git diff --exit-code -- src/api/schema.d.ts tests/fixtures
+      - name: Formatting
+        run: npm run format:check
       - name: Lint
         run: npm run lint
       - name: Typecheck

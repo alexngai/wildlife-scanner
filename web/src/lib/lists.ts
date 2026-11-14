@@ -5,6 +5,7 @@
  */
 import type { components } from "../api/schema";
 import type { License, PlaceFile, PlaceItemRow } from "../products/types";
+import { capitalize } from "./format";
 import { normalizeConfidence, type ConfidenceLevel } from "./policy";
 
 export interface ListItem {
@@ -73,7 +74,7 @@ export function listsFromPlaceFile(file: PlaceFile, week: number): ListsView | n
     const res = row[idx.res] as number;
     return {
       taxonId: id,
-      name: t?.common_name || t?.scientific_name || id,
+      name: capitalize(t?.common_name || t?.scientific_name || id),
       scientificName: t?.scientific_name ?? null,
       p: (row[idx.p] as number) / file.p_scale,
       lift: lift === null ? null : lift / 100,
@@ -100,7 +101,11 @@ export function listsFromPlaceFile(file: PlaceFile, week: number): ListsView | n
     groups,
     awareness: (w.awareness ?? []).map((id) => {
       const t = file.taxa[id];
-      return { taxonId: id, name: t?.common_name || t?.scientific_name || id, scientificName: t?.scientific_name ?? null };
+      return {
+        taxonId: id,
+        name: capitalize(t?.common_name || t?.scientific_name || id),
+        scientificName: t?.scientific_name ?? null,
+      };
     }),
     awarenessMessage: file.awareness_message || DEFAULT_AWARENESS_MESSAGE,
     label: null,
@@ -114,7 +119,7 @@ export function listsFromApi(lists: ApiLists): ListsView {
   const fallback = new Set(lists.area_fallback ?? []);
   const item = (i: ApiItem): ListItem => ({
     taxonId: i.taxon_id,
-    name: i.common_name || i.scientific_name || i.taxon_id,
+    name: capitalize(i.common_name || i.scientific_name || i.taxon_id),
     scientificName: i.scientific_name ?? null,
     p: i.p,
     lift: i.lift ?? null,
@@ -136,7 +141,7 @@ export function listsFromApi(lists: ApiLists): ListsView {
     })),
     awareness: (lists.awareness ?? []).map((a) => ({
       taxonId: a.taxon_id,
-      name: a.common_name || a.scientific_name || a.taxon_id,
+      name: capitalize(a.common_name || a.scientific_name || a.taxon_id),
       scientificName: a.scientific_name ?? null,
     })),
     awarenessMessage: lists.awareness?.[0]?.message ?? DEFAULT_AWARENESS_MESSAGE,

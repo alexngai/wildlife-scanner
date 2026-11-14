@@ -1,4 +1,5 @@
 import { Link } from "react-router";
+import { ChevronRightIcon, ExploreIcon } from "../components/Icons";
 import { Async } from "../components/Status";
 import { lastRegion, useRegions } from "../hooks";
 import { shortDate } from "../lib/format";
@@ -10,30 +11,44 @@ export function HomePage() {
   usePageTitle(null);
   return (
     <div className="page">
-      <h1>Where and when to see wildlife</h1>
-      <p className="lede">
-        Seasonal maps, calendars and daily forecasts for any species, built from public biodiversity records. Pick a
-        region to start.
-      </p>
-      <section aria-labelledby="regions-h">
-        <h2 id="regions-h">Regions</h2>
+      <section className="hero">
+        <h1>Where and when to see wildlife</h1>
+        <p className="lede">
+          Seasonal maps, calendars and daily forecasts for any species, built from public biodiversity records.
+        </p>
+      </section>
+      <section aria-labelledby="regions-h" className="card">
+        <div className="card-head">
+          <div>
+            <h2 id="regions-h">Choose a region</h2>
+            <p className="muted small">Each region has its own maps, places and species.</p>
+          </div>
+        </div>
         <Async state={regions} what="Regions">
           {(list) =>
             list.length === 0 ? (
               <p className="muted">No regions are published yet.</p>
             ) : (
-              <ul className="card-list">
+              <ul className="card-list two">
                 {list.map((r) => (
                   <li key={r.id}>
                     <Link className="card card-link" to={`/r/${r.id}`}>
-                      <span className="card-title">
-                        {r.info?.name ?? r.id}
-                        {r.id === last && <span className="badge">Last used</span>}
+                      <span className="place-icon">
+                        <ExploreIcon />
                       </span>
-                      <span className="muted small">
-                        {r.index
-                          ? `${Object.keys(r.index.maps).length} species mapped · published ${shortDate(r.index.published_at ?? r.index.baseline.built_at)}`
-                          : "Not available right now"}
+                      <span className="card-body">
+                        <span className="card-title">
+                          {r.info?.name ?? r.id}
+                          {r.id === last && <span className="chip accent">Last used</span>}
+                        </span>
+                        <span className="muted small">
+                          {r.index
+                            ? `${Object.keys(r.index.maps).length.toLocaleString("en")} species mapped · updated ${shortDate(r.index.published_at ?? r.index.baseline.built_at)}`
+                            : "Not available right now"}
+                        </span>
+                      </span>
+                      <span className="chevron">
+                        <ChevronRightIcon />
                       </span>
                     </Link>
                   </li>

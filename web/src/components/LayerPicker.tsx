@@ -1,6 +1,7 @@
 import { useId } from "react";
 import type { MapLayerConfig } from "../config";
 import { setLayerChoice, type LayerChoice } from "../lib/mapLayers";
+import { LayersIcon } from "./Icons";
 
 /** The map's layer picker: base map, overlays and how strongly the data is drawn. */
 export function LayerPicker({
@@ -22,7 +23,10 @@ export function LayerPicker({
   const set = (change: Partial<LayerChoice>) => setLayerChoice({ ...choice, ...change });
   return (
     <details className="layer-picker">
-      <summary>Layers</summary>
+      <summary>
+        <LayersIcon />
+        Layers
+      </summary>
       <div className="layer-panel">
         <fieldset>
           <legend>Base map</legend>

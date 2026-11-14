@@ -12,7 +12,11 @@ const t = (id: string, common: string | null, sci: string, aliases: string[] = [
   records: 1,
 });
 
-const taxa = [t("a", "Sea Otter", "Enhydra lutris"), t("b", "Otter Trawl Gull", "Larus x"), t("c", null, "Ottera z", ["Ötter alias"])];
+const taxa = [
+  t("a", "Sea Otter", "Enhydra lutris"),
+  t("b", "Otter Trawl Gull", "Larus x"),
+  t("c", null, "Ottera z", ["Ötter alias"]),
+];
 
 describe("species search", () => {
   it("ranks prefix matches first, then word prefixes", () => {

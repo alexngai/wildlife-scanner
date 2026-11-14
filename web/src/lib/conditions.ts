@@ -69,7 +69,13 @@ export function summarizeConditions(results: CellForecast[]): ConditionsSummary 
     }
   }
   out.factors = [...bySignal.entries()]
-    .map(([signal, s]) => ({ signal, up: s.up, down: s.down, multiplier: oddsMultiplier(s.sum / s.n), hypothesis: s.hypothesis }))
+    .map(([signal, s]) => ({
+      signal,
+      up: s.up,
+      down: s.down,
+      multiplier: oddsMultiplier(s.sum / s.n),
+      hypothesis: s.hypothesis,
+    }))
     .sort((a, b) => Math.abs(Math.log(b.multiplier)) - Math.abs(Math.log(a.multiplier)));
   return out;
 }

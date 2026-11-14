@@ -5,7 +5,10 @@ import { hotspotGroups, hotspots, type HotspotPlace } from "./hotspots";
 
 const load = (id: string) =>
   JSON.parse(
-    readFileSync(resolve(__dirname, `../../tests/fixtures/bucket/region=testland/static/places/${id}.fixture.json`), "utf8"),
+    readFileSync(
+      resolve(__dirname, `../../tests/fixtures/bucket/region=testland/static/places/${id}.fixture.json`),
+      "utf8",
+    ),
   ) as PlaceFile;
 
 const places: HotspotPlace[] = [

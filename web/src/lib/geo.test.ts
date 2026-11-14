@@ -12,7 +12,10 @@ describe("geo", () => {
   });
   it("sorts places by distance", () => {
     const near = nearestPlaces(
-      { a: { name: "A", kind: "park", lat: 36.6, lon: -121.9, file: "" }, b: { name: "B", kind: "park", lat: 37.6, lon: -121.9, file: "" } },
+      {
+        a: { name: "A", kind: "park", lat: 36.6, lon: -121.9, file: "" },
+        b: { name: "B", kind: "park", lat: 37.6, lon: -121.9, file: "" },
+      },
       { lat: 36.61, lon: -121.9 },
     );
     expect(near.map((n) => n.id)).toEqual(["a", "b"]);

@@ -15,7 +15,7 @@ const CENTER = { lat: 36.6, lon: -121.9 };
 
 // Seeded PRNG so fixtures are stable.
 let seed = 42;
-const rand = () => ((seed = (seed * 1664525 + 1013904223) % 2 ** 32) / 2 ** 32);
+const rand = () => (seed = (seed * 1664525 + 1013904223) % 2 ** 32) / 2 ** 32;
 
 const license = {
   license_ids: ["CC-BY-4.0", "CC-BY-NC-4.0"],
@@ -138,7 +138,14 @@ for (const s of species) {
   maps[s.id] = path;
   write(path, {
     format: 2,
-    taxon: { taxon_id: s.id, scientific_name: s.scientific_name, common_name: s.common_name, group: s.group, tier: s.tier, mode: s.mode },
+    taxon: {
+      taxon_id: s.id,
+      scientific_name: s.scientific_name,
+      common_name: s.common_name,
+      group: s.group,
+      tier: s.tier,
+      mode: s.mode,
+    },
     effort_group: `${s.group}:casual`,
     method: "observer_visit",
     label: LABEL,
@@ -166,15 +173,30 @@ for (const [id, p] of Object.entries(places)) {
     awareness_message: "Present in this wider area. Shown for awareness only (synthetic).",
     taxa: taxaInfo,
     groups: {
-      "birds:casual": { taxon_group: "birds", effort_class: "casual", label: "birds · casual sightings", method: "observer_visit", license },
-      "fishes:casual": { taxon_group: "fishes", effort_class: "casual", label: "fishes · casual sightings", method: "observer_visit", license },
+      "birds:casual": {
+        taxon_group: "birds",
+        effort_class: "casual",
+        label: "birds · casual sightings",
+        method: "observer_visit",
+        license,
+      },
+      "fishes:casual": {
+        taxon_group: "fishes",
+        effort_class: "casual",
+        label: "fishes · casual sightings",
+        method: "observer_visit",
+        license,
+      },
     },
     weeks: weeks.map((w) => ({
       week: w,
       groups: {
         "birds:casual": {
           most_likely: [["testus-primus", Math.round(P_SCALE * seasonal(w, 20, 6, 0.7)), 120, 150, "h", 0]],
-          special_here: w > 10 && w < 30 ? [["testus-primus", Math.round(P_SCALE * seasonal(w, 20, 6, 0.7)), 250, 150, "h", 0]] : [],
+          special_here:
+            w > 10 && w < 30
+              ? [["testus-primus", Math.round(P_SCALE * seasonal(w, 20, 6, 0.7)), 250, 150, "h", 0]]
+              : [],
           peaking_now: [],
         },
         "fishes:casual": {
@@ -207,7 +229,17 @@ write(
 );
 
 // Synthetic API responses (shapes from web/api/openapi.json).
-const taxonSummary = { taxon_id: "testus-primus", scientific_name: "Testus primus", common_name: "Common Testbird", group: "birds", records_visits: 5000, tier: 0, mode: "forecast", gate: null, effort_groups: [] };
+const taxonSummary = {
+  taxon_id: "testus-primus",
+  scientific_name: "Testus primus",
+  common_name: "Common Testbird",
+  group: "birds",
+  records_visits: 5000,
+  tier: 0,
+  mode: "forecast",
+  gate: null,
+  effort_groups: [],
+};
 const api = {
   regions: [{ region: REGION, name: "Testland", bbox: [-122.2, 36.3, -121.6, 36.9] }],
   forecast: {
@@ -249,14 +281,41 @@ const api = {
     window_days: 14,
     data_through: "2026-05-19",
     picking_up: [
-      { taxon_id: "testus-primus", scientific_name: "Testus primus", common_name: "Common Testbird", effort_group: "birds:casual", method: "observer_visit", recent_detections: 9, recent_outings: 20, p_usual: 0.3, p_now: 0.45, level: 2, odds_boost: 1.9, drivers: [] },
+      {
+        taxon_id: "testus-primus",
+        scientific_name: "Testus primus",
+        common_name: "Common Testbird",
+        effort_group: "birds:casual",
+        method: "observer_visit",
+        recent_detections: 9,
+        recent_outings: 20,
+        p_usual: 0.3,
+        p_now: 0.45,
+        level: 2,
+        odds_boost: 1.9,
+        drivers: [],
+      },
     ],
     reported_recently: [
-      { taxon_id: "testus-primus", scientific_name: "Testus primus", common_name: "Common Testbird", effort_group: "birds:casual", method: "observer_visit", recent_detections: 9, recent_outings: 20, p_usual: 0.3, p_now: 0.45, level: 2, odds_boost: null, drivers: [] },
+      {
+        taxon_id: "testus-primus",
+        scientific_name: "Testus primus",
+        common_name: "Common Testbird",
+        effort_group: "birds:casual",
+        method: "observer_visit",
+        recent_detections: 9,
+        recent_outings: 20,
+        p_usual: 0.3,
+        p_now: 0.45,
+        level: 2,
+        odds_boost: null,
+        drivers: [],
+      },
     ],
     notes: [],
   },
 };
 mkdirSync(join(out, "api"), { recursive: true });
-for (const [name, body] of Object.entries(api)) writeFileSync(join(out, "api", `${name}.json`), JSON.stringify(body, null, 1));
+for (const [name, body] of Object.entries(api))
+  writeFileSync(join(out, "api", `${name}.json`), JSON.stringify(body, null, 1));
 console.log(`fixtures written to ${out}`);

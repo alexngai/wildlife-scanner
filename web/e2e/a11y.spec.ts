@@ -34,7 +34,13 @@ for (const theme of ["light", "dark"] as const) {
       const results = await new AxeBuilder({ page }).exclude(".maplibregl-ctrl").analyze();
       const serious = results.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
       expect(
-        serious.map((v) => `${v.id}: ${v.help} (${v.nodes.map((n) => n.target.join(" ")).slice(0, 3).join(", ")})`),
+        serious.map(
+          (v) =>
+            `${v.id}: ${v.help} (${v.nodes
+              .map((n) => n.target.join(" "))
+              .slice(0, 3)
+              .join(", ")})`,
+        ),
       ).toEqual([]);
     });
   }

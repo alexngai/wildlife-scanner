@@ -11,7 +11,10 @@ export function renderApp(
   { api = {}, config = {} }: { api?: Parameters<typeof makeFixtureFetch>[0]; config?: Partial<AppConfig> } = {},
 ) {
   const { fetcher, requested } = makeFixtureFetch(api);
-  const services = makeServices({ ...DEFAULT_CONFIG, staticBase: "/data", apiBase: "/api", regions: ["testland"], ...config }, fetcher);
+  const services = makeServices(
+    { ...DEFAULT_CONFIG, staticBase: "/data", apiBase: "/api", regions: ["testland"], ...config },
+    fetcher,
+  );
   const router = createMemoryRouter(routes, { initialEntries: [path] });
   const utils = render(
     <ServicesProvider services={services}>

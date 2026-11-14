@@ -157,7 +157,16 @@ export function presenceGeoJSON(cells: string[]): FeatureCollection {
     features: cells.map((cell, id) => ({
       type: "Feature",
       id,
-      properties: { cell, bin: -1, p: null, confidence: "none", insufficient: false, presence: true, lift: null, liftBin: -1 },
+      properties: {
+        cell,
+        bin: -1,
+        p: null,
+        confidence: "none",
+        insufficient: false,
+        presence: true,
+        lift: null,
+        liftBin: -1,
+      },
       geometry: { type: "Polygon", coordinates: polygon(cell) },
     })),
   };
@@ -205,7 +214,8 @@ export function calendar(map: SpeciesMapFile, point: { lat: number; lon: number 
       if (point) {
         const cell = latLngToCell(point.lat, point.lon, seg.resolution);
         const i = seg.cells.indexOf(cell);
-        if (basis.cell === null || basis.resolution_km !== seg.resolution_km) basis = { cell, resolution_km: seg.resolution_km };
+        if (basis.cell === null || basis.resolution_km !== seg.resolution_km)
+          basis = { cell, resolution_km: seg.resolution_km };
         if (i < 0) {
           found = { period, p: null, confidence: "none", presenceOnly: false };
           break;
@@ -220,7 +230,12 @@ export function calendar(map: SpeciesMapFile, point: { lat: number; lon: number 
         };
       } else {
         const raw = seg.region_p[j] ?? null;
-        found = { period, p: raw === null ? null : raw / map.p_scale, confidence: raw === null ? "none" : "high", presenceOnly: false };
+        found = {
+          period,
+          p: raw === null ? null : raw / map.p_scale,
+          confidence: raw === null ? "none" : "high",
+          presenceOnly: false,
+        };
       }
       break;
     }

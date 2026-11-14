@@ -61,9 +61,8 @@ export function hotspots(places: HotspotPlace[], week: number, groupId: string):
       const g = listsFromPlaceFile(p.file, week)?.groups.find((x) => x.id === groupId);
       const score = g && g.mostLikely.length > 0 ? g.mostLikely.reduce((s, i) => s + i.p, 0) : null;
       const special =
-        g?.specialHere
-          .filter((i) => i.lift !== null && !i.coarser)
-          .sort((a, b) => (b.lift ?? 0) - (a.lift ?? 0))[0] ?? null;
+        g?.specialHere.filter((i) => i.lift !== null && !i.coarser).sort((a, b) => (b.lift ?? 0) - (a.lift ?? 0))[0] ??
+        null;
       return { id: p.id, name: p.name, lat: p.lat, lon: p.lon, score, peaking: g?.peakingNow.length ?? 0, special };
     })
     .sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
