@@ -11,8 +11,8 @@ Cloudflare Pages. AGPL-3.0, like the rest of the repository.
 | Route | What it shows | Data |
 |---|---|---|
 | `/` | region picker | `/config.json` regions (or API `/regions`) → each region's `index.json` |
-| `/r/:region` | species search, places, "near me" | `taxa.json`, `index.json` |
-| `/r/:region/species/:id` | week map + slider (with play), coloured by chance or by chance compared with the wider area; cell details on hover/tap; named places on the map; the map as a table (keyboard alternative to tapping); calendar (region or a tapped cell / place), what the number means, confidence, daily forecast + drivers, hourly timing, licence | species map file; API `forecast`, `forecast/hourly`, `timing` |
+| `/r/:region` | species search with a 52-week season ribbon per result; "Where to go": places compared within one effort group by likely species per outing (week slider, map, ranked list; loaded on request); places, "near me" | `taxa.json`, `index.json`, species map files (ribbons), place files (hotspots) |
+| `/r/:region/species/:id` | week map + slider (with play), coloured by chance or by chance compared with the wider area; "Today's conditions" over the 12 highest cells (better / about / worse than usual, with the factors); cell details on hover/tap; named places on the map; the map as a table (keyboard alternative to tapping); calendar (region or a tapped cell / place), what the number means, confidence, daily forecast + drivers, hourly timing, licence | species map file; API `forecast`, `forecast/hourly`, `timing` |
 | `/r/:region/places/:id` | most likely / special here / peaking now / new for you, awareness species, picking up now / reported recently with data delay | place file; API `places/{id}/recent` |
 | `/r/:region/nearby` | geolocation (on request, rounded to ~100 m) → closest places, lists, recent activity | `index.json`; API `nearby`, `nearby/recent` |
 | `/about` | AGPL source link, non-commercial notice, licences, privacy | API `/sources` |
@@ -35,6 +35,12 @@ Data arrives policy-filtered, and the app adds display rules on top. See
   reference value (`ref.p`, its parent cell or the region) for the same period. Both numbers
   are already in the file, so nothing finer is derived.
 - Publication delays are shown with recent activity (`data_through`) and per species.
+- Season ribbons use each species' published region-wide values (`region_p`) and are scaled to the
+  species' own peak, so they show timing, not how common species are against each other. Withheld
+  weeks are empty, awareness weeks a flat band, and awareness species get none.
+- "Likely species per outing" adds up the published chances in a place's top list for one effort
+  group. Places are only compared within a group, because chances from different methods don't
+  mix.
 - Licence and attribution appear with every map and list, alongside a non-commercial notice
   and the source link.
 

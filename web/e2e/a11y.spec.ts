@@ -22,7 +22,12 @@ for (const theme of ["light", "dark"] as const) {
       await page.goto(path);
       await expect(page.locator("main h1")).toBeVisible();
       await page.waitForLoadState("networkidle");
-      // Open any "as a table" disclosures so their contents are checked too.
+      // Open on-request sections and "as a table" disclosures so their contents are checked too.
+      const compare = page.getByRole("button", { name: "Compare places" });
+      if (await compare.count()) {
+        await compare.click();
+        await expect(page.locator(".hotspot-list")).toBeVisible();
+      }
       for (const summary of await page.locator("details.data-table > summary").all()) await summary.click();
       // The map canvas is described by its aria-label; MapLibre's own controls are third-party.
       const results = await new AxeBuilder({ page }).exclude(".maplibregl-ctrl").analyze();

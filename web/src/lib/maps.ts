@@ -254,3 +254,51 @@ export function cellsBounds(cells: string[]): [number, number, number, number] |
   }
   return [w, s, e, n];
 }
+
+/** One week of a region-wide season ribbon. */
+export type RibbonWeek = { kind: "value"; p: number } | { kind: "presence" } | { kind: "none" };
+
+/**
+ * The region-wide value for each ISO week 1-52, from the published `region_p` of the segment
+ * serving that week. Awareness (tier ≥ 2) weeks are presence only; withheld weeks are "none".
+ * Monthly segments repeat their month's value across its weeks, as published.
+ */
+export function seasonRibbon(map: SpeciesMapFile): RibbonWeek[] {
+  const out: RibbonWeek[] = [];
+  for (let w = 1; w <= 52; w++) {
+    const hit = segmentForWeek(map, w);
+    if (!hit) out.push({ kind: "none" });
+    else if (isPresenceOnly(hit.segment)) out.push({ kind: "presence" });
+    else {
+      const raw = hit.segment.region_p[hit.j];
+      out.push(raw === null || raw === undefined ? { kind: "none" } : { kind: "value", p: raw / map.p_scale });
+    }
+  }
+  return out;
+}
+
+/**
+ * The weeks within 80% of the ribbon's peak, as [first, last] runs (for a text summary). A run
+ * across the new year has first > last.
+ */
+export function peakRuns(ribbon: RibbonWeek[]): [number, number][] {
+  const values = ribbon.map((r) => (r.kind === "value" ? r.p : 0));
+  const max = Math.max(0, ...values);
+  if (max <= 0) return [];
+  const runs: [number, number][] = [];
+  values.forEach((v, i) => {
+    if (v < 0.8 * max) return;
+    const w = i + 1;
+    const last = runs[runs.length - 1];
+    if (last && last[1] === w - 1) last[1] = w;
+    else runs.push([w, w]);
+  });
+  // A peak across the new year is one run (e.g. weeks 50-3).
+  const first = runs[0];
+  const lastRun = runs[runs.length - 1];
+  if (runs.length > 1 && first && lastRun && first[0] === 1 && lastRun[1] === 52) {
+    runs.shift();
+    lastRun[1] = first[1];
+  }
+  return runs;
+}
