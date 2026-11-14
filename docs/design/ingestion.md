@@ -127,6 +127,7 @@ existence check (below).
 | 3. Corrections layer | covered for now | event ids in `lake/ref` are re-applied after each ingest; no separate table |
 | 4. Live log | done | `pipeline/livelog.py`; the `live` job of regions with `coverage:` |
 | 5. Work store as cache | later | |
+| Retention (old snapshots, old live-log days) | done 2026-11-14 | `wildlife-radar lake-prune` (keeps the newest two complete snapshots; drops live days past 67 days and older than the newest snapshot, here and in the bucket) |
 | Bucket sync of `lake/ref` and `lake/norm` | done 2026-11-14 | `wildlife-radar lake-sync`; the worker pulls `ref/` and the live log before a tick and pushes after; see [`../deploy.md`](../deploy.md) |
 
 **Deletions, as built.**
