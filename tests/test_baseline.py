@@ -114,6 +114,16 @@ def test_backtest_gates(world_store):
         "SELECT count(*) FROM prior_effort WHERE region_id LIKE '%backtest%'"
     ).fetchone()[0]
     assert leftovers == 0
+    # Per-group cap: a group's taxa × sampled visits stays within the budget.
+    capped = backtest_baseline(
+        store.conn,
+        region_id="test",
+        bbox=world.bbox,
+        split=datetime(2025, 1, 1, tzinfo=UTC),
+        max_group_trials=2_000,
+    )
+    assert capped and sum(s.n_test for s in capped) <= 2_000
+    assert sum(s.n_test for s in capped) < sum(s.n_test for s in scores.values())
 
 
 def test_cutoff_and_min_visits():

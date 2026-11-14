@@ -70,6 +70,7 @@ def backtest_baseline(
     floor: float = 1e-4,
     max_test_visits: int = 50_000,
     max_test_trials: int = 200_000,
+    max_group_trials: int = 5_000_000,
     groups: list[str] | None = None,
 ) -> list[TaxonScore]:
     """``groups`` restricts scoring to these effort groups (e.g. survey programs whose data end
@@ -92,6 +93,21 @@ def backtest_baseline(
             f"CREATE OR REPLACE TEMP TABLE _tv AS SELECT * FROM _tv "
             f"USING SAMPLE reservoir({int(max_test_visits)} ROWS) REPEATABLE (42)"
         )
+    # Every taxon of a group is scored on every test visit of that group, so a group's
+    # trials are taxa × visits: San Diego's 1,772 plant taxa on all their visits spilled more
+    # than 17 GB. Cap each group at ``max_group_trials`` by sampling its visits (a stable
+    # hash, so reruns score the same visits).
+    conn.execute(
+        """
+        CREATE OR REPLACE TEMP TABLE _tv AS
+        WITH n AS (SELECT group_id, count(*) AS taxa FROM prior_taxa WHERE region_id = ?
+                   GROUP BY 1)
+        SELECT v.* FROM _tv v LEFT JOIN n ON n.group_id = v.egroup
+        QUALIFY row_number() OVER (PARTITION BY v.egroup ORDER BY hash(v.visit_key))
+            <= greatest(1, ? // coalesce(n.taxa, 1))
+        """,
+        [bt, int(max_group_trials)],
+    )
     conn.execute(
         f"""
         CREATE OR REPLACE TEMP TABLE _th AS
