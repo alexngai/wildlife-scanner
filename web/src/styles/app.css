@@ -458,6 +458,19 @@ input[type="search"] {
   margin: 4px 0;
 }
 
+details.more > summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 0.9rem;
+  min-height: 32px;
+  display: list-item;
+}
+
+details.more > p {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .map-wrap {
   position: relative;
   margin: 8px 0;
