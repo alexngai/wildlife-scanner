@@ -1,5 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from wildlife_radar.pipeline.runner import Job, JobContext, latest, order, run, staleness
 from wildlife_radar.regions import load_region
 
@@ -371,3 +373,30 @@ def test_event_ids_from_earlier_runs_are_adopted(tmp_path, monkeypatch):
     out = run("repairs", c, jobs={"repairs": Job("repairs", (), runner._repairs)})[0]["outcome"]
     assert out["ids_adopted"] == 4 and not fetched and out["redated"]["kelp"] == 4
     assert out["ref_part"]  # and they now live in the reference store
+
+
+def test_signals_job_keeps_going_when_one_fetch_fails(tmp_path):
+    from wildlife_radar.pipeline.runner import JOBS
+    from wildlife_radar.storage import ObservationStore
+
+    class Coops:
+        def observations(self, station, lon, product, start, end):
+            raise RuntimeError("No Predictions data was found")
+
+        def tides(self, station, lon, start, end):
+            return []
+
+    c = ctx(tmp_path, now=datetime.now(UTC))
+    ObservationStore(c.db).close()
+    c.params["_coops"] = Coops()
+    out = JOBS["signals"].run(c)
+    assert out["daily_values"] == 0 and out["errors"]
+    assert all("No Predictions" in e for e in out["errors"].values())
+
+    class Down(Coops):
+        def tides(self, station, lon, start, end):
+            raise RuntimeError("down")
+
+    c.params["_coops"] = Down()
+    with pytest.raises(RuntimeError, match="every signal fetch failed"):
+        JOBS["signals"].run(c)

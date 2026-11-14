@@ -343,9 +343,11 @@ def _signals(ctx: JobContext) -> dict:
         store_rows,
     )
 
-    fetcher = CoopsDailyFetcher()
+    fetcher = ctx.params.get("_coops") or CoopsDailyFetcher()
     end = ctx.now.date()
     n = 0
+    errors: dict[str, str] = {}
+    attempts = 0
     with ctx.store() as store:
         ensure_schema(store.conn)
         for st in ctx.region.tide_stations:
@@ -353,14 +355,24 @@ def _signals(ctx: JobContext) -> dict:
                 "SELECT max(day) FROM signal_daily WHERE station_id = ?", [st.station_id]
             ).fetchone()[0]
             start = (last - timedelta(days=3)) if last else date(2010, 1, 1)
-            for product in COOPS_PRODUCTS:
-                n += store_rows(
-                    store.conn, fetcher.observations(st.station_id, st.lon, product, start, end)
-                )
-            n += store_rows(
-                store.conn, fetcher.tides(st.station_id, st.lon, start, end + timedelta(days=30))
-            )
-    return {"daily_values": n}
+            # One station or product failing (e.g. NOAA has no data for it) must not block the
+            # region: record it and keep the rest; the next run retries.
+            for name in (*COOPS_PRODUCTS, "tides"):
+                attempts += 1
+                try:
+                    if name == "tides":
+                        rows = fetcher.tides(st.station_id, st.lon, start, end + timedelta(days=30))
+                    else:
+                        rows = fetcher.observations(st.station_id, st.lon, name, start, end)
+                    n += store_rows(store.conn, rows)
+                except Exception as exc:
+                    errors[f"{st.station_id}:{name}"] = f"{type(exc).__name__}: {exc}"[:300]
+    if errors and len(errors) == attempts:
+        raise RuntimeError(f"every signal fetch failed: {errors}")
+    out: dict = {"daily_values": n}
+    if errors:
+        out["errors"] = errors
+    return out
 
 
 LIVE_WINDOW_DAYS = 60
@@ -818,10 +830,13 @@ def _timed(ctx: JobContext) -> dict:
 
 def _conditions(ctx: JobContext) -> dict:
     from wildlife_radar.conditions import terms_from_profile
+    from wildlife_radar.conditions.daily import ensure_schema
     from wildlife_radar.conditions.levels import run_conditions
     from wildlife_radar.profiles import ProfileLibrary
 
     lib = ProfileLibrary()
+    with ctx.store() as store:  # no signals yet (e.g. NOAA was down): fit nothing, don't fail
+        ensure_schema(store.conn)
     specs = {}
     for pid in lib.ids(kind="species"):
         terms, _ = terms_from_profile(lib.resolve(pid))
