@@ -182,10 +182,12 @@ details, and cache results between publishes. Photos rarely change, so refresh t
 when a taxon is new. Please check iNaturalist's current API guidance (I couldn't open it from
 here).
 
-**Optional but better: copy the thumbnails into the bucket** (`static/photos/<taxon>.jpg`, both
-sizes, about 5–40 KB each) and publish relative paths. Visitors then never contact third parties,
-and images can't disappear between publishes. CC licences allow redistribution with credit;
-keep `attribution`, `license` and `source_url` with each.
+**Decision (owner): hotlink, don't store, for now.** Publish the absolute
+`inaturalist-open-data.s3.amazonaws.com` URLs: `url` = `…/photos/<id>/square.<ext>` (about 6 KB)
+and `url_medium` = `…/small.<ext>` (about 20 KB). Visitors' browsers load them from AWS, which the
+About page's privacy section mentions. Copying them into the bucket later would take about 30 KB
+per taxon, at most about 150 MB per region (measured on Monterey), and needs no app change:
+relative paths already work.
 
 **App behaviour:** it re-checks the licence and URL (https or a bucket path only), shows the
 credit with every photo (visible on the species page, under "Photo credits" in lists), loads
