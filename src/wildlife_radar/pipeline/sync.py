@@ -161,3 +161,125 @@ def sync_ref(store: ObjectStore, ref_root: Path) -> dict:
     for key in pushed:
         store.put_file(key, local[key], cache_control="private, max-age=31536000, immutable")
     return {"pulled": len(pulled), "pushed": len(pushed)}
+
+
+LAKE_PREFIXES = ("ref", "norm")
+MUTABLE = {"_cursor.json"}
+"""Lake files that change in place (live-log cursors); everything else is immutable."""
+MARKERS = {"_SUCCESS.json", "delta.json"}
+"""Written last in a coverage snapshot folder: uploaded last, so a reader never sees a
+partial snapshot as complete."""
+
+
+def _incomplete_snapshot(rel: str, complete: set[str]) -> bool:
+    """A coverage snapshot folder whose build hasn't finished (no ``_SUCCESS.json``)."""
+    parts = rel.split("/")
+    if "source=gbif" not in parts:
+        return False
+    i = parts.index("source=gbif")
+    if len(parts) < i + 3:
+        return False
+    return "/".join(parts[: i + 3]) not in complete
+
+
+def lake_files(lake: Path) -> dict[str, Path]:
+    """Lake files to share (``ref/`` and ``norm/``), keyed by their path under the lake;
+    hidden and temporary files and unfinished snapshot builds are left out."""
+    out: dict[str, Path] = {}
+    for prefix in LAKE_PREFIXES:
+        root = lake / prefix
+        if root.exists():
+            for p in root.rglob("*"):
+                rel = p.relative_to(lake)
+                if p.is_file() and not any(x.startswith(".") for x in rel.parts):
+                    out[rel.as_posix()] = p
+    complete = {k.rsplit("/", 1)[0] for k in out if k.endswith("/_SUCCESS.json")}
+    return {k: p for k, p in out.items() if not _incomplete_snapshot(k, complete)}
+
+
+def sync_lake(
+    store: ObjectStore,
+    lake: Path,
+    *,
+    push: bool = True,
+    pull: bool = False,
+    pull_prefixes: tuple[str, ...] = LAKE_PREFIXES,
+    workers: int = 4,
+    log=lambda _m: None,
+) -> dict:
+    """Copy the lake's shared layers to and from object storage.
+
+    Immutable files are matched by key and size; live-log cursors are pushed when their
+    content changed and pulled only when missing. ``pull`` restores a fresh machine (limited
+    to ``pull_prefixes``, e.g. only the reference store and the live log)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from wildlife_radar.storage.objects import R2_MAX_PUT
+
+    remote: dict[str, int] = {}
+    for prefix in LAKE_PREFIXES:
+        if hasattr(store, "stat"):
+            remote.update(store.stat(f"{prefix}/"))
+        else:
+            remote.update({k: -1 for k in store.list(f"{prefix}/")})
+    local = lake_files(lake)
+    out: dict = {"pushed": 0, "pushed_bytes": 0, "pulled": 0, "pulled_bytes": 0}
+
+    if push:
+        todo, too_big = [], []
+        for key, path in local.items():
+            size = path.stat().st_size
+            name = key.rsplit("/", 1)[-1]
+            if name in MUTABLE:
+                if key in remote and store.get_text(key) == path.read_text(encoding="utf-8"):
+                    continue
+            elif key in remote and remote[key] in (-1, size):
+                continue
+            if size > R2_MAX_PUT:
+                too_big.append(key)
+                continue
+            todo.append((key, path, size))
+        data = [t for t in todo if t[0].rsplit("/", 1)[-1] not in MARKERS]
+        markers = [t for t in todo if t[0].rsplit("/", 1)[-1] in MARKERS]
+
+        def up(item) -> int:
+            key, path, size = item
+            name = key.rsplit("/", 1)[-1]
+            cache = "no-cache" if name in MUTABLE else "private, max-age=31536000, immutable"
+            store.put_file(key, path, cache_control=cache)
+            return size
+
+        for batch in (data, markers):
+            with ThreadPoolExecutor(workers) as pool:
+                for i, size in enumerate(pool.map(up, batch), 1):
+                    out["pushed"] += 1
+                    out["pushed_bytes"] += size
+                    if i % 50 == 0:
+                        log(f"pushed {out['pushed']}/{len(todo)} ({out['pushed_bytes'] >> 20} MiB)")
+        if too_big:
+            out["too_big"] = too_big
+
+    if pull:
+        complete = {k.rsplit("/", 1)[0] for k in remote if k.endswith("/_SUCCESS.json")}
+        want = [
+            k
+            for k in remote
+            if k not in local
+            and k.startswith(pull_prefixes)
+            and not _incomplete_snapshot(k, complete)
+        ]
+        # Markers last here too: a crash mid-pull leaves the snapshot incomplete, not wrong.
+        want.sort(key=lambda k: k.rsplit("/", 1)[-1] in MARKERS)
+
+        def down(key: str) -> int:
+            store.get_file(key, lake / key)
+            return (lake / key).stat().st_size
+
+        data = [k for k in want if k.rsplit("/", 1)[-1] not in MARKERS]
+        markers = [k for k in want if k.rsplit("/", 1)[-1] in MARKERS]
+        for batch in (data, markers):
+            with ThreadPoolExecutor(workers) as pool:
+                for size in pool.map(down, batch):
+                    out["pulled"] += 1
+                    out["pulled_bytes"] += size
+    return out

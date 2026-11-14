@@ -488,6 +488,46 @@ def cmd_push_publish(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_lake_sync(args: argparse.Namespace) -> int:
+    """Copy the lake's shared layers (reference store, normalized observations) to and from
+    private object storage."""
+    from wildlife_radar.pipeline import coverage
+    from wildlife_radar.pipeline.sync import sync_lake
+    from wildlife_radar.storage.objects import open_store
+
+    url = args.lake_url or os.environ.get(LAKE_URL_ENV)
+    if not url:
+        raise SystemExit(f"--lake-url or {LAKE_URL_ENV} is required")
+    lake = Path(args.lake)
+    out: dict = {}
+    if args.push:
+        # Tiles built before the size cap may be too big for one upload: cut them first.
+        root = lake / "norm" / "observations" / "source=gbif"
+        split: list[str] = []
+        for marker in root.glob(f"snapshot=*/coverage=*/{coverage.SUCCESS}"):
+            folder = marker.parent
+            split += coverage.split_large(
+                lake,
+                folder.name.removeprefix("coverage="),
+                folder.parent.name.removeprefix("snapshot="),
+            )
+        if split:
+            out["split"] = split
+    out.update(
+        sync_lake(
+            open_store(url),
+            lake,
+            push=args.push,
+            pull=args.pull,
+            pull_prefixes=tuple(args.pull_prefix) if args.pull_prefix else ("ref", "norm"),
+            workers=args.workers,
+            log=lambda m: print(m, file=sys.stderr, flush=True),
+        )
+    )
+    print(json.dumps(out, indent=2))
+    return 0
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     """Run the job graph up to a target, skipping jobs whose inputs haven't changed."""
     from wildlife_radar.pipeline.runner import JOBS, context, run
@@ -769,6 +809,22 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--workers", type=int, default=10)
     p.add_argument("--keep-staging", action="store_true")
     p.set_defaults(func=cmd_coverage_snapshot)
+
+    p = sub.add_parser(
+        "lake-sync", help="copy the lake's ref/ and norm/ layers to and from private storage"
+    )
+    common(p)
+    p.add_argument("--lake", default="data/lake", help="lake root")
+    p.add_argument("--lake-url", help=f"e.g. r2://<account>/<bucket>/lake (${LAKE_URL_ENV})")
+    p.add_argument("--push", action="store_true", help="upload what the bucket lacks")
+    p.add_argument("--pull", action="store_true", help="download what this machine lacks")
+    p.add_argument(
+        "--pull-prefix",
+        action="append",
+        help="with --pull: only keys under this prefix (repeatable), e.g. ref",
+    )
+    p.add_argument("--workers", type=int, default=4, help="parallel transfers")
+    p.set_defaults(func=cmd_lake_sync)
 
     p = sub.add_parser("push-publish", help="upload the current published version")
     common(p)
