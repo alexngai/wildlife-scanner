@@ -166,3 +166,25 @@ command as `app`.
 - **Every tick republishes the whole bundle**, even when only the live aggregates changed.
   Splitting the small live tables into their own file would make pushes and cold starts
   cheaper; measure bundle sizes on real data first.
+
+
+## Private lake storage (R2)
+
+The lake's shared layers (`lake/ref`, `lake/norm`) live in a private R2 bucket, so a new
+machine restores them instead of re-downloading from GBIF.
+
+- **Address:** `r2://<account id>/<bucket>/lake` (`--lake-url` or `WILDLIFE_RADAR_LAKE_URL`).
+- **Token:** a Cloudflare API token with *Account → Workers R2 Storage → Edit*, sent as a
+  bearer header to `api.cloudflare.com`. In a cloud session it is a saved network secret that
+  the proxy injects; elsewhere set `CLOUDFLARE_API_TOKEN`. A token limited to one bucket's
+  objects is refused by the REST API.
+- **Limits:** one upload is at most 300 MiB; coverage tiles are written in files of about
+  200 MB, and `lake-sync --push` splits older, larger tiles first.
+
+```sh
+wildlife-radar lake-sync --push            # upload new files (add --prune after splits)
+wildlife-radar lake-sync --pull            # restore everything (~5 GB for California)
+wildlife-radar lake-sync --pull --pull-prefix ref --pull-prefix norm/observations/source=live
+```
+
+Region work stores are not synced: they are rebuilt from the tiles and the live log.
