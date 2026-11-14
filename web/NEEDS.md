@@ -3,6 +3,10 @@
 The web track doesn't edit `src/`, the pipeline or the formats. These are the changes the
 app would like, each with the reason. Newest at the bottom; the data session decides.
 
+**Status (2026-11-14):** §9–15 are done in static format 3 and the API (data branch 92e394f,
+contract in `docs/design/static-products.md`), and the app uses them. §14's failure is fixed
+there (f3e15a2).
+
 ## 1. Awareness-mode species: numbers are still published (policy)
 
 **What:** tier-2 / `mode: "awareness"` taxa still carry numbers:

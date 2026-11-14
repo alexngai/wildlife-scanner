@@ -1,7 +1,7 @@
 # wildlife-radar web app
 
 The browser front end: React + Vite + TypeScript (strict), MapLibre GL for maps, H3 cells
-drawn with `h3-js`. It reads the **static products** (format 2,
+drawn with `h3-js`. It reads the **static products** (format 3,
 [`docs/design/static-products.md`](../docs/design/static-products.md)) and, when configured,
 the **API** (daily forecasts, hourly timing, recent activity). It builds to a static site for
 Cloudflare Pages. AGPL-3.0, like the rest of the repository.
@@ -11,8 +11,8 @@ Cloudflare Pages. AGPL-3.0, like the rest of the repository.
 | Route | What it shows | Data |
 |---|---|---|
 | `/` | region picker | `/config.json` regions (or API `/regions`) → each region's `index.json` |
-| `/r/:region` | species search with a 52-week season ribbon per result; "Where to go": places compared within one effort group by likely species per outing (week slider, map, ranked list; loaded on request); places, "near me" | `taxa.json`, `index.json`, species map files (ribbons), place files (hotspots) |
-| `/r/:region/species/:id` | week map + slider (with play), coloured by chance or by chance compared with the wider area; "Today's conditions" over the 12 highest cells (better / about / worse than usual, with the factors); cell details on hover/tap; named places on the map; the map as a table (keyboard alternative to tapping); calendar (region or a tapped cell / place), what the number means, confidence, daily forecast + drivers, hourly timing, licence | species map file; API `forecast`, `forecast/hourly`, `timing` |
+| `/r/:region` | species search with a 52-week season ribbon per result (from `taxa.json`'s `season`, no map files); "Where to go": places compared within one effort group by likely species per outing (week slider, map, ranked list; loaded on request); places, "near me" | `taxa.json`, `index.json`, place headers and week files (hotspots) |
+| `/r/:region/species/:id` | week map + slider (with play), coloured by chance or by chance compared with the wider area; a third view, "Today vs usual", colours every cell by the day's forecast against its usual chance (one `/species/{id}/forecast/map` call) with the factors summarised; cell details on hover/tap; named places on the map; the map as a table (keyboard alternative to tapping); calendar (region or a tapped cell / place), what the number means, confidence, daily forecast + drivers, hourly timing, licence | species map file (path from `taxa.json`); API `forecast`, `forecast/map`, `forecast/hourly`, `timing` |
 | `/r/:region/places/:id` | one effort group at a time (busiest first) with tabs for most likely / special here / peaking now / new for you (top 10, then "Show all"); awareness species; picking up now / reported recently with data delay | place file; API `places/{id}/recent` |
 | `/r/:region/nearby` | geolocation (on request, rounded to ~100 m) → closest places, lists, recent activity | `index.json`; API `nearby`, `nearby/recent` |
 | `/about` | AGPL source link, non-commercial notice, licences, privacy | API `/sources` |

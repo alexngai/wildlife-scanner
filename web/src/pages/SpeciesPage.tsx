@@ -30,7 +30,7 @@ import type { MapMetric } from "../components/mapColors";
 import type { CellFeatureProps } from "../lib/maps";
 import { useAsync } from "../lib/useAsync";
 import { isoDate, monthLabel, parseIsoDate, weekLabel, weekOf } from "../lib/weeks";
-import { CONDITION_CELLS, ConditionsSummaryView, useConditions } from "../components/Conditions";
+import { ConditionsSummaryView, useConditions } from "../components/Conditions";
 import { ArrowLeftIcon, WeatherIcon } from "../components/Icons";
 import { SpeciesFigure } from "../components/SpeciesPhoto";
 import type { SpeciesMapFile, StaticIndex } from "../products/types";
@@ -74,7 +74,8 @@ function SpeciesView({ region, index, map }: { region: string; index: StaticInde
   const lat = params.get("lat");
   const lon = params.get("lon");
   const point = useMemo(() => pointFrom(index, placeId, lat, lon), [index, placeId, lat, lon]);
-  const metric: MapMetric = params.get("view") === "compare" ? "lift" : "chance";
+  const view = params.get("view");
+  const metric: MapMetric = view === "compare" ? "lift" : view === "today" ? "today" : "chance";
   const mapPlaces = useMemo(
     () =>
       Object.entries(index.places).map(([id, p]) => ({
@@ -139,13 +140,28 @@ function SpeciesView({ region, index, map }: { region: string; index: StaticInde
   const currentPeriod = series?.granularity === "month" ? hit?.period : week;
 
   const hasLift = geo.features.some((f) => f.properties.liftBin >= 0);
-  const showLift = metric === "lift" && hasLift;
 
-  // Today's conditions over the week's highest cells (API only, on request).
-  const [conditionsOn, setConditionsOn] = useState(false);
+  // "Today vs usual": the day's forecast for every cell, in one API call, when that view is picked.
   const canCondition = api.enabled && !awareness && hit !== null && !presenceOnlyWeek;
   const dateWeek = weekOf(parseIsoDate(date) ?? new Date());
-  const conditions = useConditions(t.taxon_id, geo, date, conditionsOn && canCondition && week === dateWeek);
+  const todayOn = metric === "today" && canCondition;
+  const conditions = useConditions(t.taxon_id, region, date, todayOn && week === dateWeek);
+  const showToday = todayOn && week === dateWeek && !!conditions.summary && !conditions.summary.baselineOnly;
+  const shown: MapMetric = showToday ? "today" : metric === "lift" && hasLift ? "lift" : "chance";
+  const showLift = shown === "lift";
+  const mapData = useMemo(
+    () =>
+      showToday
+        ? {
+            ...geo,
+            features: geo.features.map((f) => {
+              const c = conditions.byCell.get(f.properties.cell);
+              return { ...f, properties: { ...f.properties, today: c?.ratio ?? null, todayBin: c?.bin ?? -1 } };
+            }),
+          }
+        : geo,
+    [geo, showToday, conditions.byCell],
+  );
 
   const mapLabel = awareness
     ? `Map of where ${displayName(t)} is present at landscape scale (awareness only).`
@@ -153,7 +169,7 @@ function SpeciesView({ region, index, map }: { region: string; index: StaticInde
       ? `No map is published for ${displayName(t)} in week ${week}.`
       : presenceOnlyWeek
         ? `Map of where ${displayName(t)} is present this time of year (awareness only).`
-        : `Map of ${displayName(t)}: ${showLift ? "chance compared with the wider area" : "chance per outing"} in week ${week} across ${geo.features.length} cells of ${km(hit.segment.resolution_km)}; highest chance ${percent(Math.max(0, ...values))}.`;
+        : `Map of ${displayName(t)}: ${showToday ? `the chance on ${shortDate(date)} against usual` : showLift ? "chance compared with the wider area" : "chance per outing"} in week ${week} across ${geo.features.length} cells of ${km(hit.segment.resolution_km)}; highest chance ${percent(Math.max(0, ...values))}.`;
 
   const placeName = placeId ? index.places[placeId]?.name : null;
   const whereText = placeName ?? (point ? "the point you chose" : null);
@@ -219,27 +235,22 @@ function SpeciesView({ region, index, map }: { region: string; index: StaticInde
         )}
         {!awareness && hit && !presenceOnlyWeek && (hasLift || canCondition) && (
           <div className="map-tools">
-            {hasLift && (
-              <div className="segmented" role="group" aria-label="Colour the map by">
-                <button type="button" aria-pressed={!showLift} onClick={() => update({ view: null })}>
-                  Chance
-                </button>
-                <button type="button" aria-pressed={showLift} onClick={() => update({ view: "compare" })}>
+            <div className="segmented" role="group" aria-label="Colour the map by">
+              <button type="button" aria-pressed={metric === "chance"} onClick={() => update({ view: null })}>
+                Chance
+              </button>
+              {hasLift && (
+                <button type="button" aria-pressed={metric === "lift"} onClick={() => update({ view: "compare" })}>
                   Compared with wider area
                 </button>
-              </div>
-            )}
-            {canCondition && (
-              <button
-                type="button"
-                className="toggle"
-                aria-pressed={conditionsOn}
-                onClick={() => setConditionsOn((v) => !v)}
-              >
-                <WeatherIcon />
-                {date === isoDate() ? "Today's conditions" : `Conditions on ${shortDate(date)}`}
-              </button>
-            )}
+              )}
+              {canCondition && (
+                <button type="button" aria-pressed={metric === "today"} onClick={() => update({ view: "today" })}>
+                  <WeatherIcon />
+                  {date === isoDate() ? "Today vs usual" : `${shortDate(date)} vs usual`}
+                </button>
+              )}
+            </div>
           </div>
         )}
         {showLift && !presenceOnlyWeek && (
@@ -248,7 +259,7 @@ function SpeciesView({ region, index, map }: { region: string; index: StaticInde
             their surroundings, even where the chance itself is low.
           </p>
         )}
-        {conditionsOn && canCondition && (
+        {todayOn && (
           <div className="conditions-panel">
             {week !== dateWeek ? (
               <p className="small">
@@ -259,25 +270,12 @@ function SpeciesView({ region, index, map }: { region: string; index: StaticInde
               </p>
             ) : conditions.state?.status === "loading" ? (
               <p className="loading muted small" role="status">
-                Getting the forecast for the {CONDITION_CELLS} highest cells…
+                Getting the forecast for every cell…
               </p>
             ) : conditions.state?.status === "error" ? (
               <p className="muted small">The forecast isn't available for this species right now.</p>
             ) : conditions.summary ? (
               <>
-                {conditions.summary.baselineOnly < conditions.summary.cells && (
-                  <ul className="legend" aria-label="Map legend: conditions against the usual chance">
-                    <li>
-                      <span className="swatch swatch-dot dot-up" aria-hidden="true" /> Better than usual
-                    </li>
-                    <li>
-                      <span className="swatch swatch-dot dot-same" aria-hidden="true" /> About usual
-                    </li>
-                    <li>
-                      <span className="swatch swatch-dot dot-down" aria-hidden="true" /> Worse than usual
-                    </li>
-                  </ul>
-                )}
                 <ConditionsSummaryView summary={conditions.summary} date={date} />
               </>
             ) : null}
@@ -286,22 +284,14 @@ function SpeciesView({ region, index, map }: { region: string; index: StaticInde
         <div className="map-wrap">
           <Suspense fallback={<div className="map map-placeholder">Loading map…</div>}>
             <MapView
-              data={geo}
+              data={mapData}
               bounds={bounds}
               theme={theme}
               basemap={config.basemap}
               layers={config.layers}
               selectedCell={selectedCell}
               label={mapLabel}
-              metric={showLift ? "lift" : "chance"}
-              markers={
-                conditionsOn &&
-                week === dateWeek &&
-                conditions.summary &&
-                conditions.summary.baselineOnly < conditions.summary.cells
-                  ? conditions.markers
-                  : undefined
-              }
+              metric={shown}
               places={mapPlaces}
               selectedPlace={placeId}
               onPlace={(id) => update({ place: id, lat: null, lon: null })}
@@ -310,7 +300,7 @@ function SpeciesView({ region, index, map }: { region: string; index: StaticInde
             />
           </Suspense>
         </div>
-        <Legend theme={theme} presence={awareness || presenceOnlyWeek} metric={showLift ? "lift" : "chance"} />
+        <Legend theme={theme} presence={awareness || presenceOnlyWeek} metric={shown} />
         {!awareness && hit && !presenceOnlyWeek && (
           <p className="muted small map-caption">
             {geo.features.length} cells of {km(hit.segment.resolution_km)}
@@ -494,5 +484,6 @@ function describeCell(c: CellFeatureProps): string {
   if (c.insufficient) return "Not enough data here";
   if (c.p === null) return "";
   const lift = c.lift === null ? "" : ` · ${times(c.lift)} the wider area`;
-  return `${percent(c.p)} chance per outing · ${CONFIDENCE_TEXT[c.confidence].toLowerCase()}${lift}`;
+  const today = c.today === null || c.today === undefined ? "" : ` · ${times(c.today)} usual on the chosen day`;
+  return `${percent(c.p)} chance per outing · ${CONFIDENCE_TEXT[c.confidence].toLowerCase()}${lift}${today}`;
 }

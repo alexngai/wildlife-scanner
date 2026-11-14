@@ -43,7 +43,7 @@ export function HomePage() {
                         </span>
                         <span className="muted small">
                           {r.index
-                            ? `${Object.keys(r.index.maps).length.toLocaleString("en")} species mapped · updated ${shortDate(r.index.published_at ?? r.index.baseline.built_at)}`
+                            ? `${Object.keys(r.index.places).length} places · data updated ${shortDate(r.index.published_at ?? r.index.baseline.built_at)}`
                             : "Not available right now"}
                         </span>
                       </span>

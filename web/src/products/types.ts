@@ -3,7 +3,7 @@
  * format; these types mirror it. Everything here is already policy-filtered upstream.
  */
 
-export const SUPPORTED_FORMAT = 2;
+export const SUPPORTED_FORMAT = 3;
 
 /** h(igh), m(edium), l(ow), i(nsufficient), - (none). */
 export type ConfidenceCode = "h" | "m" | "l" | "i" | "-";
@@ -41,7 +41,6 @@ export interface StaticIndex {
   p_scale: number;
   paths_relative_to?: string;
   taxa: string;
-  maps: Record<string, string>;
   places: Record<string, PlaceRef>;
 }
 
@@ -75,6 +74,13 @@ export interface TaxonEntry {
   tier: number;
   mode: TaxonMode;
   records: number;
+  /** The species' map file, relative to the region root; absent when nothing is mapped. */
+  map?: string;
+  /**
+   * The regional season: one level 0-9 per ISO week, relative to the species' own peak; null
+   * for withheld weeks. Only open and generalized species, weekly segments.
+   */
+  season?: (number | null)[] | null;
   /** Absent or null when there's no usable photo. */
   photo?: TaxonPhoto | null;
 }
@@ -134,13 +140,16 @@ export interface PlaceWeekGroup {
   peaking_now?: PlaceItemRow[];
 }
 
+/** One ISO week of a place's lists (`places/<place>.<key>/wNN.json`). */
 export interface PlaceWeek {
+  format?: number;
   week: number;
   groups: Record<string, PlaceWeekGroup>;
   awareness: string[];
   area_fallback: string[];
 }
 
+/** A place header (`places/<place>.<key>.json`): what every week shares. */
 export interface PlaceFile {
   format: number;
   place: {
@@ -158,5 +167,6 @@ export interface PlaceFile {
   awareness_message: string;
   taxa: Record<string, { scientific_name: string | null; common_name: string | null; group: string | null }>;
   groups: Record<string, PlaceGroupInfo>;
-  weeks: PlaceWeek[];
+  /** `weeks[w - 1]` is the path of ISO week w's file, relative to the region root. */
+  weeks: string[];
 }

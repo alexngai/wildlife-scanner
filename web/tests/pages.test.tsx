@@ -21,7 +21,6 @@ vi.mock("../src/components/MapView", () => ({
       data-cells={props.data.features.length}
       data-metric={props.metric}
       data-places={props.places?.length}
-      data-markers={props.markers?.length ?? 0}
     />
   ),
 }));
@@ -101,33 +100,24 @@ describe("species page", () => {
     expect((await screen.findAllByText(/At the point you chose/)).length).toBe(2); // calendar and forecast
   });
 
-  it("overlays today's conditions on the highest cells, on request", async () => {
+  it("colours the map by today vs usual from one batch forecast, on request", async () => {
     const user = userEvent.setup();
     const week = weekOf(new Date());
     const { requested } = renderApp(`/r/testland/species/testus-primus?week=${week}`, {
-      api: { "/species/testus-primus/forecast": fixtureApi("forecast") },
+      api: { "/species/testus-primus/forecast/map": fixtureApi("forecastMap") },
     });
     await screen.findByTestId("map");
     expect(requested.some((u) => u.includes("/forecast"))).toBe(false); // nothing until asked
-    await user.click(screen.getByRole("button", { name: "Today's conditions", pressed: false }));
+    await user.click(screen.getByRole("button", { name: "Today vs usual", pressed: false }));
     expect(await screen.findByText(/conditions raise the chance in/)).toHaveTextContent(
-      /raise the chance in 12, lower it in 0/,
+      /across 37 cells: conditions raise the chance in 13, lower it in 12/,
     );
-    expect(screen.getByTestId("map")).toHaveAttribute("data-markers", "12");
+    expect(screen.getByTestId("map")).toHaveAttribute("data-metric", "today");
+    expect(screen.getByRole("list", { name: /the day's chance against the usual chance/ })).toBeInTheDocument();
     expect(screen.getByText("Water temperature")).toBeInTheDocument();
-    expect(requested.filter((u) => u.includes("/forecast")).length).toBe(12);
-  });
-
-  it("shows the species photo with its credit, and a placeholder when the image fails", async () => {
-    renderApp("/r/testland/species/testus-primus?week=20");
-    const img = await screen.findByRole("img", { name: "Common Testbird" });
-    expect(img).toHaveAttribute("src", "/data/region=testland/static/photos/testus-primus.svg");
-    expect(img).toHaveAttribute("referrerpolicy", "no-referrer");
-    expect(screen.getByText(/Synthetic Fixture/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "CC BY" })).toHaveAttribute("rel", "license noreferrer");
-    fireEvent.error(img);
-    expect(screen.queryByRole("img", { name: "Common Testbird" })).toBeNull();
-    expect(screen.queryByText(/Synthetic Fixture/)).toBeNull();
+    const calls = requested.filter((u) => u.includes("/forecast"));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("/forecast/map?region=testland");
   });
 
   it("explains when the API isn't configured", async () => {
@@ -192,13 +182,14 @@ describe("region and search", () => {
 
   it("shows a season ribbon on search results, but not for awareness species", async () => {
     const user = userEvent.setup();
-    renderApp("/r/testland");
+    const { requested } = renderApp("/r/testland");
     await user.type(await screen.findByLabelText("Search species"), "test");
     const results = document.querySelector(".result-list") as HTMLElement;
     const bird = within(results).getByRole("link", { name: /Common Testbird/ });
     expect(await within(bird).findByRole("img", { name: /Season: Most recorded (April|May)/ })).toBeInTheDocument();
     const cat = within(results).getByRole("link", { name: /Shy Testcat/ });
     expect(within(cat).queryByRole("img")).toBeNull();
+    expect(requested.some((u) => u.includes("/static/maps/"))).toBe(false); // from taxa.json's season, no map files
   });
 
   it("compares places for one group on request", async () => {

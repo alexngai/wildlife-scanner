@@ -6,15 +6,15 @@
  * of the published chances in the group's most-likely list. Lists are capped (top 20), so this is
  * a lower bound, and the same cap applies to every place.
  */
-import type { PlaceFile } from "../products/types";
-import { listsFromPlaceFile, type ListItem } from "./lists";
+import type { ListItem, ListsView } from "./lists";
 
+/** A place with its lists for the week being compared (null when that week isn't available). */
 export interface HotspotPlace {
   id: string;
   name: string;
   lat: number;
   lon: number;
-  file: PlaceFile;
+  lists: ListsView | null;
 }
 
 export interface HotspotRow {
@@ -37,11 +37,11 @@ export interface GroupOption {
   places: number;
 }
 
-/** Effort groups with lists in `week`: most widely available first, then the busiest. */
-export function hotspotGroups(places: HotspotPlace[], week: number): GroupOption[] {
+/** Effort groups with lists that week: most widely available first, then the busiest. */
+export function hotspotGroups(places: HotspotPlace[]): GroupOption[] {
   const seen = new Map<string, GroupOption & { total: number }>();
   for (const p of places) {
-    for (const g of listsFromPlaceFile(p.file, week)?.groups ?? []) {
+    for (const g of p.lists?.groups ?? []) {
       if (g.mostLikely.length === 0) continue;
       const o = seen.get(g.id) ?? { id: g.id, label: g.label, places: 0, total: 0 };
       o.places += 1;
@@ -55,10 +55,10 @@ export function hotspotGroups(places: HotspotPlace[], week: number): GroupOption
     .map(({ id, label, places: n }) => ({ id, label, places: n }));
 }
 
-export function hotspots(places: HotspotPlace[], week: number, groupId: string): HotspotRow[] {
+export function hotspots(places: HotspotPlace[], groupId: string): HotspotRow[] {
   return places
     .map((p) => {
-      const g = listsFromPlaceFile(p.file, week)?.groups.find((x) => x.id === groupId);
+      const g = p.lists?.groups.find((x) => x.id === groupId);
       const score = g && g.mostLikely.length > 0 ? g.mostLikely.reduce((s, i) => s + i.p, 0) : null;
       const special =
         g?.specialHere.filter((i) => i.lift !== null && !i.coarser).sort((a, b) => (b.lift ?? 0) - (a.lift ?? 0))[0] ??

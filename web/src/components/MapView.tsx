@@ -27,15 +27,6 @@ export interface MapPlace {
   note?: string;
 }
 
-/** A point drawn over the cells, e.g. today's forecast against the usual chance. */
-export interface MapMarker {
-  lat: number;
-  lon: number;
-  /** -1 below usual, 0 about the same, 1 above. */
-  direction: -1 | 0 | 1;
-  text: string;
-}
-
 export interface MapViewProps {
   data: FeatureCollection;
   /** [w, s, e, n] to fit when the map opens (and when it changes). */
@@ -54,7 +45,6 @@ export interface MapViewProps {
   describe?: (cell: CellFeatureProps) => string;
   /** Accessible description of what the map shows (the map itself isn't readable by screen readers). */
   label: string;
-  markers?: MapMarker[];
   /** Extra base maps and overlays the viewer can switch on (from config). */
   layers?: MapLayerConfig[];
   /** A shorter map, for overviews. */
@@ -62,21 +52,8 @@ export interface MapViewProps {
 }
 
 const SRC = "wr-cells";
-const NO_MARKERS: MapMarker[] = [];
 const NO_LAYERS: MapLayerConfig[] = [];
 const PLACES = "wr-places";
-const MARKERS = "wr-markers";
-
-function markersData(markers: MapMarker[]): GeoData {
-  return {
-    type: "FeatureCollection",
-    features: markers.map((m) => ({
-      type: "Feature",
-      properties: { direction: m.direction, popup: m.text },
-      geometry: { type: "Point", coordinates: [m.lon, m.lat] },
-    })),
-  } as GeoData;
-}
 
 function blankStyle(theme: "light" | "dark"): StyleSpecification {
   return {
@@ -178,10 +155,13 @@ function matchBins(prop: string, ramp: string[], fallback: string): Expr {
 /** Fill colour by metric; presence and "not enough data" look the same in both. */
 export function fillColor(theme: "light" | "dark", metric: MapMetric): Expr {
   const dark = theme === "dark";
+  const none = dark ? "#16191d" : "#ffffff";
   const values =
     metric === "lift"
-      ? matchBins("liftBin", liftRampFor(theme), dark ? "#16191d" : "#ffffff")
-      : matchBins("bin", rampFor(theme), rampFor(theme)[0] ?? "#888888");
+      ? matchBins("liftBin", liftRampFor(theme), none)
+      : metric === "today"
+        ? matchBins("todayBin", liftRampFor(theme), none)
+        : matchBins("bin", rampFor(theme), rampFor(theme)[0] ?? "#888888");
   return [
     "case",
     ["get", "presence"],
@@ -202,8 +182,8 @@ function fillOpacity(metric: MapMetric, k = 1): Expr {
       0.45,
       ["get", "insufficient"],
       0.12,
-      // Cells with no comparison stay faint in the "compared" view.
-      metric === "lift" ? ["==", ["get", "liftBin"], -1] : false,
+      // Cells with no comparison stay faint in the "compared" and "today" views.
+      metric === "lift" ? ["==", ["get", "liftBin"], -1] : metric === "today" ? ["==", ["get", "todayBin"], -1] : false,
       0.15,
       ["==", ["get", "confidence"], "low"],
       0.4,
@@ -320,35 +300,6 @@ function addLayers(map: maplibregl.Map, s: Latest) {
     paint: { "line-color": dark ? "#ffffff" : "#111111", "line-width": 2.5 },
   });
 
-  const lift = liftRampFor(s.theme);
-  map.addSource(MARKERS, { type: "geojson", data: markersData(s.markers) });
-  map.addLayer({
-    id: "wr-markers",
-    type: "circle",
-    source: MARKERS,
-    paint: {
-      "circle-radius": ["case", ["==", ["get", "direction"], 0], 5, 8],
-      // "About usual" is a hollow ring, so it isn't mistaken for a place dot.
-      "circle-opacity": ["case", ["==", ["get", "direction"], 0], 0, 1],
-      "circle-color": [
-        "match",
-        ["get", "direction"],
-        1,
-        lift[4] ?? "#e66101",
-        -1,
-        lift[0] ?? "#5e3c99",
-        dark ? "#c3c8cf" : "#5b6168",
-      ] as unknown as Expr,
-      "circle-stroke-color": [
-        "case",
-        ["==", ["get", "direction"], 0],
-        dark ? "#c3c8cf" : "#5b6168",
-        dark ? "#1b1f24" : "#ffffff",
-      ] as unknown as Expr,
-      "circle-stroke-width": 2,
-    },
-  });
-
   map.addSource(PLACES, { type: "geojson", data: placesData(s.places) });
   map.addLayer({
     id: "wr-places",
@@ -389,7 +340,6 @@ interface Latest {
   metric: MapMetric;
   selectedCell: string | null;
   places: MapPlace[];
-  markers: MapMarker[];
   layers: MapLayerConfig[];
   choice: LayerChoice;
   selectedPlace: string | null;
@@ -412,7 +362,6 @@ export default function MapView({
   describe,
   label,
   short = false,
-  markers = NO_MARKERS,
   layers = NO_LAYERS,
 }: MapViewProps) {
   const stored = useLayerChoice();
@@ -426,7 +375,7 @@ export default function MapView({
     metric,
     selectedCell,
     places,
-    markers,
+
     layers,
     choice,
     selectedPlace,
@@ -441,7 +390,7 @@ export default function MapView({
       metric,
       selectedCell,
       places,
-      markers,
+
       layers,
       choice,
       selectedPlace,
@@ -487,11 +436,9 @@ export default function MapView({
       }
     });
 
-    // Points drawn over the cells (places, markers) take hover and taps before the cell under them.
-    const overlayAt = (e: MapLayerMouseEvent) => {
-      const layers = ["wr-places", "wr-markers"].filter((l) => map.getLayer(l));
-      return layers.length > 0 ? map.queryRenderedFeatures(e.point, { layers })[0] : undefined;
-    };
+    // Places drawn over the cells take hover and taps before the cell under them.
+    const overlayAt = (e: MapLayerMouseEvent) =>
+      map.getLayer("wr-places") ? map.queryRenderedFeatures(e.point, { layers: ["wr-places"] })[0] : undefined;
     const showCell = (e: MapLayerMouseEvent) => {
       const props = e.features?.[0]?.properties as CellFeatureProps | undefined;
       const text = props && latest.current.describe?.(props);
@@ -499,12 +446,9 @@ export default function MapView({
     };
 
     map.on("click", "wr-fill", (e: MapLayerMouseEvent) => {
-      const over = overlayAt(e);
-      if (over?.layer.id === "wr-places") return; // the place handles it
+      if (overlayAt(e)) return; // the place handles it
       const f = e.features?.[0];
-      const markerText = over?.properties?.popup as string | undefined;
-      if (markerText) popup.setLngLat(e.lngLat).setText(markerText).addTo(map);
-      else showCell(e);
+      showCell(e);
       latest.current.onSelect?.({
         lat: e.lngLat.lat,
         lon: e.lngLat.lng,
@@ -519,11 +463,6 @@ export default function MapView({
       const id = e.features?.[0]?.properties?.id as string | undefined;
       if (id) latest.current.onPlace?.(id);
     });
-    map.on("mousemove", "wr-markers", (e: MapLayerMouseEvent) => {
-      const text = e.features?.[0]?.properties?.popup as string | undefined;
-      if (text) popup.setLngLat(e.lngLat).setText(text).addTo(map);
-    });
-    map.on("mouseleave", "wr-markers", () => popup.remove());
     map.on("mousemove", "wr-places", (e: MapLayerMouseEvent) => {
       const text = e.features?.[0]?.properties?.popup as string | undefined;
       if (text) popup.setLngLat(e.lngLat).setText(text).addTo(map);
@@ -578,11 +517,6 @@ export default function MapView({
     const map = mapRef.current;
     if (map?.getLayer("wr-selected")) map.setFilter("wr-selected", ["==", ["get", "cell"], selectedCell ?? ""]);
   }, [selectedCell]);
-
-  useEffect(() => {
-    const src = mapRef.current?.getSource(MARKERS) as GeoJSONSource | undefined;
-    src?.setData(markersData(markers));
-  }, [markers]);
 
   useEffect(() => {
     const src = mapRef.current?.getSource(PLACES) as GeoJSONSource | undefined;

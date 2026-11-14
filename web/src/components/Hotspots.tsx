@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { useServices } from "../context";
 import { percent } from "../lib/format";
 import { hotspotGroups, hotspots, type HotspotPlace } from "../lib/hotspots";
+import { listsFromPlace } from "../lib/lists";
 import { useAsync } from "../lib/useAsync";
 import { weekOf } from "../lib/weeks";
 import type { StaticIndex } from "../products/types";
@@ -49,18 +50,27 @@ function HotspotsView({ region, index }: { region: string; index: StaticIndex })
   const [chosen, setChosen] = useState<string | null>(null);
   const year = new Date().getFullYear();
 
+  // Headers are cached; each week loads one small file per place.
   const loaded = useAsync(async () => {
     const entries = Object.entries(index.places);
-    const files = await Promise.allSettled(entries.map(([id]) => products.place(region, id)));
-    return entries.flatMap(([id, ref], i): HotspotPlace[] => {
-      const r = files[i];
-      return r?.status === "fulfilled" ? [{ id, name: ref.name, lat: ref.lat, lon: ref.lon, file: r.value }] : [];
+    const lists = await Promise.allSettled(
+      entries.map(async ([id]) => {
+        const [header, w] = await Promise.all([products.place(region, id), products.placeWeek(region, id, week)]);
+        return listsFromPlace(header, w);
+      }),
+    );
+    return entries.map(([id, ref], i): HotspotPlace => {
+      const r = lists[i];
+      return { id, name: ref.name, lat: ref.lat, lon: ref.lon, lists: r?.status === "fulfilled" ? r.value : null };
     });
-  }, [products, region, index]);
-  const places = loaded?.status === "ok" ? loaded.data : null;
-  const groups = useMemo(() => (places ? hotspotGroups(places, week) : []), [places, week]);
+  }, [products, region, index, week]);
+  // Keep showing the last week while the next one loads (no flicker while playing).
+  const [last, setLast] = useState<HotspotPlace[] | null>(null);
+  if (loaded?.status === "ok" && loaded.data !== last) setLast(loaded.data);
+  const places = loaded?.status === "ok" ? loaded.data : last;
+  const groups = useMemo(() => (places ? hotspotGroups(places) : []), [places]);
   const group = groups.find((g) => g.id === chosen) ?? groups[0] ?? null;
-  const rows = useMemo(() => (places && group ? hotspots(places, week, group.id) : []), [places, week, group]);
+  const rows = useMemo(() => (places && group ? hotspots(places, group.id) : []), [places, group]);
   const max = Math.max(0, ...rows.map((r) => r.score ?? 0));
   const mapPlaces = useMemo(
     () =>
@@ -75,8 +85,13 @@ function HotspotsView({ region, index }: { region: string; index: StaticIndex })
     [rows, max],
   );
 
-  if (!loaded || loaded.status === "loading") return <Loading label="Loading every place's lists…" />;
-  if (!places || places.length === 0) return <p className="muted">The place lists couldn't be loaded.</p>;
+  if (!places)
+    return loaded?.status === "error" ? (
+      <p className="muted">The place lists couldn't be loaded.</p>
+    ) : (
+      <Loading label="Loading every place's lists…" />
+    );
+  if (places.every((p) => p.lists === null)) return <p className="muted">The place lists couldn't be loaded.</p>;
 
   return (
     <div className="hotspots">

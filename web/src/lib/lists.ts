@@ -4,7 +4,7 @@
  * and the life list kept in this browser, so the life list never leaves the device.
  */
 import type { components } from "../api/schema";
-import type { License, PlaceFile, PlaceItemRow } from "../products/types";
+import type { License, PlaceFile, PlaceItemRow, PlaceWeek } from "../products/types";
 import { capitalize } from "./format";
 import { normalizeConfidence, type ConfidenceLevel } from "./policy";
 
@@ -53,9 +53,8 @@ function fieldIndex(fields: string[], name: string, fallback: number): number {
   return i >= 0 ? i : fallback;
 }
 
-export function listsFromPlaceFile(file: PlaceFile, week: number): ListsView | null {
-  const w = file.weeks[week - 1] ?? file.weeks.find((x) => x.week === week);
-  if (!w) return null;
+/** One week of a place's lists: the header (names, groups, fields) and that week's file. */
+export function listsFromPlace(file: PlaceFile, w: PlaceWeek): ListsView {
   const f = file.item_fields;
   const idx = {
     id: fieldIndex(f, "taxon_id", 0),

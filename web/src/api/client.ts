@@ -15,6 +15,8 @@ export type RecentItem = Schemas["RecentItem"];
 export type PlaceLists = Schemas["PlaceLists"];
 export type Calendar = Schemas["Calendar"];
 export type Driver = Schemas["Driver"];
+export type MapForecast = Schemas["MapForecast"];
+export type CellForecastApi = Schemas["CellForecast"];
 
 export interface TimingCategory {
   category: string;
@@ -83,6 +85,15 @@ export class ApiClient {
 
   forecast(taxonId: string, where: Where, date?: string): Promise<Forecast> {
     return this.get(`/species/${encodeURIComponent(taxonId)}/forecast`, { ...whereParams(where), date });
+  }
+
+  /** The day's forecast for every cell of the week's map (or the listed cells), in one call. */
+  forecastMap(taxonId: string, region: string, date?: string, cells?: string[]): Promise<MapForecast> {
+    return this.get(`/species/${encodeURIComponent(taxonId)}/forecast/map`, {
+      region,
+      date,
+      cells: cells && cells.length > 0 ? cells.join(",") : undefined,
+    });
   }
 
   hourly(taxonId: string, where: Where, date?: string): Promise<HourlyForecast> {
