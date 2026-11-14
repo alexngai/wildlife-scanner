@@ -98,7 +98,7 @@ def test_observed_geoprivacy_raises_tier(store):
 
 def test_bundled_region_status_file():
     region = load_region("socal")
-    provider = RegionStatusFile(region_dir("socal") / "statuses.yaml")
+    provider = RegionStatusFile(region_dir("california") / "statuses.yaml")
     puma = provider.lookup_many([TaxonInfo(taxon_id="puma-concolor", scientific_name="P c")])
     statuses = puma["puma-concolor"].statuses
     assert statuses and statuses[0].scope in region.scopes

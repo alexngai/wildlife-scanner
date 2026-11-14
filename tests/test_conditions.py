@@ -114,6 +114,31 @@ def test_normals_use_days_before_cutoff(world):
     assert clim[("TEST1", 200)] > clim[("TEST1", 20)]
 
 
+def test_scorecard_flags_claims_for_review(world):
+    """A term that helps for a reason other than the profile's is marked for review."""
+    conn = world.conn
+    wrong = TermSpec(
+        "sst_anomaly", "ocean.sst_anomaly_c", "linear", "moderate", True, direction="-"
+    )
+    (report,) = run_conditions(
+        conn,
+        region_id="review",
+        bbox=BBOX,
+        split=SPLIT,
+        end=None,
+        specs={"piscis-calida": [wrong]},  # warm water helps this species
+        station_coords={"TEST1": SITE},
+        reps=30,
+    )
+    score = report.scorecard[0]
+    assert score.verdict == "supported" and score.direction_fitted == "+"
+    assert score.review == "fitted direction + contradicts the profile's -"
+    stored = conn.execute(
+        "SELECT review FROM hypothesis_scorecard WHERE region_id = 'review'"
+    ).fetchone()
+    assert stored == (score.review,)
+
+
 def test_levels_and_scorecard(world):
     conn = world.conn
     sst_anomaly = TermSpec("sst_anomaly", "ocean.sst_anomaly_c", "linear", "moderate", True)
@@ -146,7 +171,8 @@ def test_levels_and_scorecard(world):
         "ORDER BY 1, 2"
     ).fetchall()
     assert ("piscis-calida", 1, True) in gates
-    assert conn.execute("SELECT count(*) FROM hypothesis_scorecard").fetchone()[0] == 3
+    n = "SELECT count(*) FROM hypothesis_scorecard WHERE region_id = 'cond'"
+    assert conn.execute(n).fetchone()[0] == 3
     assert conn.execute("SELECT count(*) FROM conditions_models").fetchone()[0] >= 6
 
 
@@ -240,10 +266,35 @@ def test_forecast_uses_gated_levels_and_explains(world):
     assert hot.level >= 1 and hot.drivers[0].term == "sst_anomaly"
     assert hot.drivers[0].contribution > 0 > cold.drivers[0].contribution
     assert hot.p > hot.p_level0 and cold.p < cold.p_level0
+    # Signals are loaded once per service, not per request.
+    assert len(service._lookups) == 1
+    loaded = next(iter(service._lookups.values()))
+    service.forecast("piscis-calida", *SITE, cool)
+    assert next(iter(service._lookups.values())) is loaded
     # No model passed its gate: Level 0, labeled.
     flat = service.forecast("piscis-indifferens", *SITE, warm)
     assert flat.level == 0 and flat.p == flat.p_level0
     assert any("gate" in n for n in flat.notes)
+    # The batch form: every cell of the week's map, each equal to the single-cell forecast.
+    import h3
+
+    batch = service.forecast_map("piscis-calida", warm)
+    assert batch.level == hot.level and batch.cells
+    by_cell = {c.cell: c for c in batch.cells}
+    assert hot.cell in by_cell
+    # (The batch starts from the map's baseline, rounded to 6 decimals.)
+    assert abs(by_cell[hot.cell].p - hot.p) < 2e-6
+    assert abs(by_cell[hot.cell].p_level0 - hot.p_level0) < 2e-6
+    lat, lon = h3.cell_to_latlng(batch.cells[-1].cell)
+    one = service.forecast("piscis-calida", lat, lon, warm)
+    assert abs(by_cell[one.cell].p - one.p) < 2e-6
+    assert by_cell[one.cell].drivers == one.drivers
+    some = service.forecast_map("piscis-calida", warm, cells=[hot.cell, "8a2a1072b59ffff"])
+    assert [c.cell for c in some.cells] == [hot.cell] and any(
+        "not on this map" in n for n in some.notes
+    )
+    gated = service.forecast_map("piscis-indifferens", warm)
+    assert gated.level == 0 and all(c.p == c.p_level0 for c in gated.cells)
 
 
 def test_nowcast_for_open_taxa_without_profiles(world):

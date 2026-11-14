@@ -7,8 +7,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
+
+from wildlife_radar.regions import load_region
+
+PUBLISH_URL_ENV = "WILDLIFE_RADAR_PUBLISH_URL"
+"""Object storage for published versions, e.g. ``s3://wildlife-radar-publish``."""
+LAKE_URL_ENV = "WILDLIFE_RADAR_LAKE_URL"
+"""Private object storage for shared lake layers (``ref``), e.g. ``s3://wildlife-radar-lake``."""
 
 DEFAULT_DB = "data/wildlife-radar.duckdb"
 
@@ -30,25 +39,24 @@ def _statuses_path(args: argparse.Namespace, region):
         if not path.exists():
             raise SystemExit(f"error: {path} not found")
         return path
-    candidates = [region_dir(region.id) / "statuses.yaml"]
-    if Path(args.region).suffix:
-        candidates.append(Path(args.region).parent / "statuses.yaml")
-    return next((p for p in candidates if p.exists()), None)
+    from wildlife_radar.regions import pack_file
+
+    pack = Path(args.region).parent if Path(args.region).suffix else region_dir(region.id)
+    return pack_file(region, "statuses.yaml", pack)
 
 
 def _registry(args: argparse.Namespace):
     from pathlib import Path
 
     from wildlife_radar.baseline.effort import DatasetRegistry
-    from wildlife_radar.regions import region_dir
+    from wildlife_radar.regions import pack_file, region_dir
 
     region = _region(args)
-    path = (
-        Path(args.datasets)
-        if getattr(args, "datasets", None)
-        else (region_dir(region.id) / "datasets.yaml")
-    )
-    return DatasetRegistry.load(path)
+    if getattr(args, "datasets", None):
+        return DatasetRegistry.load(Path(args.datasets))
+    pack = Path(args.region).parent if Path(args.region).suffix else region_dir(region.id)
+    path = pack_file(region, "datasets.yaml", pack)
+    return DatasetRegistry.load(path) if path else DatasetRegistry()
 
 
 def _print(model) -> None:
@@ -196,14 +204,21 @@ def cmd_build_tiers(args: argparse.Namespace) -> int:
     with ObservationStore(args.db) as store:
         providers = [RegionStatusFile(statuses)] if statuses else []
         if not args.offline:
-            from wildlife_radar.connectors.inaturalist_taxa import InatTaxonStatusProvider
+            from wildlife_radar.connectors.inaturalist_taxa import (
+                InatTaxonStatusProvider,
+                RecordCache,
+            )
 
+            # A refresh bypasses both the parsed lookups and the raw records.
+            max_age = timedelta(0) if args.refresh_statuses else timedelta(days=90)
             providers.append(
                 CachedStatusProvider(
                     store.conn,
-                    max_age=timedelta(0) if args.refresh_statuses else timedelta(days=90),
+                    max_age=max_age,
                     inner=InatTaxonStatusProvider(
-                        region.inat_place_scopes, innermost_place=region.inat_innermost_place
+                        region.inat_place_scopes,
+                        innermost_place=region.inat_innermost_place,
+                        records=RecordCache(store.conn, max_age=max_age),
                     ),
                 )
             )
@@ -347,12 +362,184 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     from wildlife_radar.api import create_app
 
+    regions = [load_region(r.strip()).id for r in args.region.split(",") if r.strip()]
+    bundle_dir = args.bundle_dir
+    url = args.bundle_url
+    if not url and not bundle_dir and not args.db_only:
+        url = os.environ.get(PUBLISH_URL_ENV)
+    if url:
+        # Mirror the bucket's CURRENT bundle locally, then follow it like a local publish root.
+        import threading
+        import time
+
+        from wildlife_radar.pipeline.sync import pull_current
+        from wildlife_radar.storage.objects import open_store
+
+        store = open_store(url)
+        bundle_dir = args.cache_dir
+        for region_id in regions:
+            pull_current(store, region_id, Path(bundle_dir))
+
+        def refresh() -> None:
+            while True:
+                time.sleep(args.refresh_seconds)
+                for region_id in regions:
+                    try:
+                        if version := pull_current(store, region_id, Path(bundle_dir)):
+                            print(f"{region_id}: bundle {version} ready", file=sys.stderr)
+                    except Exception as exc:  # keep serving the current bundle
+                        print(f"{region_id}: bundle refresh failed: {exc}", file=sys.stderr)
+
+        threading.Thread(target=refresh, daemon=True).start()
     app = (
-        create_app(bundle_dir=args.bundle_dir, region_id=args.region)
-        if args.bundle_dir
-        else create_app(args.db, region_id=args.region)
+        create_app(bundle_dir=bundle_dir, region_id=regions)
+        if bundle_dir
+        else create_app(args.db, region_id=regions[0])
     )
     uvicorn.run(app, host=args.host, port=args.port)
+    return 0
+
+
+def _run_params(args: argparse.Namespace) -> dict:
+    return {
+        k: v
+        for k, v in {
+            "statuses": args.statuses,
+            "datasets": args.datasets,
+            "allow_findings": getattr(args, "allow_findings", False),
+            "ingest_snapshots": args.ingest_snapshots,
+            "snapshot_date": args.snapshot_date,
+            "snapshot_workers": args.snapshot_workers,
+            "keep_staging": args.keep_staging,
+            "reingest_snapshot": args.reingest_snapshot,
+        }.items()
+        if v
+    }
+
+
+def cmd_worker(args: argparse.Namespace) -> int:
+    """Run the job graph on a fixed tick and push each new version to object storage."""
+    from datetime import timedelta
+
+    from wildlife_radar.pipeline import worker
+    from wildlife_radar.pipeline.runner import context
+    from wildlife_radar.storage.objects import open_store
+
+    url = args.publish_url or os.environ.get(PUBLISH_URL_ENV)
+    store = open_store(url) if url else None
+    lake_url = args.lake_url or os.environ.get(LAKE_URL_ENV)
+    lake_store = open_store(lake_url) if lake_url else None
+    params = _run_params(args)
+    regions = [r.strip() for r in args.region.split(",") if r.strip()]
+    if len(regions) > 1 and "{region}" not in args.db:
+        raise SystemExit("with several regions, --db needs a {region} placeholder")
+
+    def make_contexts():
+        out = []
+        for region in regions:
+            ctx = context(region, args.db.format(region=region), args.lake, dict(params))
+            ctx.log = lambda msg, r=region: print(f"[{r}] {msg}", file=sys.stderr, flush=True)
+            out.append(ctx)
+        return out
+
+    if args.once:
+        outs = [worker.tick(c, store, lake_store=lake_store) for c in make_contexts()]
+        print(json.dumps(outs, indent=2, default=str))
+        return 1 if any(o["failed"] or "push_error" in o for o in outs) else 0
+    worker.loop(
+        make_contexts,
+        timedelta(minutes=args.every),
+        store,
+        lake_store=lake_store,
+        log=lambda m: print(m, flush=True),
+    )
+    return 0
+
+
+def cmd_coverage_snapshot(args: argparse.Namespace) -> int:
+    """Extract a coverage area from a GBIF snapshot into Parquet tiles (once for its regions)."""
+    from wildlife_radar.connectors import gbif_snapshot_remote as remote
+    from wildlife_radar.pipeline import coverage
+
+    date_ = args.snapshot_date or remote.latest_snapshot()
+    out = coverage.build(
+        load_region(args.coverage),
+        date_,
+        Path(args.lake),
+        workers=args.workers,
+        keep_staging=args.keep_staging,
+        log=lambda m: print(m, file=sys.stderr, flush=True),
+    )
+    print(json.dumps({k: v for k, v in out.items() if k != "tiles"}, indent=2, default=str))
+    return 0
+
+
+def cmd_push_publish(args: argparse.Namespace) -> int:
+    """Upload the region's current published version to object storage and swap its pointer."""
+    from wildlife_radar.pipeline.sync import push_publish
+    from wildlife_radar.storage.objects import open_store
+
+    url = args.publish_url or os.environ.get(PUBLISH_URL_ENV)
+    if not url:
+        raise SystemExit(f"--publish-url or {PUBLISH_URL_ENV} is required")
+    region_id = load_region(args.region).id
+    out = push_publish(Path(args.lake) / "publish", open_store(url), region_id, args.keep)
+    print(json.dumps(out, indent=2))
+    return 0
+
+
+def cmd_lake_sync(args: argparse.Namespace) -> int:
+    """Copy the lake's shared layers (reference store, normalized observations) to and from
+    private object storage."""
+    from wildlife_radar.pipeline import coverage
+    from wildlife_radar.pipeline.sync import sync_lake
+    from wildlife_radar.storage.objects import open_store
+
+    url = args.lake_url or os.environ.get(LAKE_URL_ENV)
+    if not url:
+        raise SystemExit(f"--lake-url or {LAKE_URL_ENV} is required")
+    lake = Path(args.lake)
+    out: dict = {}
+    if args.push:
+        # Tiles built before the size cap may be too big for one upload: cut them first.
+        root = lake / "norm" / "observations" / "source=gbif"
+        split: list[str] = []
+        for marker in root.glob(f"snapshot=*/coverage=*/{coverage.SUCCESS}"):
+            folder = marker.parent
+            split += coverage.split_large(
+                lake,
+                folder.name.removeprefix("coverage="),
+                folder.parent.name.removeprefix("snapshot="),
+            )
+        if split:
+            out["split"] = split
+    out.update(
+        sync_lake(
+            open_store(url),
+            lake,
+            push=args.push,
+            pull=args.pull,
+            pull_prefixes=tuple(args.pull_prefix) if args.pull_prefix else ("ref", "norm"),
+            workers=args.workers,
+            prune=args.prune,
+            log=lambda m: print(m, file=sys.stderr, flush=True),
+        )
+    )
+    print(json.dumps(out, indent=2))
+    return 0
+
+
+def cmd_lake_prune(args: argparse.Namespace) -> int:
+    """Drop coverage snapshots and live-log days the lake no longer needs (here and remotely)."""
+    from datetime import UTC, datetime
+
+    from wildlife_radar.pipeline import retention
+    from wildlife_radar.storage.objects import open_store
+
+    url = args.lake_url or os.environ.get(LAKE_URL_ENV)
+    store = open_store(url) if url and not args.local_only else None
+    out = retention.prune(Path(args.lake), datetime.now(UTC), store=store, dry_run=args.dry_run)
+    print(json.dumps(out, indent=2))
     return 0
 
 
@@ -374,15 +561,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                 cadence = f"every {age.seconds // 60}m"
             print(f"{job.name:<11} needs {deps:<36} {cadence:<10} {job.description}")
         return 0
-    params = {
-        k: v
-        for k, v in {
-            "statuses": args.statuses,
-            "datasets": args.datasets,
-            "allow_findings": args.allow_findings,
-        }.items()
-        if v
-    }
+    params = _run_params(args)
     ctx = context(args.region, args.db, args.lake, params)
     ctx.log = lambda msg: print(msg, file=sys.stderr)
     force = tuple(f.strip() for f in (args.force or "").split(",") if f.strip())
@@ -400,7 +579,9 @@ def cmd_publish(args: argparse.Namespace) -> int:
 
     import yaml
 
+    from wildlife_radar.core.time import utcnow
     from wildlife_radar.pipeline.publish import PublishBlocked, publish_bundle
+    from wildlife_radar.pipeline.static import before_swap
     from wildlife_radar.storage import ObservationStore
 
     region = _region(args)
@@ -418,6 +599,8 @@ def cmd_publish(args: argparse.Namespace) -> int:
                 curated_ids=curated,
                 registry=_registry(args),
                 allow_findings=args.allow_findings,
+                now=(now := utcnow()),
+                before_swap=None if args.no_static else before_swap(region, now),
             )
         except PublishBlocked as exc:
             print(f"error: publishing blocked: {exc}; run audit-tiers for details", file=sys.stderr)
@@ -481,6 +664,23 @@ def cmd_demo(args: argparse.Namespace) -> int:
     )
     print(f"  wildlife-radar serve --db {args.db}")
     return 0
+
+
+def snapshot_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--ingest-snapshots",
+        action="store_true",
+        help="snapshot job: ingest the newest monthly GBIF snapshot when one is newer (network)",
+    )
+    p.add_argument("--snapshot-date", help="with --ingest-snapshots: this snapshot, not the newest")
+    p.add_argument("--snapshot-workers", type=int, help="download threads (default 10)")
+    p.add_argument("--keep-staging", action="store_true", help="keep staged snapshot rows")
+    p.add_argument(
+        "--reingest-snapshot",
+        action="store_true",
+        help="with --ingest-snapshots: ingest the snapshot even if its date was already "
+        "ingested (e.g. to switch a region to its coverage tiles)",
+    )
 
 
 def register(sub: argparse._SubParsersAction) -> None:
@@ -574,6 +774,16 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8000)
     p.add_argument("--bundle-dir", help="serve published bundles from this root (follows CURRENT)")
+    p.add_argument(
+        "--bundle-url",
+        help=f"mirror bundles from object storage (s3://bucket/prefix or a folder; "
+        f"default ${PUBLISH_URL_ENV})",
+    )
+    p.add_argument("--cache-dir", default="data/bundles", help="local copy of mirrored bundles")
+    p.add_argument("--refresh-seconds", type=int, default=60, help="how often to check CURRENT")
+    p.add_argument(
+        "--db-only", action="store_true", help=f"serve --db even if ${PUBLISH_URL_ENV} is set"
+    )
     p.set_defaults(func=cmd_serve)
 
     p = sub.add_parser("run", help="run the job graph up to a target (only stale jobs)")
@@ -585,7 +795,73 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--statuses", help="curated statuses YAML (default: the region pack's)")
     p.add_argument("--datasets", help="dataset registry YAML (default: the region pack's)")
     p.add_argument("--allow-findings", action="store_true", help="publish despite high findings")
+    snapshot_args(p)
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("worker", help="run the job graph on a schedule and push new versions")
+    common(p)
+    p.add_argument(
+        "--lake-url",
+        help=f"private object storage to share the reference store through (${LAKE_URL_ENV})",
+    )
+    p.add_argument("--lake", default="data/lake", help="lake root (manifests, publish)")
+    p.add_argument("--every", type=int, default=30, help="minutes between ticks")
+    p.add_argument("--once", action="store_true", help="run a single tick and exit")
+    p.add_argument(
+        "--publish-url", help=f"object storage for published versions (default ${PUBLISH_URL_ENV})"
+    )
+    p.add_argument("--statuses", help="curated statuses YAML (default: the region pack's)")
+    p.add_argument("--datasets", help="dataset registry YAML (default: the region pack's)")
+    snapshot_args(p)
+    p.set_defaults(func=cmd_worker)
+
+    p = sub.add_parser(
+        "coverage-snapshot", help="extract a coverage area from a GBIF snapshot into tiles"
+    )
+    p.add_argument("--coverage", default="california", help="region pack of the coverage area")
+    p.add_argument("--snapshot-date", help="default: the newest complete snapshot")
+    p.add_argument("--lake", default="data/lake")
+    p.add_argument("--workers", type=int, default=10)
+    p.add_argument("--keep-staging", action="store_true")
+    p.set_defaults(func=cmd_coverage_snapshot)
+
+    p = sub.add_parser(
+        "lake-sync", help="copy the lake's ref/ and norm/ layers to and from private storage"
+    )
+    common(p)
+    p.add_argument("--lake", default="data/lake", help="lake root")
+    p.add_argument("--lake-url", help=f"e.g. r2://<account>/<bucket>/lake (${LAKE_URL_ENV})")
+    p.add_argument("--push", action="store_true", help="upload what the bucket lacks")
+    p.add_argument("--pull", action="store_true", help="download what this machine lacks")
+    p.add_argument(
+        "--pull-prefix",
+        action="append",
+        help="with --pull: only keys under this prefix (repeatable), e.g. ref",
+    )
+    p.add_argument("--workers", type=int, default=4, help="parallel transfers")
+    p.add_argument(
+        "--prune",
+        action="store_true",
+        help="with --push: delete remote snapshot files this lake no longer has (split tiles)",
+    )
+    p.set_defaults(func=cmd_lake_sync)
+
+    p = sub.add_parser(
+        "lake-prune", help="drop old coverage snapshots and live-log days (keeps the newest two)"
+    )
+    common(p)
+    p.add_argument("--lake", default="data/lake", help="lake root")
+    p.add_argument("--lake-url", help=f"also delete remotely (${LAKE_URL_ENV})")
+    p.add_argument("--local-only", action="store_true", help="don't touch object storage")
+    p.add_argument("--dry-run", action="store_true", help="list what would be deleted")
+    p.set_defaults(func=cmd_lake_prune)
+
+    p = sub.add_parser("push-publish", help="upload the current published version")
+    common(p)
+    p.add_argument("--lake", default="data/lake", help="lake root (manifests, publish)")
+    p.add_argument("--publish-url", help=f"default ${PUBLISH_URL_ENV}")
+    p.add_argument("--keep", type=int, default=6, help="versions to keep remotely")
+    p.set_defaults(func=cmd_push_publish)
 
     p = sub.add_parser("publish", help="write a policy-filtered serving bundle (audit-gated)")
     common(p)
@@ -595,6 +871,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--allow-findings", action="store_true", help="publish despite high audit findings"
     )
+    p.add_argument("--no-static", action="store_true", help="skip the static products")
     p.set_defaults(func=cmd_publish)
 
     p = sub.add_parser("demo", help="build an offline demo database from synthetic data")

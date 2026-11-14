@@ -7,14 +7,16 @@ it is younger than its cadence (``max_age``). ``run`` walks the graph to the tar
 only stale jobs; a failed job leaves no complete manifest, so it runs again next time.
 
 Jobs operate on the region's work store (a DuckDB file); serving reads only published bundles,
-so builds never block the API. Global reference jobs (identity, statuses) are per region for
-now and will move to a shared store with the lake (data-platform.md §8).
+so builds never block the API. Identities and raw iNaturalist taxon records are shared by all
+regions through the reference store (``lake/ref``, storage/refstore.py).
 """
 
 from __future__ import annotations
 
 import json
+import math
 import os
+import shutil
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -43,17 +45,26 @@ class JobContext:
 
         return ObservationStore(self.db)
 
+    def ref(self):
+        """The global reference store shared by all regions (``lake/ref``)."""
+        from wildlife_radar.storage.refstore import RefStore
+
+        return RefStore(self.lake / "ref", writer=self.region.id)
+
     def registry(self):
         from wildlife_radar.baseline.effort import DatasetRegistry
+        from wildlife_radar.regions import pack_file
 
-        path = self.params.get("datasets") or (
-            self.region_path / "datasets.yaml" if self.region_path else None
+        path = self.params.get("datasets") or pack_file(
+            self.region, "datasets.yaml", self.region_path
         )
         return DatasetRegistry.load(Path(path)) if path else DatasetRegistry()
 
     def statuses_path(self) -> Path | None:
-        path = self.params.get("statuses") or (
-            self.region_path / "statuses.yaml" if self.region_path else None
+        from wildlife_radar.regions import pack_file
+
+        path = self.params.get("statuses") or pack_file(
+            self.region, "statuses.yaml", self.region_path
         )
         return Path(path) if path and Path(path).exists() else None
 
@@ -84,35 +95,190 @@ class Job:
 
 
 def _snapshot(ctx: JobContext) -> dict:
+    """Register the store's GBIF snapshot ingest; with ``ingest_snapshots``, first ingest the
+    newest complete monthly snapshot if it is newer than the last one ingested.
+
+    A region inside a coverage area (``coverage:`` in its pack) reads that area's snapshot
+    tiles, built once for all its regions, and drops GBIF rows the new snapshot no longer has
+    (deleted or withdrawn at the source; pipeline/coverage.py). Other regions extract their
+    own bounding box.
+
+    Reports ``unchanged`` when nothing new arrived, so downstream jobs keep their inputs and a
+    weekly check costs one bucket listing, not a rebuild.
+    """
+    prev = latest(ctx.lake, ctx.region.id, "snapshot")
+    prev_out = (prev or {}).get("outputs") or {}
+    prev_ok = bool(prev and prev.get("status") == "complete")
+    ingested = prev_out.get("snapshot_date")
+    out: dict = {}
+    if ctx.params.get("ingest_snapshots"):
+        from wildlife_radar.connectors import gbif_snapshot_remote as remote
+
+        available = ctx.params.get("snapshot_date") or remote.latest_snapshot()
+        if available is None:
+            raise RuntimeError("no complete GBIF snapshot found")
+        newer = ingested is None or available > ingested
+        if ctx.params.get("reingest_snapshot"):
+            newer = True
+        if newer and ctx.region.coverage:
+            # One pass for the whole coverage area (shared by its regions), then this
+            # region's tiles; rows the new snapshot lacks are reconciled away.
+            from wildlife_radar.pipeline import coverage
+            from wildlife_radar.regions import load_region
+
+            ctx.log(f"GBIF snapshot {available} via coverage {ctx.region.coverage}")
+            workers = int(ctx.params.get("snapshot_workers") or 10)
+            built = coverage.build(
+                load_region(ctx.region.coverage),
+                available,
+                ctx.lake,
+                workers=workers,
+                keep_staging=bool(ctx.params.get("keep_staging")),
+                log=ctx.log,
+            )
+            out["coverage"] = {k: built.get(k) for k in ("coverage", "rows", "reused", "delta")}
+            out["ingest"] = coverage.ingest_region(
+                ctx.region,
+                ctx.db,
+                ctx.lake,
+                ctx.region.coverage,
+                available,
+                workers=max(1, workers // 2),
+                log=ctx.log,
+                live_keys=ctx.registry().live_keys(),
+            )
+            ingested = available
+        elif newer:
+            ctx.log(f"ingesting GBIF snapshot {available} (previous: {ingested or 'none'})")
+            work = (
+                ctx.lake / "raw" / "gbif-snapshot" / f"date={available}" / f"region={ctx.region.id}"
+            )
+            staging, scratch = work / "staging", work / "work"
+            parts = remote.list_parts(available)
+            workers = int(ctx.params.get("snapshot_workers") or 10)
+            out["extract"] = remote.extract_region(
+                parts, staging, scratch, ctx.region.bbox, workers, log=ctx.log
+            )
+            out["ingest"] = remote.ingest_staged(
+                ctx.db, staging, ctx.region.bbox, max(1, workers // 2), log=ctx.log
+            )
+            ingested = available
+            if not ctx.params.get("keep_staging"):
+                shutil.rmtree(work, ignore_errors=True)
+        else:
+            out["checked"] = available
     with ctx.store() as store:
-        n = store.conn.execute("SELECT count(*) FROM observations").fetchone()[0]
+        n, last = store.conn.execute(
+            "SELECT count(*), max(ingested_at) FILTER (WHERE source_id = 'gbif') FROM observations"
+        ).fetchone()
     if not n:
-        raise RuntimeError("the store has no observations: run ingest-snapshot first")
-    return {"observations": n, "note": "registered existing ingest"}
+        raise RuntimeError(
+            "the store has no observations: run ingest-snapshot or pass --ingest-snapshots"
+        )
+    # The newest GBIF ingest time identifies the ingest; live iNaturalist records don't move it.
+    last_ingest = last.isoformat() if last else None
+    out.update({"observations": n, "snapshot_date": ingested, "last_ingest": last_ingest})
+    if (
+        prev_ok
+        and last_ingest == prev_out.get("last_ingest")
+        and ingested == prev_out.get("snapshot_date")
+    ):
+        out["unchanged"] = True
+    return out
+
+
+REPAIR_CHUNK = 200
+"""Events per checkpoint when fetching event ids (a restart skips finished events)."""
 
 
 def _repairs(ctx: JobContext) -> dict:
-    from wildlife_radar.connectors.gbif_events import fetch_event_ids
+    """Re-date records a dataset stamped with a placeholder date, from their event ids.
+
+    Event ids come from the GBIF API (snapshots don't carry them), event by event, in chunks
+    of ``REPAIR_CHUNK`` events. Each chunk's ids are kept in ``gbif_event_ids`` and exported
+    to the shared reference store, so a rebuild re-applies them instead of re-fetching.
+    Work is **budgeted**: a run stops after ``repair_budget_s`` (default 30 min) or when GBIF
+    rate-limits it, and completes with what it has; records not yet re-dated stay excluded.
+    The job reruns daily and continues where it stopped; a run that changes nothing reports
+    ``unchanged``, so nothing downstream rebuilds. Requests share one rate limiter (default
+    4/s over 4 threads).
+    """
+    import time
+
+    from wildlife_radar.connectors.base import ConnectorError, RateLimiter, make_client
+    from wildlife_radar.connectors.gbif_events import event_ids, fetch_events
     from wildlife_radar.storage.repair import (
+        adopt_event_ids,
+        apply_event_ids,
+        fetched_events,
         missing_event_ids,
         redate_from_event_ids,
-        set_event_ids,
+        store_event_ids,
     )
 
-    out = {}
+    started = utcnow()
+    ref = ctx.ref()
+    workers = int(ctx.params.get("repair_workers") or 4)
+    limiter = RateLimiter(float(ctx.params.get("repair_interval_s") or 0.25))
+    deadline = time.monotonic() + float(ctx.params.get("repair_budget_s") or 1800)
+    out: dict = {"redated": {}, "remaining_events": 0, "events_done": 0}
+    stopped: str | None = None
     with ctx.store() as store:
-        for key, entry in ctx.registry().datasets.items():
-            if not (entry.event_id_date and entry.placeholder_dates):
-                continue
-            for d in entry.placeholder_dates:
-                if missing_event_ids(store.conn, key, [d]):
-                    set_event_ids(
-                        store.conn, key, fetch_event_ids(key, d.isoformat(), ctx.region.bbox)
-                    )
-            out[key] = redate_from_event_ids(
-                store.conn, key, entry.event_id_date, entry.placeholder_dates
-            )
-    return {"redated": out}
+        conn = store.conn
+        # Ids fetched before (by any region or earlier store) come from the reference store.
+        out["ids_from_ref"] = ref.import_into(conn, "gbif_event_ids")
+        client = make_client(timeout=60)
+        try:
+            for key, entry in ctx.registry().datasets.items():
+                if not (entry.event_id_date and entry.placeholder_dates):
+                    continue
+                out["ids_adopted"] = adopt_event_ids(conn, key, utcnow())
+                apply_event_ids(conn, key)
+                done = fetched_events(conn, key)
+                for d in entry.placeholder_dates:
+                    if stopped or not missing_event_ids(conn, key, [d]):
+                        continue
+                    try:
+                        listed = event_ids(client, key, d.isoformat(), ctx.region.bbox, limiter)
+                    except ConnectorError as exc:
+                        stopped = str(exc)
+                        break
+                    events = [e for e in listed if e[0] not in done]
+                    for i in range(0, len(events), REPAIR_CHUNK):
+                        if time.monotonic() > deadline:
+                            stopped = "time budget used"
+                        if stopped:
+                            out["remaining_events"] += len(events) - i
+                            break
+                        chunk = events[i : i + REPAIR_CHUNK]
+                        try:
+                            pairs = fetch_events(
+                                key, chunk, client=client, limiter=limiter, workers=workers
+                            )
+                        except ConnectorError as exc:  # e.g. HTTP 429: continue next run
+                            stopped = str(exc)
+                            out["remaining_events"] += len(events) - i
+                            break
+                        # Stored per completed chunk: an event is either fully known or absent.
+                        store_event_ids(conn, key, pairs, utcnow())
+                        apply_event_ids(conn, key)
+                        done.update(name for name, _ in chunk)
+                        out["events_done"] += len(chunk)
+                        ctx.log(
+                            f"repairs {key[:8]} {d}: {min(i + REPAIR_CHUNK, len(events))}/"
+                            f"{len(events)} events"
+                        )
+                out["redated"][key] = redate_from_event_ids(
+                    conn, key, entry.event_id_date, entry.placeholder_dates
+                )
+        finally:
+            part = ref.export_from(conn, "gbif_event_ids", started)
+            out["ref_part"] = part and part.name
+    if stopped:
+        out["stopped"] = stopped
+    if not out["events_done"] and not any(out["redated"].values()):
+        out["unchanged"] = True
+    return out
 
 
 def _crosswalk(ctx: JobContext) -> dict:
@@ -122,8 +288,12 @@ def _crosswalk(ctx: JobContext) -> dict:
         save_identities,
     )
 
+    started = utcnow()
+    ref = ctx.ref()
     with ctx.store() as store:
         store.conn.execute(IDENTITY_SCHEMA)
+        # Identities other regions already resolved (shared reference store).
+        imported = ref.import_into(store.conn, "taxon_identity")
         # Species-level names with enough records to get a baseline; only names not yet cached.
         names = [
             n
@@ -136,13 +306,26 @@ def _crosswalk(ctx: JobContext) -> dict:
             ).fetchall()
             if n
         ]
+        # Curated statuses' own names too, so a status keyed by an older name reaches the
+        # region's taxon through its synonyms (policy/statuses.py: concept_aliases).
+        statuses = ctx.statuses_path()
+        if statuses:
+            doc = yaml.safe_load(statuses.read_text(encoding="utf-8")) or {}
+            cached = {
+                q for (q,) in store.conn.execute("SELECT query_name FROM taxon_identity").fetchall()
+            }
+            for e in doc.get("statuses", []):
+                name = e["taxon_id"].replace("-", " ").capitalize()
+                if name not in cached and name not in names:
+                    names.append(name)
         resolver = IdentityResolver()
         for start in range(0, len(names), 200):
             save_identities(
                 store.conn, resolver.resolve_many(names[start : start + 200], gbif="fallback")
             )
             ctx.log(f"crosswalk: {min(start + 200, len(names))}/{len(names)}")
-    return {"new_names": len(names)}
+        part = ref.export_from(store.conn, "taxon_identity", started)
+    return {"new_names": len(names), "from_ref": imported, "ref_part": part and part.name}
 
 
 def _aliases(ctx: JobContext) -> dict:
@@ -160,9 +343,11 @@ def _signals(ctx: JobContext) -> dict:
         store_rows,
     )
 
-    fetcher = CoopsDailyFetcher()
+    fetcher = ctx.params.get("_coops") or CoopsDailyFetcher()
     end = ctx.now.date()
     n = 0
+    errors: dict[str, str] = {}
+    attempts = 0
     with ctx.store() as store:
         ensure_schema(store.conn)
         for st in ctx.region.tide_stations:
@@ -170,14 +355,24 @@ def _signals(ctx: JobContext) -> dict:
                 "SELECT max(day) FROM signal_daily WHERE station_id = ?", [st.station_id]
             ).fetchone()[0]
             start = (last - timedelta(days=3)) if last else date(2010, 1, 1)
-            for product in COOPS_PRODUCTS:
-                n += store_rows(
-                    store.conn, fetcher.observations(st.station_id, st.lon, product, start, end)
-                )
-            n += store_rows(
-                store.conn, fetcher.tides(st.station_id, st.lon, start, end + timedelta(days=30))
-            )
-    return {"daily_values": n}
+            # One station or product failing (e.g. NOAA has no data for it) must not block the
+            # region: record it and keep the rest; the next run retries.
+            for name in (*COOPS_PRODUCTS, "tides"):
+                attempts += 1
+                try:
+                    if name == "tides":
+                        rows = fetcher.tides(st.station_id, st.lon, start, end + timedelta(days=30))
+                    else:
+                        rows = fetcher.observations(st.station_id, st.lon, name, start, end)
+                    n += store_rows(store.conn, rows)
+                except Exception as exc:
+                    errors[f"{st.station_id}:{name}"] = f"{type(exc).__name__}: {exc}"[:300]
+    if errors and len(errors) == attempts:
+        raise RuntimeError(f"every signal fetch failed: {errors}")
+    out: dict = {"daily_values": n}
+    if errors:
+        out["errors"] = errors
+    return out
 
 
 LIVE_WINDOW_DAYS = 60
@@ -185,38 +380,119 @@ LIVE_MAX_RECORDS = 20_000
 
 
 def _live(ctx: JobContext) -> dict:
-    """Recent iNaturalist records for the region (docs/design/data-platform.md §4).
+    """Recent records for the region (docs/design/data-platform.md §4).
 
-    Records updated since the previous run's cursor (with an hour of overlap), observed within
-    the last ``LIVE_WINDOW_DAYS`` days; keyset-paged at ≤1 request/s and capped per run, so a
-    backlog is caught up over several runs. Copies of records already ingested from snapshots
-    replace them (same iNaturalist id).
+    - **iNaturalist:** records updated since the previous run's cursor (with an hour of
+      overlap), observed within the last ``LIVE_WINDOW_DAYS`` days; keyset-paged at ≤1
+      request/s and capped per run, so a backlog is caught up over several runs.
+    - **GBIF datasets marked ``live`` in the dataset registry** (e.g. Happywhale): records
+      GBIF (re)interpreted since its own cursor (a day of overlap: GBIF filters by date).
+      A GBIF failure is recorded and retried next run; it doesn't fail the job.
+
+    Copies of records already ingested from snapshots replace them (same record id).
     """
     from wildlife_radar.connectors.base import ObservationQuery
+    from wildlife_radar.connectors.gbif import GBIFConnector
     from wildlife_radar.connectors.inaturalist import INaturalistConnector
 
+    if ctx.region.coverage:
+        return _live_from_log(ctx)
     previous = latest(ctx.lake, ctx.region.id, "live")
-    cursor = (
-        datetime.fromisoformat(previous["outputs"]["cursor"])
-        if previous and previous.get("status") == "complete"
-        else ctx.now - timedelta(days=3)
-    )
+    ok = bool(previous and previous.get("status") == "complete")
+    prev_out = (previous or {}).get("outputs") or {}
+    cursor = datetime.fromisoformat(prev_out["cursor"]) if ok else ctx.now - timedelta(days=3)
     started = utcnow()
+    window_start = (ctx.now - timedelta(days=LIVE_WINDOW_DAYS)).date()
     query = ObservationQuery(
         bbox=ctx.region.bbox,
-        start=(ctx.now - timedelta(days=LIVE_WINDOW_DAYS)).date(),
+        start=window_start,
         updated_since=cursor - timedelta(hours=1),
         limit=LIVE_MAX_RECORDS,
     )
+    inat = ctx.params.get("_inaturalist") or INaturalistConnector()
     with ctx.store() as store:
-        n = store.add(INaturalistConnector().fetch(query))
+        n = store.add(inat.fetch(query))
     capped = n >= LIVE_MAX_RECORDS
-    return {
+    out: dict = {
         "records": n,
         # When capped, keep the old cursor so the next run continues the backlog.
         "cursor": (cursor if capped else started).isoformat(),
         "capped": capped,
     }
+    live_keys = ctx.registry().live_keys()
+    if live_keys:
+        gbif_cursor = (
+            datetime.fromisoformat(prev_out["gbif_cursor"])
+            if ok and prev_out.get("gbif_cursor")
+            else ctx.now - timedelta(days=LIVE_WINDOW_DAYS)
+        )
+        gquery = ObservationQuery(
+            bbox=ctx.region.bbox,
+            start=window_start,
+            updated_since=gbif_cursor - timedelta(days=1),
+            limit=LIVE_MAX_RECORDS,
+            dataset_keys=tuple(live_keys),
+        )
+        gbif = ctx.params.get("_gbif") or GBIFConnector()
+        try:
+            with ctx.store() as store:
+                g = store.add(gbif.fetch(gquery))
+            out["gbif_records"] = g
+            out["gbif_cursor"] = (gbif_cursor if g >= LIVE_MAX_RECORDS else started).isoformat()
+        except Exception as exc:
+            out["gbif_error"] = f"{type(exc).__name__}: {exc}"
+            out["gbif_cursor"] = gbif_cursor.isoformat()
+    return out
+
+
+LIVE_PULL_EVERY = timedelta(minutes=25)
+"""A region's live job pulls the coverage area's stream if it is older than this (the first
+region of a tick pulls; the others only load)."""
+
+
+def _live_from_log(ctx: JobContext) -> dict:
+    """Live records for a region inside a coverage area: pull the area's stream if due, check
+    recent iNaturalist records still exist (daily), load new parts (pipeline/livelog.py)."""
+    from wildlife_radar.pipeline import livelog
+    from wildlife_radar.regions import load_region
+
+    cov = load_region(ctx.region.coverage)
+    cursor = livelog.read_cursor(ctx.lake, cov.id)
+    out: dict = {"coverage": cov.id}
+    pulled = cursor.get("pulled_at")
+    if pulled is None or ctx.now - datetime.fromisoformat(pulled) >= LIVE_PULL_EVERY:
+        out["pull"] = livelog.pull(
+            cov,
+            ctx.lake,
+            ctx.now,
+            live_keys=ctx.registry().live_keys(),
+            inat=ctx.params.get("_inaturalist"),
+            gbif=ctx.params.get("_gbif"),
+        )
+        cursor = livelog.read_cursor(ctx.lake, cov.id)
+    if not ctx.params.get("skip_existence_check") and livelog.check_due(cursor, ctx.now):
+        try:
+            out["existence"] = livelog.check_existence(ctx.lake, cov.id, ctx.now)
+            livelog.mark_checked(ctx.lake, cov.id, ctx.now)
+        except Exception as exc:  # retried next tick
+            out["existence_error"] = f"{type(exc).__name__}: {exc}"
+    previous = latest(ctx.lake, ctx.region.id, "live")
+    after = ((previous or {}).get("outputs") or {}).get("log_after")
+    with ctx.store() as store:
+        loaded = livelog.load_region(store.conn, ctx.region, ctx.lake, cov.id, after)
+    out.update(
+        {
+            "records": loaded["rows_added"],
+            "parts": loaded["parts"],
+            "removed": loaded["removed"],
+            "log_after": loaded["after"],
+            "cursor": cursor.get("inaturalist"),
+            "gbif_cursor": cursor.get("gbif"),
+        }
+    )
+    if not loaded["parts"] and not loaded["removed"] and previous:
+        out["unchanged"] = True
+    return out
 
 
 def _baseline(ctx: JobContext) -> dict:
@@ -249,7 +525,7 @@ def _backtest(ctx: JobContext) -> dict:
 
 
 def _tiers(ctx: JobContext) -> dict:
-    from wildlife_radar.connectors.inaturalist_taxa import InatTaxonStatusProvider
+    from wildlife_radar.connectors.inaturalist_taxa import InatTaxonStatusProvider, RecordCache
     from wildlife_radar.policy.statuses import (
         CachedStatusProvider,
         RegionStatusFile,
@@ -262,31 +538,305 @@ def _tiers(ctx: JobContext) -> dict:
         providers.append(RegionStatusFile(statuses))
     else:
         ctx.log("warning: no curated statuses file; state-listed populations won't be raised")
+    started = utcnow()
+    ref = ctx.ref()
     with ctx.store() as store:
+        # Raw iNaturalist records other regions fetched are reused; parsing stays per region.
+        imported = ref.import_into(store.conn, "inat_taxon_records")
         providers.append(
             CachedStatusProvider(
                 store.conn,
                 InatTaxonStatusProvider(
                     ctx.region.inat_place_scopes,
                     innermost_place=ctx.region.inat_innermost_place,
+                    records=RecordCache(store.conn),
                 ),
             )
         )
         decisions = build_tier_table(
             store.conn, region_id=ctx.region.id, scopes=ctx.region.scopes, providers=providers
         )
+        part = ref.export_from(store.conn, "inat_taxon_records", started)
+    # Fingerprint of the decisions: live records arrive every tick and rerun this job, but
+    # only a changed tier should make the jobs that read tiers (nowcast, timed) rerun.
+    import hashlib
+
+    fingerprint = hashlib.sha256(
+        json.dumps(sorted((t, int(d.tier)) for t, d in decisions.items())).encode()
+    ).hexdigest()[:16]
+    previous = latest(ctx.lake, ctx.region.id, "tiers")
+    prev_print = ((previous or {}).get("outputs") or {}).get("fingerprint")
     counts: dict[str, int] = {}
     for d in decisions.values():
         counts[d.tier.name] = counts.get(d.tier.name, 0) + 1
-    return {"tiers": counts, "curated_statuses": str(statuses) if statuses else None}
+    out = {
+        "tiers": counts,
+        "curated_statuses": str(statuses) if statuses else None,
+        "records_from_ref": imported,
+        "ref_part": part and part.name,
+        "fingerprint": fingerprint,
+    }
+    if previous and previous.get("status") == "complete" and prev_print == fingerprint:
+        out["unchanged"] = True
+    return out
+
+
+TIMED_TOP = 40
+"""Besides profiled species, this many open/generalized taxa get hourly models: the
+most-recorded of each taxon group in turn (the top 40 of a region are otherwise all common
+birds, whose daily rhythms barely differ from other birds')."""
+
+
+def pick_timed_taxa(info: dict, groups: set[str], top: int) -> list[str]:
+    """Open/generalized taxa for hourly models: round robin over taxon groups, most recorded
+    first within each. ``info``: taxon → (group, name, records, tier)."""
+    by_group: dict[str, list[str]] = {}
+    for t in sorted(info, key=lambda t: (-(info[t][2] or 0), t)):
+        g, _name, _n, tier = info[t]
+        if tier is not None and tier <= 1 and g in groups:
+            by_group.setdefault(g, []).append(t)
+    picked: list[str] = []
+    while len(picked) < top and any(by_group.values()):
+        for g in sorted(by_group):
+            if by_group[g] and len(picked) < top:
+                picked.append(by_group[g].pop(0))
+    return picked
+
+
+HOURLY_COUNTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS inat_hourly (
+    region_id VARCHAR, series VARCHAR, hour TIMESTAMP, n INTEGER
+);
+CREATE TABLE IF NOT EXISTS inat_hourly_years (
+    region_id VARCHAR, series VARCHAR, year INTEGER, fetched_at TIMESTAMP
+);
+"""
+
+
+def _hourly_counts(conn, hist, region, series: str, ids, start: date, end: date, now) -> dict:
+    """Hourly counts for a taxon or group, cached in the store: years before last year are
+    fetched once, recent years every run (records keep arriving)."""
+    conn.execute(HOURLY_COUNTS_SCHEMA)
+    have = {
+        y
+        for (y,) in conn.execute(
+            "SELECT year FROM inat_hourly_years WHERE region_id = ? AND series = ?",
+            [region.id, series],
+        ).fetchall()
+    }
+    for year in range(start.year, end.year + 1):
+        if year in have and year < end.year - 1:
+            continue
+        counts = hist.hourly(
+            ids, region.bbox, max(start, date(year, 1, 1)), min(end, date(year, 12, 31))
+        )
+        conn.execute(
+            "DELETE FROM inat_hourly WHERE region_id = ? AND series = ? AND year(hour) = ?",
+            [region.id, series, year],
+        )
+        if counts:
+            conn.executemany(
+                "INSERT INTO inat_hourly VALUES (?, ?, ?, ?)",
+                [(region.id, series, t.replace(tzinfo=None), n) for t, n in counts.items()],
+            )
+        conn.execute(
+            "DELETE FROM inat_hourly_years WHERE region_id = ? AND series = ? AND year = ?",
+            [region.id, series, year],
+        )
+        conn.execute(
+            "INSERT INTO inat_hourly_years VALUES (?, ?, ?, ?)",
+            [region.id, series, year, now.replace(tzinfo=None)],
+        )
+    return {
+        t.replace(tzinfo=UTC): n
+        for t, n in conn.execute(
+            "SELECT hour, n FROM inat_hourly WHERE region_id = ? AND series = ? AND hour >= ? "
+            "AND hour < ?",
+            [region.id, series, start, end + timedelta(days=1)],
+        ).fetchall()
+    }
+
+
+def _timed(ctx: JobContext) -> dict:
+    """Hourly factors (conditions/factors.py, hourly.py) from iNaturalist hourly counts.
+
+    For profiled species and the ``timed_top`` most-recorded open or generalized taxa:
+    descriptive indices per factor (``timed_index``), checks of the profile's intra-day claims
+    (``timed_scorecard``), and a gated hourly model that spreads the daily forecast over the
+    hours (``hourly_models``, ``hourly_scorecard``). Counts are cached in the store.
+
+    Errors are recorded per taxon rather than failing the job: publishing depends on it, and
+    an iNaturalist outage must not hold back live data.
+    """
+    from wildlife_radar.conditions import factors, hourly, timed
+    from wildlife_radar.connectors.inat_histogram import GROUP_TAXA, InatHistogram
+    from wildlife_radar.connectors.inaturalist_taxa import (
+        RECORDS_SCHEMA,
+        InatTaxonStatusProvider,
+    )
+    from wildlife_radar.connectors.noaa_coops import CoopsTideConnector
+    from wildlife_radar.policy.statuses import TIERS_SCHEMA, TaxonInfo
+    from wildlife_radar.profiles import ProfileLibrary
+
+    hist = ctx.params.get("_histogram") or InatHistogram()
+    lib = ProfileLibrary()
+    start = date(ctx.region.pipeline.since_year or 2010, 1, 1)
+    end = ctx.now.date() - timedelta(days=1)
+    split = ctx.conditions_split().date()
+    top = int(ctx.params.get("timed_top", TIMED_TOP))
+    out: dict = {"taxa": {}, "errors": {}, "hourly_models": 0, "hourly_passing": []}
+    with ctx.store() as store:
+        conn = store.conn
+        conn.execute(timed.TIMED_SCHEMA)
+        conn.execute(hourly.HOURLY_SCHEMA)
+        conn.execute(TIERS_SCHEMA)
+        rows = conn.execute(
+            "SELECT p.taxon_id, any_value(p.taxon_group), any_value(p.scientific_name), "
+            "sum(p.n_visits), any_value(t.tier) FROM prior_taxa p "
+            "LEFT JOIN tiers t ON t.region_id = p.region_id AND t.taxon_id = p.taxon_id "
+            "WHERE p.region_id = ? GROUP BY 1",
+            [ctx.region.id],
+        ).fetchall()
+        info = {t: (g, name, n, tier) for t, g, name, n, tier in rows}
+        profiled = [t for t in lib.ids(kind="species") if t in info]
+        taxa = list(dict.fromkeys([*profiled, *pick_timed_taxa(info, set(GROUP_TAXA), top)]))
+        # Where the sun and tides are evaluated: the primary tide station, else the centre.
+        lon_min, lat_min, lon_max, lat_max = ctx.region.bbox
+        lat, lon = (lat_min + lat_max) / 2, (lon_min + lon_max) / 2
+        hilo: list = []
+        station = ctx.region.tide_stations[0] if ctx.region.tide_stations else None
+        if station is not None:
+            lat, lon = station.lat, station.lon
+            hilo = timed.load_hilo(conn, station.station_id)
+            have = {t.year for t, _, _ in hilo}
+            tides = ctx.params.get("_tides") or CoopsTideConnector()
+            for year in range(start.year, end.year + 2):
+                if year in have and year < end.year:
+                    continue
+                try:
+                    values = tides.predictions(
+                        station.station_id, date(year, 1, 1), date(year, 12, 31), interval="hilo"
+                    )
+                except Exception as exc:  # tide factors are skipped for that year
+                    out["errors"][f"tides:{year}"] = str(exc)
+                    continue
+                timed.store_hilo(
+                    conn,
+                    station.station_id,
+                    [
+                        (v.valid_time, v.attrs.get("type"), v.value)
+                        for v in values
+                        if v.value is not None
+                    ],
+                )
+            hilo = timed.load_hilo(conn, station.station_id)
+        signals = timed.HourSignals(lat, lon, hilo)
+        edges = signals.height_edges()
+        conn.execute(RECORDS_SCHEMA)  # iNaturalist ids the tiers job already resolved
+        known = dict(
+            conn.execute(
+                "SELECT taxon_id, inat_id FROM inat_taxon_records WHERE inat_id IS NOT NULL"
+            ).fetchall()
+        )
+        resolver = InatTaxonStatusProvider({})
+        value_cache: dict = {}
+
+        def value(signal: str, t: datetime):
+            key = (signal, t)
+            if key not in value_cache:
+                value_cache[key] = signals.value(signal, t, edges)
+            return value_cache[key]
+
+        for taxon_id in taxa:
+            group, name, _n, _tier = info[taxon_id]
+            profile = lib.resolve(taxon_id) if taxon_id in profiled else None
+            try:
+                inat_id = known.get(taxon_id) or resolver._resolve_id(
+                    TaxonInfo(taxon_id=taxon_id, scientific_name=name or taxon_id)
+                )
+                if inat_id is None or group not in GROUP_TAXA:
+                    out["errors"][taxon_id] = "no iNaturalist id or effort group"
+                    continue
+                counts = _hourly_counts(
+                    conn, hist, ctx.region, f"taxon:{inat_id}", [inat_id], start, end, ctx.now
+                )
+                effort = _hourly_counts(
+                    conn,
+                    hist,
+                    ctx.region,
+                    f"group:{group}",
+                    GROUP_TAXA[group],
+                    start,
+                    end,
+                    ctx.now,
+                )
+            except Exception as exc:
+                out["errors"][taxon_id] = f"{type(exc).__name__}: {exc}"
+                continue
+            indices: dict[str, list] = {}
+            for signal in (
+                "astro.diel_phase",
+                "astro.hours_since_sunset",
+                "astro.moonlight",
+                "tide.stage",
+                "tide.height_m",
+            ):
+                if signal.startswith("tide.") and not hilo:
+                    continue
+                indices[signal] = timed.category_index(
+                    counts,
+                    effort,
+                    lambda t, s=signal: signals.category(s, t, edges),
+                    timed.TIMED_SIGNALS[signal],
+                    signals.offset,
+                )
+            verdicts = []
+            for tname, spec in profile.signals.items() if profile else ():
+                sig = spec.signal or tname
+                if sig not in timed.TIMED_SIGNALS:
+                    continue
+                rows_ = indices.get("astro.diel_phase" if sig == "astro.sun_altitude_deg" else sig)
+                if rows_:
+                    trait = (profile.traits or {}).get("activity_pattern")
+                    verdicts.append(timed.judge(tname, spec, sig, rows_, trait))
+            n = sum(counts.values())
+            timed.persist(conn, ctx.region.id, taxon_id, indices, verdicts, n, ctx.now)
+            terms = factors.hourly_terms(group, profile, tides=bool(hilo))
+            fit = hourly.fit_hourly(
+                counts,
+                effort,
+                terms,
+                value,
+                split,
+                offset_hours=signals.offset,
+                expectations=timed.expectations(profile),
+            )
+            hourly.persist(conn, ctx.region.id, taxon_id, fit, split, ctx.now)
+            out["hourly_models"] += 1
+            if fit.passes:
+                out["hourly_passing"].append(taxon_id)
+            out["taxa"][taxon_id] = {
+                "records": n,
+                "verdicts": {v.term: v.verdict for v in verdicts},
+                "hourly": {
+                    "passes": fit.passes,
+                    "gain": None if math.isnan(fit.gain) else round(fit.gain / fit.loss_base, 4),
+                    "supported": [t.term for t in fit.scorecard if t.verdict == "supported"],
+                    "note": fit.note,
+                },
+            }
+    return out
 
 
 def _conditions(ctx: JobContext) -> dict:
     from wildlife_radar.conditions import terms_from_profile
+    from wildlife_radar.conditions.daily import ensure_schema
     from wildlife_radar.conditions.levels import run_conditions
     from wildlife_radar.profiles import ProfileLibrary
 
     lib = ProfileLibrary()
+    with ctx.store() as store:  # no signals yet (e.g. NOAA was down): fit nothing, don't fail
+        ensure_schema(store.conn)
     specs = {}
     for pid in lib.ids(kind="species"):
         terms, _ = terms_from_profile(lib.resolve(pid))
@@ -349,6 +899,10 @@ def _publish(ctx: JobContext) -> dict:
     if statuses:
         doc = yaml.safe_load(statuses.read_text(encoding="utf-8")) or {}
         curated = [e["taxon_id"] for e in doc.get("statuses", [])]
+    from wildlife_radar.pipeline.freshness import collect as collect_freshness
+    from wildlife_radar.pipeline.static import before_swap
+
+    hook = None if ctx.params.get("no_static") else before_swap(ctx.region, ctx.now, log=ctx.log)
     with ctx.store() as store:
         result = publish_bundle(
             store.conn,
@@ -360,6 +914,10 @@ def _publish(ctx: JobContext) -> dict:
             now=ctx.now,
             allow_findings=bool(ctx.params.get("allow_findings")),
             inputs=ctx.params.get("_inputs"),
+            before_swap=hook,
+            freshness=collect_freshness(
+                store.conn, ctx.region, ctx.lake, ctx.registry().live_keys()
+            ),
         )
     return {"version": result.version, "rows": result.rows, "audit": result.findings}
 
@@ -367,8 +925,14 @@ def _publish(ctx: JobContext) -> dict:
 JOBS: dict[str, Job] = {
     j.name: j
     for j in (
-        Job("snapshot", (), _snapshot, None, "registered observation ingest (ingest-snapshot)"),
-        Job("repairs", ("snapshot",), _repairs, None, "re-date placeholder-dated records"),
+        Job("snapshot", (), _snapshot, timedelta(days=7), "GBIF snapshot ingest (monthly)"),
+        Job(
+            "repairs",
+            ("snapshot",),
+            _repairs,
+            timedelta(days=1),
+            "re-date placeholder-dated records (budgeted, resumes daily)",
+        ),
         Job("crosswalk", ("snapshot",), _crosswalk, timedelta(days=30), "identities, new names"),
         Job("aliases", ("crosswalk", "repairs"), _aliases, None, "merge renamed species"),
         Job("signals", (), _signals, timedelta(hours=20), "daily station signals (NOAA)"),
@@ -386,6 +950,13 @@ JOBS: dict[str, Job] = {
         ),
         Job("conditions", ("baseline",), _conditions, timedelta(days=30), "Levels 1–2, scorecard"),
         Job(
+            "timed",
+            ("baseline", "tiers"),
+            _timed,
+            timedelta(days=30),
+            "time-of-day and tide indices (iNaturalist hourly counts)",
+        ),
+        Job(
             "nowcast",
             ("baseline", "tiers", "conditions"),
             _nowcast,
@@ -394,7 +965,7 @@ JOBS: dict[str, Job] = {
         ),
         Job(
             "publish",
-            ("tiers", "backtest", "conditions", "nowcast", "signals", "live"),
+            ("tiers", "backtest", "conditions", "nowcast", "signals", "live", "timed"),
             _publish,
             None,
             "audit-gated serving bundle",
@@ -419,7 +990,8 @@ def _record(lake: Path, region_id: str, manifest: dict) -> None:
     folder = _manifest_dir(lake, region_id, manifest["job"])
     folder.mkdir(parents=True, exist_ok=True)
     body = json.dumps(manifest, indent=2, default=str)
-    (folder / f"{manifest['version']}.json").write_text(body, encoding="utf-8")
+    run_id = manifest.get("run", manifest["version"])
+    (folder / f"{run_id}.json").write_text(body, encoding="utf-8")
     tmp = folder / ".latest.tmp"
     tmp.write_text(body, encoding="utf-8")
     os.replace(tmp, folder / "latest.json")
@@ -500,6 +1072,7 @@ def run(
         manifest = {
             "job": name,
             "region": ctx.region.id,
+            "run": version,
             "version": version,
             "inputs": inputs,
             "created_at": utcnow().isoformat(),
@@ -508,6 +1081,12 @@ def run(
         try:
             manifest["outputs"] = jobs[name].run(ctx)
             manifest["status"] = "complete"
+            prev = latest(ctx.lake, ctx.region.id, name)
+            if manifest["outputs"].get("unchanged") and prev and prev.get("status") == "complete":
+                # The job's result is the same as last time (even if an input changed, e.g.
+                # tiers after new live records): keep the previous version so downstream jobs
+                # stay up to date. The manifest still records the new inputs.
+                manifest["version"] = prev["version"]
         except Exception as exc:
             manifest["status"] = "failed"
             manifest["error"] = f"{type(exc).__name__}: {exc}"

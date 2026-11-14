@@ -96,6 +96,9 @@ class DatasetEntry(BaseModel):
     event_id_date: str | None = None
     """Regex whose first group is the real ``YYYYMMDD`` date inside ``eventID``; records on
     placeholder dates are re-dated from it by ``repair-dates`` (and then kept)."""
+    live: bool = False
+    """The dataset publishes to GBIF within days: the ``live`` job pulls it from the GBIF API,
+    and its records are live-source records (nowcast inputs) in training and serving alike."""
     name: str | None = None
     reason: str | None = None
 
@@ -112,6 +115,9 @@ class DatasetRegistry(BaseModel):
         if not path.exists():
             return cls()
         return cls.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")) or {})
+
+    def live_keys(self) -> list[str]:
+        return sorted(k for k, e in self.datasets.items() if e.live and not e.exclude)
 
     def check(self) -> None:
         bad = {

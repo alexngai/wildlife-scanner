@@ -183,7 +183,7 @@ def test_labels_and_methods():
 def test_bundled_registry_is_valid():
     from wildlife_radar.regions import region_dir
 
-    registry = DatasetRegistry.load(region_dir("socal") / "datasets.yaml")
+    registry = DatasetRegistry.load(region_dir("california") / "datasets.yaml")
     registry.check()
     assert any(e.effort_class == "dive_survey" for e in registry.datasets.values())
     assert any(e.exclude for e in registry.datasets.values())

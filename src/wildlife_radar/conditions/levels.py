@@ -62,8 +62,9 @@ CREATE TABLE IF NOT EXISTS hypothesis_scorecard (
     region_id VARCHAR, taxon_id VARCHAR, group_id VARCHAR, term VARCHAR, signal VARCHAR,
     hypothesis BOOLEAN, n_test BIGINT, delta_log_loss DOUBLE, ci_lo DOUBLE, ci_hi DOUBLE,
     direction_expected VARCHAR, direction_fitted VARCHAR, verdict VARCHAR,
-    evaluated_at TIMESTAMP
-)
+    evaluated_at TIMESTAMP, review VARCHAR
+);
+ALTER TABLE hypothesis_scorecard ADD COLUMN IF NOT EXISTS review VARCHAR;
 """
 
 NOWCAST_TERMS = [
@@ -102,6 +103,23 @@ class TermScore:
     direction_expected: str | None
     direction_fitted: str | None
     verdict: str
+
+    @property
+    def review(self) -> str | None:
+        """Why the profile's claim for this term needs a human look, if it does. A term can
+        improve predictions for a reason other than the one the profile gives."""
+        if self.verdict == "contradicted":
+            return "the term makes held-out predictions worse"
+        if (
+            self.direction_expected
+            and self.direction_fitted
+            and self.direction_expected != self.direction_fitted
+        ):
+            return (
+                f"fitted direction {self.direction_fitted} contradicts the profile's "
+                f"{self.direction_expected}"
+            )
+        return None
 
 
 @dataclass
@@ -567,7 +585,7 @@ def _persist(
         )
     for s in report.scorecard:
         conn.execute(
-            "INSERT INTO hypothesis_scorecard VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO hypothesis_scorecard VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 *key,
                 s.term,
@@ -581,5 +599,6 @@ def _persist(
                 s.direction_fitted,
                 s.verdict,
                 now,
+                s.review,
             ],
         )

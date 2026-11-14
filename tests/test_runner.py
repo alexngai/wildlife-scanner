@@ -1,5 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from wildlife_radar.pipeline.runner import Job, JobContext, latest, order, run, staleness
 from wildlife_radar.regions import load_region
 
@@ -95,6 +97,7 @@ def test_live_job_advances_its_cursor(tmp_path, monkeypatch):
 
     monkeypatch.setattr(inaturalist.INaturalistConnector, "fetch", fake_fetch)
     c = ctx(tmp_path, now=datetime.now(UTC))
+    c.region = c.region.model_copy(update={"coverage": None})  # the per-region path
     with ObservationStore(c.db) as store:
         store.add(SyntheticWorld(observers=5, visits_per_observer=10).generate()[20:21])
     jobs = {k: runner.JOBS[k] for k in ("snapshot", "live")}
@@ -105,3 +108,295 @@ def test_live_job_advances_its_cursor(tmp_path, monkeypatch):
     # The next run (forced: within its 30-minute cadence) asks only for newer updates.
     run("live", c, jobs=jobs, force=("live",))
     assert queries[1].updated_since == datetime.fromisoformat(cursor) - timedelta(hours=1)
+
+
+def test_region_pack_inherits_curated_files():
+    from wildlife_radar.pipeline.runner import context
+
+    c = context("sandiego", "unused.duckdb", "unused-lake")
+    assert c.region.inherits == "california"
+    assert c.statuses_path().parts[-2:] == ("california", "statuses.yaml")
+    assert any(e.event_id_date for e in c.registry().datasets.values())  # shared registry
+
+
+def test_live_job_pulls_registry_live_datasets_from_gbif(tmp_path):
+    from wildlife_radar.pipeline import runner
+    from wildlife_radar.storage import ObservationStore
+    from wildlife_radar.synthetic import SyntheticWorld
+
+    registry = tmp_path / "datasets.yaml"
+    registry.write_text(
+        "datasets:\n"
+        "  whale-feed: {name: Live whale feed, live: true}\n"
+        "  archive: {name: Old survey}\n",
+        encoding="utf-8",
+    )
+    records = SyntheticWorld(observers=3, visits_per_observer=5).generate()
+
+    class Fake:
+        def __init__(self, items, fail=False):
+            self.items, self.fail, self.queries = items, fail, []
+
+        def fetch(self, query):
+            self.queries.append(query)
+            if self.fail:
+                raise RuntimeError("GBIF is down")
+            return iter(self.items)
+
+    c = ctx(tmp_path, now=datetime.now(UTC))
+    c.region = c.region.model_copy(update={"coverage": None})  # the per-region path
+    with ObservationStore(c.db) as store:
+        store.add(records[:1])
+    gbif = Fake(records[5:8])
+    c.params.update({"datasets": str(registry), "_inaturalist": Fake(records[1:3]), "_gbif": gbif})
+    jobs = {k: runner.JOBS[k] for k in ("snapshot", "live")}
+    out = {r["job"]: r for r in run("live", c, jobs=jobs)}["live"]["outcome"]
+    assert out["records"] == 2 and out["gbif_records"] == 3
+    assert gbif.queries[0].dataset_keys == ("whale-feed",)  # only datasets marked live
+    # A GBIF failure is recorded; the job (and publishing after it) carries on.
+    c.params["_gbif"] = Fake([], fail=True)
+    out = {r["job"]: r for r in run("live", c, jobs=jobs, force=("live",))}["live"]["outcome"]
+    assert "GBIF is down" in out["gbif_error"] and "gbif_cursor" in out
+
+
+def test_registry_live_datasets_are_live_in_training_views(tmp_path):
+    from wildlife_radar.baseline.builder import BaselineConfig, create_training_view
+    from wildlife_radar.baseline.effort import DatasetEntry, DatasetRegistry
+    from wildlife_radar.storage import ObservationStore
+    from wildlife_radar.synthetic import DEFAULT_SPECIES, SyntheticWorld
+
+    world = SyntheticWorld(
+        observers=5,
+        visits_per_observer=10,
+        survey_sites=((32.85, -117.27),),
+        survey_species=DEFAULT_SPECIES[:1],
+    )
+    st = ObservationStore()
+    st.add(world.generate())
+    bbox = world.bbox
+    counts = {}
+    for live in (False, True):
+        registry = DatasetRegistry(
+            datasets={world.survey_dataset: DatasetEntry(effort_class="dive_survey", live=live)}
+        )
+        create_training_view(st.conn, BaselineConfig(since_year=None), bbox, registry)
+        counts[live] = st.conn.execute(
+            "SELECT count(*) FILTER (WHERE live) FROM _obs WHERE effort_class = 'dive_survey'"
+        ).fetchone()[0]
+    assert counts[False] == 0 and counts[True] > 0
+
+
+def test_repairs_resume_after_an_interruption(tmp_path, monkeypatch):
+    from datetime import date
+
+    from wildlife_radar.connectors import gbif_events
+    from wildlife_radar.connectors.base import ConnectorError
+    from wildlife_radar.pipeline import runner
+    from wildlife_radar.storage import ObservationStore
+
+    registry = tmp_path / "datasets.yaml"
+    registry.write_text(
+        "datasets:\n  kelp: {placeholder_dates: [2023-11-30], event_id_date: '_(\\d{8})_'}\n",
+        encoding="utf-8",
+    )
+    c = ctx(tmp_path)
+    c.params["datasets"] = str(registry)
+    with ObservationStore(c.db) as store:
+        for i in range(6):
+            store.conn.execute(
+                "INSERT INTO observations (dedupe_key, obs_id, source_id, source_record_id, "
+                "dataset_key, local_date, lon) VALUES (?, ?, 'gbif', ?, 'kelp', ?, -117.2)",
+                [f"k{i}", f"o{i}", str(i), date(2023, 11, 30)],
+            )
+    events = [(f"SITE_2020010{e + 1}_A", 2) for e in range(3)]  # records 0-1, 2-3, 4-5
+    index = {name: e for e, (name, _) in enumerate(events)}
+    fetched: list[str] = []
+    fail = {"on": "SITE_20200103_A"}
+
+    def fake_fetch(key, chunk, **_kw):
+        out = []
+        for name, _n in chunk:
+            if name == fail["on"]:
+                raise ConnectorError("rate limited (HTTP 429)")
+            fetched.append(name)
+            e = index[name]
+            out += [(str(2 * e), name), (str(2 * e + 1), name)]
+        return out
+
+    monkeypatch.setattr(gbif_events, "event_ids", lambda *a, **k: events)
+    monkeypatch.setattr(gbif_events, "fetch_events", fake_fetch)
+    monkeypatch.setattr(runner, "REPAIR_CHUNK", 1)
+    jobs = {"repairs": Job("repairs", (), runner._repairs)}
+    # Rate-limited part-way: the job completes with what it has (re-dated records are kept,
+    # the rest stay excluded) and reports what remains.
+    first = run("repairs", c, jobs=jobs)[0]["outcome"]
+    assert "429" in first["stopped"] and first["remaining_events"] == 1
+    assert first["redated"]["kelp"] == 4
+    fail["on"] = None
+    second = run("repairs", c, jobs=jobs, force=("repairs",))[0]["outcome"]
+    assert fetched == ["SITE_20200101_A", "SITE_20200102_A", "SITE_20200103_A"]  # no repeats
+    assert second["redated"]["kelp"] == 2 and second["remaining_events"] == 0
+    # Nothing left to do: unchanged, so downstream jobs keep their inputs.
+    v = latest(c.lake, "socal", "repairs")["version"]
+    third = run("repairs", c, jobs=jobs, force=("repairs",))[0]["outcome"]
+    assert third.get("unchanged") and latest(c.lake, "socal", "repairs")["version"] == v
+    with ObservationStore(c.db) as store:
+        days = store.conn.execute("SELECT DISTINCT local_date FROM observations").fetchall()
+    assert sorted(d for (d,) in days) == [date(2020, 1, 1), date(2020, 1, 2), date(2020, 1, 3)]
+
+
+def test_crosswalk_also_resolves_curated_status_names(tmp_path, monkeypatch):
+    from wildlife_radar.pipeline import runner
+    from wildlife_radar.profilegen import identity
+    from wildlife_radar.storage import ObservationStore
+
+    statuses = tmp_path / "statuses.yaml"
+    statuses.write_text(
+        "statuses:\n  - {taxon_id: euphydryas-editha, authority: ESA, code: E, scope: us-ca}\n",
+        encoding="utf-8",
+    )
+    asked: list[str] = []
+    monkeypatch.setattr(
+        identity.IdentityResolver,
+        "resolve_many",
+        lambda self, names, **kw: asked.extend(names) or [],
+    )
+    c = ctx(tmp_path)
+    c.params["statuses"] = str(statuses)
+    with ObservationStore(c.db):
+        pass
+    out = run("crosswalk", c, jobs={"crosswalk": Job("crosswalk", (), runner._crosswalk)})[0]
+    assert isinstance(out["outcome"], dict), out["outcome"]
+    assert "Euphydryas editha" in asked
+
+
+def test_unchanged_result_keeps_downstream_up_to_date(tmp_path):
+    """A job rerun by a changed input that reports the same result keeps its version."""
+    calls: list[str] = []
+    state = {"same": False}
+
+    def mid(_c):
+        calls.append("mid")
+        return {"unchanged": True} if state["same"] else {"n": 1}
+
+    jobs = {
+        "source": Job("source", (), lambda _c: calls.append("source") or {}),
+        "mid": Job("mid", ("source",), mid),
+        "down": Job("down", ("mid",), lambda _c: calls.append("down") or {}),
+    }
+    c = ctx(tmp_path)
+    run("down", c, jobs=jobs)
+    v = latest(c.lake, "socal", "mid")["version"]
+    state["same"] = True
+    calls.clear()
+    run("down", c, jobs=jobs, force=("source",))
+    assert calls == ["source", "mid"]  # down did not rerun
+    assert latest(c.lake, "socal", "mid")["version"] == v
+    assert staleness(c.lake, "socal", "mid", c.now, jobs) is None  # new inputs recorded
+
+
+def _kelp_store(path, registry_dir):
+    from datetime import date
+
+    from wildlife_radar.storage import ObservationStore
+
+    registry = registry_dir / "datasets.yaml"
+    registry.write_text(
+        "datasets:\n  kelp: {placeholder_dates: [2023-11-30], event_id_date: '_(\\d{8})_'}\n",
+        encoding="utf-8",
+    )
+    with ObservationStore(path) as store:
+        for i in range(4):
+            store.conn.execute(
+                "INSERT INTO observations (dedupe_key, obs_id, source_id, source_record_id, "
+                "dataset_key, local_date, lon) VALUES (?, ?, 'gbif', ?, 'kelp', ?, -117.2)",
+                [f"k{i}", f"o{i}", str(i), date(2023, 11, 30)],
+            )
+    return registry
+
+
+def test_event_ids_survive_a_rebuild_through_the_reference_store(tmp_path, monkeypatch):
+    """Ids fetched once are re-applied from the reference store: no second fetch."""
+    from datetime import date
+
+    from wildlife_radar.connectors import gbif_events
+    from wildlife_radar.pipeline import runner
+    from wildlife_radar.storage import ObservationStore
+
+    events = [("SITE_20200101_A", 2), ("SITE_20200102_A", 2)]
+    calls: list[str] = []
+
+    def fake_fetch(key, chunk, **_kw):
+        out = []
+        for name, _n in chunk:
+            calls.append(name)
+            e = [n for n, _ in events].index(name)
+            out += [(str(2 * e), name), (str(2 * e + 1), name)]
+        return out
+
+    monkeypatch.setattr(gbif_events, "event_ids", lambda *a, **k: events)
+    monkeypatch.setattr(gbif_events, "fetch_events", fake_fetch)
+    jobs = {"repairs": Job("repairs", (), runner._repairs)}
+    first = ctx(tmp_path / "a")
+    first.params["datasets"] = str(_kelp_store(first.db, tmp_path))
+    assert run("repairs", first, jobs=jobs)[0]["outcome"]["redated"]["kelp"] == 4
+    assert len(calls) == 2
+    # The environment is lost; only the reference store survives (in a bucket or on a volume:
+    # sync_ref copies its parts). A fresh store and lake, with the same snapshot rows.
+    import shutil
+
+    second = ctx(tmp_path / "b")
+    shutil.copytree(first.lake / "ref", second.lake / "ref")
+    second.params["datasets"] = str(_kelp_store(second.db, tmp_path))
+    out = run("repairs", second, jobs=jobs)[0]["outcome"]
+    assert out["ids_from_ref"] == 4 and out["redated"]["kelp"] == 4
+    assert len(calls) == 2  # nothing fetched again
+    with ObservationStore(second.db) as store:
+        days = {d for (d,) in store.conn.execute("SELECT local_date FROM observations").fetchall()}
+    assert days == {date(2020, 1, 1), date(2020, 1, 2)}
+
+
+def test_event_ids_from_earlier_runs_are_adopted(tmp_path, monkeypatch):
+    """Stores repaired before the reference table existed keep their work."""
+    from wildlife_radar.connectors import gbif_events
+    from wildlife_radar.pipeline import runner
+    from wildlife_radar.storage import ObservationStore
+
+    c = ctx(tmp_path / "a")
+    c.lake = tmp_path / "lake"
+    c.params["datasets"] = str(_kelp_store(c.db, tmp_path))
+    with ObservationStore(c.db) as store:  # ids set by an older version of the job
+        store.conn.execute("UPDATE observations SET event_id = 'SITE_20200101_A'")
+    fetched: list = []
+    monkeypatch.setattr(gbif_events, "event_ids", lambda *a, **k: [("SITE_20200101_A", 4)])
+    monkeypatch.setattr(gbif_events, "fetch_events", lambda *a, **k: fetched.append(a) or [])
+    out = run("repairs", c, jobs={"repairs": Job("repairs", (), runner._repairs)})[0]["outcome"]
+    assert out["ids_adopted"] == 4 and not fetched and out["redated"]["kelp"] == 4
+    assert out["ref_part"]  # and they now live in the reference store
+
+
+def test_signals_job_keeps_going_when_one_fetch_fails(tmp_path):
+    from wildlife_radar.pipeline.runner import JOBS
+    from wildlife_radar.storage import ObservationStore
+
+    class Coops:
+        def observations(self, station, lon, product, start, end):
+            raise RuntimeError("No Predictions data was found")
+
+        def tides(self, station, lon, start, end):
+            return []
+
+    c = ctx(tmp_path, now=datetime.now(UTC))
+    ObservationStore(c.db).close()
+    c.params["_coops"] = Coops()
+    out = JOBS["signals"].run(c)
+    assert out["daily_values"] == 0 and out["errors"]
+    assert all("No Predictions" in e for e in out["errors"].values())
+
+    class Down(Coops):
+        def tides(self, station, lon, start, end):
+            raise RuntimeError("down")
+
+    c.params["_coops"] = Down()
+    with pytest.raises(RuntimeError, match="every signal fetch failed"):
+        JOBS["signals"].run(c)

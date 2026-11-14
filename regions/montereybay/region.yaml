@@ -1,0 +1,27 @@
+# Monterey Bay and the northern Central Coast: Santa Cruz to northern Big Sur, inland to
+# Pinnacles. The second real-data region (proves the graph runs unchanged for a new pack).
+# Curated statuses and the dataset registry come from the california pack (`inherits`).
+id: montereybay
+name: Monterey Bay
+timezone: America/Los_Angeles
+coverage: california
+inherits: california
+bbox: [-122.55, 35.95, -121.1, 37.2]
+# The mountain lion's CESA listing covers the Central Coast populations (Santa Cruz
+# Mountains, Gabilan and Santa Lucia ranges) as well as Southern California.
+scopes: [global, us, us-ca, california, ca-southern-central-coast]
+inat_place_scopes: {"1": us, "14": us-ca}
+inat_innermost_place: "14"
+tide_stations:
+  # Metadata checked against the CO-OPS API (2026-11-12). Water temperature read 19.4 °C on
+  # 2026-11-09, high for November here: check the sensor's siting before trusting it.
+  - {station_id: "9413450", name: "Monterey", lat: 36.6089, lon: -121.8914}
+places:
+  - {place_id: breakwater-monterey, name: San Carlos Beach (Breakwater), kind: dive_site, habitat: [kelp, sand], footprint: {kind: point, lat: 36.6095, lon: -121.8946, uncertainty_m: 300}}
+  - {place_id: point-lobos, name: Point Lobos, kind: park, habitat: [kelp, rocky_reef], footprint: {kind: point, lat: 36.5180, lon: -121.9420, uncertainty_m: 1500}, notes: State Natural Reserve and State Marine Reserve.}
+  - {place_id: elkhorn-slough, name: Elkhorn Slough, kind: hotspot, habitat: [estuary], footprint: {kind: point, lat: 36.8120, lon: -121.7650, uncertainty_m: 2000}}
+  - {place_id: pinnacles, name: Pinnacles National Park, kind: park, footprint: {kind: point, lat: 36.4900, lon: -121.1800, uncertainty_m: 3000}}
+pipeline:
+  since_year: 2010
+  backtest_split: 2025-01-01
+  conditions_split: 2023-01-01

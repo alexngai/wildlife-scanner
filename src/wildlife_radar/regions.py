@@ -56,6 +56,14 @@ class Region(BaseModel):
     tide_stations: list[TideStation] = Field(default_factory=list)
     places: list[Place] = Field(default_factory=list)
     pipeline: PipelineSettings = Field(default_factory=PipelineSettings)
+    coverage: str | None = None
+    """A larger region pack whose snapshot tiles this region reads (one GBIF snapshot pass
+    for every region inside it; pipeline/coverage.py)."""
+    timezone: str | None = None
+    """IANA time zone for local times in outputs (e.g. hourly forecasts)."""
+    inherits: str | None = None
+    """Another region pack whose curated files (statuses.yaml, datasets.yaml) apply here when
+    this pack has none, e.g. a county inside ``socal``."""
     notes: str | None = None
 
     @model_validator(mode="after")
@@ -92,3 +100,13 @@ def load_region(region: str | Path, root: Path = DEFAULT_REGIONS_DIR) -> Region:
         path = root / str(region) / "region.yaml"
     doc = yaml.safe_load(path.read_text(encoding="utf-8"))
     return Region.model_validate(doc)
+
+
+def pack_file(region: Region, name: str, pack: Path | None = None) -> Path | None:
+    """A curated file (``statuses.yaml``, ``datasets.yaml``) for ``region``: from its own pack
+    folder (``pack``, or ``regions/<id>``), else from the pack it inherits from."""
+    candidates = [pack / name] if pack else []
+    candidates.append(region_dir(region.id) / name)
+    if region.inherits:
+        candidates.append(region_dir(region.inherits) / name)
+    return next((p for p in candidates if p.exists()), None)

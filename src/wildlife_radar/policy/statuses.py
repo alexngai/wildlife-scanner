@@ -214,6 +214,21 @@ def identity_crosswalk(
     return out
 
 
+def concept_aliases(
+    crosswalk: dict[str, tuple[str | None, tuple[str, ...]]],
+) -> dict[str, set[str]]:
+    """``id → every id sharing a resolved identity with it`` (accepted name, query name and
+    synonyms of any cached identity). Lets a curated status keyed by an older name reach the
+    region's taxon when that name was resolved too (e.g. Euphydryas → Occidryas editha).
+    Aliases only ever add statuses, which can only raise protection."""
+    out: dict[str, set[str]] = {}
+    for _inat, ids in crosswalk.values():
+        group = set(ids)
+        for i in ids:
+            out.setdefault(i, set()).update(group)
+    return out
+
+
 def build_tier_table(
     conn: duckdb.DuckDBPyConnection,
     *,
@@ -228,12 +243,18 @@ def build_tier_table(
     # The identity crosswalk (profilegen) supplies verified iNaturalist ids, which beat name
     # searches, and aliases, so curated statuses keyed by another name of the concept apply.
     crosswalk = identity_crosswalk(conn)
+    concepts = concept_aliases(crosswalk)
+
+    def aliases_of(t: str, name: str | None) -> tuple[str, ...]:
+        own = crosswalk.get(name or "", (None, ()))[1]
+        return tuple(dict.fromkeys([*own, *sorted(concepts.get(t, set()) - {t})]))
+
     taxa = [
         TaxonInfo(
             taxon_id=t,
             scientific_name=name or t,
             inat_taxon_id=inat or crosswalk.get(name or "", (None, ()))[0],
-            aliases=crosswalk.get(name or "", (None, ()))[1],
+            aliases=aliases_of(t, name),
         )
         for t, name, inat in conn.execute(
             "SELECT DISTINCT taxon_id, scientific_name, inat_taxon_id FROM prior_taxa "

@@ -12,7 +12,7 @@ An online resource to help people find wildlife. It fuses several data sources i
 
 ## Status
 
-**Phases 0–2 are done**: the skeleton, a policy-enforced baseline for every species with method-specific effort models, and the profile-generation pipeline (identity crosswalk, trait import, occurrence-derived priors, evidence-checked LLM extraction, reconciliation and review). Phase 3, conditions and live signals, is next. For the research and design, start with [`docs/research/00-synthesis.md`](docs/research/00-synthesis.md). It summarizes the data landscape, the evidence behind the candidate signals, a proposed model architecture, ethics guardrails and next steps. It links to seven detailed research reports.
+**Phases 0–2 are done**: the skeleton, a policy-enforced baseline for every species with method-specific effort models, and the profile-generation pipeline (identity crosswalk, trait import, occurrence-derived priors, evidence-checked LLM extraction, reconciliation and review). Phase 3, conditions and live signals, is next. Picking up the work? Read [`docs/handoff.md`](docs/handoff.md) first: current state, open threads, and how to rebuild the data. For the research and design, start with [`docs/research/00-synthesis.md`](docs/research/00-synthesis.md). It summarizes the data landscape, the evidence behind the candidate signals, a proposed model architecture, ethics guardrails and next steps. It links to seven detailed research reports.
 
 The framework design (draft) is in [`docs/design/framework.md`](docs/design/framework.md). It covers the species-agnostic architecture: core concepts, species profiles generated from metadata, how signals are combined, rare and cryptic species, species-first and place-first queries, the policy layer and the roadmap.
 
@@ -133,7 +133,7 @@ Data goes in `data/`, which git ignores:
    uv run wildlife-radar audit-tiers --region socal
    ```
 
-Data repairs: `repair-dates` re-dates records a dataset stamped with a placeholder date, using the date in their event ids (see `regions/socal/datasets.yaml`).
+Data repairs: `repair-dates` re-dates records a dataset stamped with a placeholder date, using the date in their event ids (see `regions/california/datasets.yaml`).
 
 ### Running it as a pipeline
 

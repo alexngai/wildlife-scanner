@@ -78,8 +78,11 @@ def snapshot_rows(
     *,
     batch_size: int = 10_000,
     con: duckdb.DuckDBPyConnection | None = None,
+    row_range: tuple[int, int] | None = None,
 ) -> Iterator[dict]:
-    """Rows of the snapshot inside ``bbox`` (``lon_min, lat_min, lon_max, lat_max``)."""
+    """Rows of the snapshot inside ``bbox`` (``lon_min, lat_min, lon_max, lat_max``); with
+    ``row_range`` (start, end), only those row numbers of each file (row groups outside the
+    range are skipped)."""
     path_list = [paths] if isinstance(paths, str) else list(paths)
     con = con or duckdb.connect()
     if any(p.startswith(("s3://", "http://", "https://")) for p in path_list):
@@ -92,12 +95,17 @@ def snapshot_rows(
         for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet({sources}) LIMIT 0").fetchall()
     }
     cols = ", ".join(c if c in present else f"NULL AS {c}" for c in SNAPSHOT_COLUMNS)
+    params: list = [lat_min, lat_max, lon_min, lon_max]
+    rows = ""
+    if row_range is not None:
+        rows = "AND file_row_number >= ? AND file_row_number < ?"
+        params += list(row_range)
     cursor = con.execute(
         f"""
-        SELECT {cols} FROM read_parquet({sources})
-        WHERE decimallatitude BETWEEN ? AND ? AND decimallongitude BETWEEN ? AND ?
+        SELECT {cols} FROM read_parquet({sources}, file_row_number = {row_range is not None})
+        WHERE decimallatitude BETWEEN ? AND ? AND decimallongitude BETWEEN ? AND ? {rows}
         """,
-        [lat_min, lat_max, lon_min, lon_max],
+        params,
     )
     while True:
         batch = cursor.fetchmany(batch_size)
@@ -112,10 +120,11 @@ def snapshot_observations(
     bbox: tuple[float, float, float, float],
     report: SnapshotReport | None = None,
     limit: int | None = None,
+    row_range: tuple[int, int] | None = None,
 ) -> Iterator[Observation]:
     report = report if report is not None else SnapshotReport()
     ingested_at = utcnow()
-    for row in snapshot_rows(paths, bbox):
+    for row in snapshot_rows(paths, bbox, row_range=row_range):
         report.rows_read += 1
         try:
             obs = parse_dwc_record(row, ingested_at)

@@ -28,7 +28,7 @@ from dataclasses import asdict, dataclass
 
 import duckdb
 
-from wildlife_radar.policy.statuses import StatusLookup, identity_crosswalk
+from wildlife_radar.policy.statuses import StatusLookup, concept_aliases, identity_crosswalk
 from wildlife_radar.policy.tiers import PolicyTier
 
 THREATENED = {"VU", "EN", "CR", "EW"}
@@ -128,15 +128,29 @@ def audit_tiers(
 
     # Curated entries that reach no taxon in the region.
     crosswalk = identity_crosswalk(conn)
+    concepts = concept_aliases(crosswalk)
     reachable = set(tiers)
     for name in names.values():
         reachable.update(crosswalk.get(name or "", (None, ()))[1])
+    for t in tiers:
+        reachable.update(concepts.get(t, ()))
     epithets: dict[str, list[str]] = {}
     for t in tiers:
         if "-" in t:
             epithets.setdefault(t.rsplit("-", 1)[1], []).append(t)
     for curated in sorted(set(curated_taxon_ids)):
         if curated in reachable:
+            continue
+        if curated in concepts:
+            # Its name was resolved and none of its names or synonyms occurs here: absent.
+            findings.append(
+                Finding(
+                    "info",
+                    "curated_status_absent",
+                    curated,
+                    "name resolved; no taxon with it or its synonyms in this region",
+                )
+            )
             continue
         lookalikes = [t for t in epithets.get(curated.rsplit("-", 1)[-1], []) if t != curated]
         if lookalikes:

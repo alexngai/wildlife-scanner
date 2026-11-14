@@ -1,0 +1,96 @@
+# Dataset registry for California region packs: how each dataset observes.
+#
+# Overrides automatic effort-class assignment (eBird → checklist; GBIF SAMPLING_EVENT or
+# datasets recording absences → survey; machine observations → sensor; otherwise casual).
+# `exclude: true` removes programs whose records aren't wildlife encounters.
+# Effort classes: checklist, casual, sensor, dive_survey, intertidal_survey, survey.
+
+datasets:
+  154d6192-bea0-4bcb-ab58-1c573081591d:
+    name: Monitoring and Evaluation of Kelp Forest Ecosystems in the MLPA MPA Network
+    effort_class: dive_survey
+    # ~21M of the dataset's 32M records (250k in San Diego, mostly absences) carry eventDate
+    # 2023-11-30 while their eventID holds the real survey date
+    # (e.g. SAN_MATEO_KELP_20201008_OUTER_2_swath). `repair-dates` re-dates them from eventID;
+    # records it can't re-date stay excluded.
+    placeholder_dates: [2023-11-30]
+    event_id_date: '_(\d{8})_'
+  4ef2bed0-d40f-49c9-bb64-c46a301a5a72:
+    name: Reef Check California — rocky reef fishes, invertebrates and algae
+    effort_class: dive_survey
+  f84538b9-5488-48af-a668-a45cdd0fc558:
+    name: PISCO Kelp Forest Community Surveys
+    effort_class: dive_survey
+  f02fb197-9597-4c3e-9ba0-ba29847ccdef:
+    name: MARINe/PISCO Coastal Biodiversity Surveys — swaths
+    effort_class: intertidal_survey
+  cf3bdc30-370c-48d3-8fff-b587a39d72d6:
+    name: eButterfly Surveys
+    effort_class: checklist
+  58ffefab-20aa-4cec-b0c0-dd7330ed7280:
+    name: MARINe/PISCO Coastal Biodiversity Surveys — point contact
+    effort_class: intertidal_survey
+  ca83b8e3-d395-4895-8d1f-483865f95de7:
+    name: MARINe/PISCO Coastal Biodiversity Surveys — quadrats
+    effort_class: intertidal_survey
+  350f00a7-db1f-4133-bc07-71de716339da:
+    name: Rockfish Recruitment and Ecosystem Assessment Survey (catch data)
+    exclude: true
+    reason: Trawl catch, not an encounter by divers or observers.
+  1b72b75a-fd98-42de-9d9d-c87c47631c0d:
+    name: California Harmful Algal Bloom Monitoring and Alert Program
+    exclude: true
+    reason: Plankton monitoring, not wildlife encounters.
+  27473ca0-1531-4a67-8a38-dd8c6b22bb5d:
+    name: CalCOFI Fish Larvae & Egg Tows
+    exclude: true
+    reason: Plankton net tows of larvae and eggs, not encounters.
+  3bb7e2f5-7d2d-42e8-b2b4-07439ccf9053:
+    name: eDNA_Subseafloor
+    exclude: true
+    reason: Sediment eDNA, not encounters.
+  a7dff6b5-7ca3-4639-ac3e-f0b413d1b160:
+    name: Invertebrate Collections made by R/V Velero III, IV, Atlantic, and Hubbs
+    exclude: true
+    reason: Ship-based dredge collections, not encounters.
+  39e1a4a8-204e-40f3-ac5a-a1bc1b4dae1d:
+    name: Macrofauna on mineral-rich substrates in the Southern California Borderland
+    exclude: true
+    reason: Deep-sea sampling, not encounters.
+
+  # Happywhale (CC BY-NC 4.0): photo-ID encounters, mostly from whale-watching trips, published
+  # to GBIF within days. `live: true` makes the `live` job pull them from the GBIF API, and
+  # their records are live-source records for nowcasts. Tiers still apply: listed species
+  # (e.g. blue, fin and sperm whales, sea otter, leatherback) never get recent-sighting outputs
+  # beyond their tier. North Pacific datasets for species seen in California waters
+  # (dataset keys from the GBIF API, 2026-11-12).
+  c6c36ac0-9c3f-45c3-bc40-e60a594c66e3: {name: Happywhale - Blue whale (N Pacific), live: true}
+  9fe5f160-8f85-4ac7-9e36-017e52339cdd: {name: Happywhale - Gray whale (N Pacific), live: true}
+  6cb6ab2b-b5ac-4134-9b25-574dcfcbef09: {name: Happywhale - Humpback whale (N Pacific), live: true}
+  4c2cc260-f3a4-4107-a306-791b5840eb6f: {name: Happywhale - Fin whale (N Pacific), live: true}
+  e11c8712-9b86-4767-8ebf-ffe0e0789d06: {name: Happywhale - Common minke whale (N Pacific), live: true}
+  e0da2d53-86f0-440c-a11a-42ffb0b3fd3e: {name: Happywhale - Killer whale (N Pacific), live: true}
+  c1c87d2f-f66d-46bd-8f1a-5c44c17ddb01: {name: Happywhale - Sperm whale (N Pacific), live: true}
+  2ab883c1-f7bc-45fd-95ad-ccfb85ce9de4: {name: Happywhale - Sei whale (N Pacific), live: true}
+  233ec9c0-ef02-4516-8a08-4477be375680: {name: Happywhale - Bryde's whale (N Pacific), live: true}
+  cf16cf4c-21f4-4788-ace0-b90b212a713e: {name: Happywhale - Baird's beaked whale (N Pacific), live: true}
+  71c2a31d-820a-4999-b672-6b16752694b6: {name: Happywhale - Cuvier's beaked whale (N Pacific), live: true}
+  ae339d7c-747e-4631-bccf-bfba20836d34: {name: Happywhale - Risso's dolphin (N Pacific), live: true}
+  40903b58-fd86-4f81-9675-404b8882d3e9: {name: Happywhale - Common bottlenose dolphin (N Pacific), live: true}
+  c23d8371-ab6f-4ec8-adad-a4661039f4e0: {name: "Happywhale - Common bottlenose dolphin (N Pacific, second dataset)", live: true}
+  ca791b09-cdf5-49ce-ad7b-c3a34a070f0a: {name: Happywhale - Short-beaked common dolphin (N Pacific), live: true}
+  5e7c9759-1892-41bb-b1cc-4279c41befb6: {name: Happywhale - Pacific white-sided dolphin (N Pacific), live: true}
+  ed225424-f520-4e58-9ff9-a09edb601e78: {name: Happywhale - Northern right whale dolphin (N Pacific), live: true}
+  58519d90-4a7a-4a78-bb60-d5132e728e6d: {name: Happywhale - False killer whale (N Pacific), live: true}
+  71435c60-2503-4ac4-b632-289c395ec3b9: {name: Happywhale - Short-finned pilot whale (N Pacific), live: true}
+  3348f7f1-7dbf-4da5-bf2e-a99bf9c80648: {name: Happywhale - Dall's porpoise (N Pacific), live: true}
+  fa939ded-6b94-4bee-9d4e-ef0be0287cee: {name: Happywhale - Harbor porpoise (N Pacific), live: true}
+  5708ecde-ffc2-4ce3-9e02-45f64f7dbd9a: {name: Happywhale - California sea lion (N Pacific), live: true}
+  cd874e73-d36d-4387-a824-0def824c47ad: {name: Happywhale - Steller sea lion (N Pacific), live: true}
+  3a68f6ee-a5c3-4ce6-88aa-0ac71fd0f2ff: {name: Happywhale - Harbor seal (N Pacific), live: true}
+  5c13e5a0-6ed1-412b-90c9-6e24e27feaea: {name: Happywhale - Northern elephant seal (N Pacific), live: true}
+  f41206c3-df95-4bb4-97a5-ed068e47bf7e: {name: Happywhale - Northern fur seal (N Pacific), live: true}
+  e1d9e966-8203-42dc-aec0-8d150bd1c26a: {name: Happywhale - Sea otter (N Pacific), live: true}
+  a3b0a78d-0cc0-46d8-8248-88f9a6bb62a5: {name: Happywhale - Great white shark (N Pacific), live: true}
+  79e82292-96c5-4e30-b0a8-da86bdd229ff: {name: Happywhale - Leatherback sea turtle (N Pacific), live: true}
+  65f8bb22-fdc4-4492-985a-52a2c58596b2: {name: Happywhale - Green sea turtle (N Pacific), live: true}

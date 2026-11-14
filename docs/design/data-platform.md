@@ -156,8 +156,13 @@ later: a tombstone list applied at publish.
 ## 8. Build order
 
 Status: steps 1 and 2 are implemented (`wildlife-radar run`, `publish`, `serve --bundle-dir`,
-the `live` job). The lake is still a local folder plus one DuckDB work store per region. Global
-reference data (identity, statuses) is still kept per region.
+the `live` job). Step 3 is implemented for the publish layer, not yet deployed
+([`../deploy.md`](../deploy.md)): `worker` runs the graph on a tick and pushes audited versions
+to object storage, and `serve` mirrors `CURRENT` from it. Step 4 is implemented as JSON
+products (H3 maps, place lists, a JSON search index) rather than PMTiles and SQLite: the
+frontend can draw H3 cells and search a few thousand names directly; revisit if sizes grow. The other layers stay on the worker's
+volume (one DuckDB work store per region). Global reference data (identity, statuses) is still
+kept per region.
 
 1. **Pipeline core:**
    - versioned outputs with manifests

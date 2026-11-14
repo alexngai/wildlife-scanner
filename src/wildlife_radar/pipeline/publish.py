@@ -92,7 +92,11 @@ def publish_bundle(
     now: datetime | None = None,
     allow_findings: bool = False,
     inputs: dict[str, str] | None = None,
+    before_swap=None,
+    freshness: list[tuple] | None = None,
 ) -> PublishResult:
+    """``before_swap(bundle_path, version_dir, final_dir)`` may add files (static products) to
+    the version before it becomes current; whatever it returns is recorded in the manifest."""
     now = now or utcnow()
     findings = audit_tiers(conn, region.id, list(curated_ids))
     high = [f for f in findings if f.severity == "high"]
@@ -127,6 +131,8 @@ def publish_bundle(
         [(tier, lv) for tier, lvs in levels.items() for lv in lvs],
     )
     visible = "(SELECT taxon_id FROM _pub_tier WHERE tier < 3)"
+    timing = "(SELECT taxon_id FROM _pub_tier WHERE tier <= 1)"
+    hourly_ok = "(SELECT taxon_id FROM _pub_tier WHERE tier = 0)"
     allowed = (
         "EXISTS (SELECT 1 FROM _pub_tier pt JOIN _pub_level pl ON pl.tier = pt.tier "
         "WHERE pt.taxon_id = x.taxon_id AND pl.level = x.level)"
@@ -155,12 +161,35 @@ def publish_bundle(
             f"SELECT * FROM hypothesis_scorecard x WHERE region_id = $r AND taxon_id IN {visible}"
         ),
         "taxon_alias": f"SELECT * FROM taxon_alias x WHERE taxon_id IN {visible}",
+        # Time-of-day patterns carry no places, but only open and generalized taxa get them.
+        "timed_index": f"SELECT * FROM timed_index x WHERE region_id = $r AND taxon_id IN {timing}",
+        "timed_scorecard": (
+            f"SELECT * FROM timed_scorecard x WHERE region_id = $r AND taxon_id IN {timing}"
+        ),
+        # Hourly forecasts are finer than any tier but OPEN allows (hour granularity).
+        "hourly_models": (
+            f"SELECT * FROM hourly_models x WHERE region_id = $r AND passes "
+            f"AND taxon_id IN {hourly_ok}"
+        ),
+        "hourly_scorecard": (
+            f"SELECT * FROM hourly_scorecard x WHERE region_id = $r AND taxon_id IN {hourly_ok}"
+        ),
+        # Tide predictions around now, so the API can place hours on the tide (public data).
+        "tide_hilo": (
+            "SELECT * FROM tide_hilo x WHERE station_id IN (SELECT unnest($stations)) "
+            "AND t BETWEEN $t0 AND $t1"
+        ),
         "signal_daily": (
             "SELECT * FROM signal_daily x WHERE station_id IN (SELECT unnest($stations))"
         ),
     }
     present = _tables(conn)
-    params = {"r": region.id, "stations": [s.station_id for s in region.tide_stations]}
+    params = {
+        "r": region.id,
+        "stations": [s.station_id for s in region.tide_stations],
+        "t0": naive_utc(now) - timedelta(days=3),
+        "t1": naive_utc(now) + timedelta(days=120),
+    }
     conn.execute(f"ATTACH '{bundle}' AS bundle")
     try:
         for table, sql in selects.items():
@@ -184,8 +213,29 @@ def publish_bundle(
             result.rows["taxon_names"] = conn.execute(
                 "SELECT count(*) FROM bundle.taxon_names"
             ).fetchone()[0]
+        if "inat_taxon_records" in present:
+            # One openly licensed photo per visible taxon, from the cached iNaturalist records.
+            from wildlife_radar.connectors.inaturalist_taxa import open_photo
+
+            conn.execute("CREATE TABLE bundle.taxon_photos (taxon_id VARCHAR, photo JSON)")
+            photos = []
+            for taxon_id, record in conn.execute(
+                f"SELECT taxon_id, record FROM inat_taxon_records WHERE taxon_id IN {visible}"
+            ).fetchall():
+                photo = open_photo(json.loads(record)) if record else None
+                if photo:
+                    photos.append((taxon_id, json.dumps(photo)))
+            if photos:
+                conn.executemany("INSERT INTO bundle.taxon_photos VALUES (?, ?)", photos)
+            result.rows["taxon_photos"] = len(photos)
         if "observations" in present:
             result.rows.update(_recent(conn, region, registry, config or BaselineConfig(), now))
+        if freshness is not None:
+            from wildlife_radar.pipeline.freshness import FRESHNESS_SCHEMA
+
+            conn.execute(FRESHNESS_SCHEMA.replace("TABLE IF NOT EXISTS ", "TABLE bundle."))
+            if freshness:
+                conn.executemany("INSERT INTO bundle.freshness VALUES (?, ?, ?, ?, ?)", freshness)
         conn.execute(
             "CREATE TABLE bundle.bundle_info AS SELECT ? AS region_id, ? AS version, "
             "?::TIMESTAMP AS published_at, ? AS inputs",
@@ -193,6 +243,7 @@ def publish_bundle(
         )
     finally:
         conn.execute("DETACH bundle")
+    extra = before_swap(bundle, tmp, final) if before_swap else None
     (tmp / "manifest.json").write_text(
         json.dumps(
             {
@@ -204,6 +255,7 @@ def publish_bundle(
                 "rows": result.rows,
                 "audit": result.findings,
                 "audit_overridden": result.overridden,
+                "static": extra,
                 "status": "complete",
             },
             indent=2,

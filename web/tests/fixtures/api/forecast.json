@@ -1,0 +1,38 @@
+{
+ "taxon": {
+  "taxon_id": "testus-primus",
+  "scientific_name": "Testus primus",
+  "common_name": "Common Testbird",
+  "group": "birds",
+  "records_visits": 5000,
+  "tier": 0,
+  "mode": "forecast",
+  "gate": null,
+  "effort_groups": []
+ },
+ "day": "2026-05-20",
+ "cell": "8628348b7ffffff",
+ "resolution_km": 3.72,
+ "effort_group": "birds:casual",
+ "method": "observer_visit",
+ "level": 1,
+ "p": 0.42,
+ "p_level0": 0.3,
+ "drivers": [
+  {
+   "term": "temp",
+   "signal": "water_temperature",
+   "value": 14.2,
+   "contribution": 0.35,
+   "hypothesis": true
+  },
+  {
+   "term": "wind",
+   "signal": "wind_speed",
+   "value": 7.5,
+   "contribution": -0.2,
+   "hypothesis": false
+  }
+ ],
+ "notes": []
+}

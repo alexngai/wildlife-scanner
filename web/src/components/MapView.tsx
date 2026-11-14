@@ -1,0 +1,547 @@
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import * as maplibregl from "maplibre-gl";
+import type { GeoJSONSource, MapLayerMouseEvent, StyleSpecification } from "maplibre-gl";
+
+// MapLibre's worker is a separate, self-contained file; ship it as an asset and point at it.
+import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
+
+maplibregl.setWorkerUrl(workerUrl);
+
+type GeoData = Parameters<GeoJSONSource["setData"]>[0];
+type Expr = maplibregl.ExpressionSpecification;
+import "maplibre-gl/dist/maplibre-gl.css";
+import type { BasemapConfig, MapLayerConfig } from "../config";
+import { effectiveChoice, useLayerChoice, type LayerChoice } from "../lib/mapLayers";
+import { LayerPicker } from "./LayerPicker";
+import type { CellFeatureProps, FeatureCollection } from "../lib/maps";
+import { liftRampFor, rampFor, type MapMetric } from "./mapColors";
+
+export interface MapPlace {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  /** 0-1: when given, the dot is sized and coloured by it (hotspots); null = no data. */
+  value?: number | null;
+  /** Extra text for the place's hover / tap popup. */
+  note?: string;
+}
+
+export interface MapViewProps {
+  data: FeatureCollection;
+  /** [w, s, e, n] to fit when the map opens (and when it changes). */
+  bounds: [number, number, number, number] | null;
+  theme: "light" | "dark";
+  basemap: BasemapConfig;
+  /** What the cell colours show: chance per outing (default) or chance against the wider area. */
+  metric?: MapMetric;
+  selectedCell?: string | null;
+  onSelect?: (pt: { lat: number; lon: number; cell: string | null }) => void;
+  /** Named places drawn as points; tapping one calls onPlace. */
+  places?: MapPlace[];
+  selectedPlace?: string | null;
+  onPlace?: (id: string) => void;
+  /** Text for a cell's hover / tap popup; no popup when absent. */
+  describe?: (cell: CellFeatureProps) => string;
+  /** Accessible description of what the map shows (the map itself isn't readable by screen readers). */
+  label: string;
+  /** Extra base maps and overlays the viewer can switch on (from config). */
+  layers?: MapLayerConfig[];
+  /** A shorter map, for overviews. */
+  short?: boolean;
+}
+
+const SRC = "wr-cells";
+const NO_LAYERS: MapLayerConfig[] = [];
+const PLACES = "wr-places";
+
+function blankStyle(theme: "light" | "dark"): StyleSpecification {
+  return {
+    version: 8,
+    sources: {},
+    layers: [
+      {
+        id: "bg",
+        type: "background",
+        paint: { "background-color": theme === "dark" ? "#16191d" : "#eef1f3" },
+      },
+    ],
+  };
+}
+
+function basemapUrl(basemap: BasemapConfig, theme: "light" | "dark"): string | null {
+  const url = theme === "dark" ? basemap.dark : basemap.light;
+  return !url || url === "none" ? null : url;
+}
+
+/** The style for the chosen base: the vector base map, a raster base layer, or plain. */
+function styleFor(
+  basemap: BasemapConfig,
+  theme: "light" | "dark",
+  base: string = "map",
+  layers: MapLayerConfig[] = [],
+): string | StyleSpecification {
+  const url = basemapUrl(basemap, theme);
+  if (base === "map" && url) return url;
+  const raster = layers.find((l) => l.kind === "base" && l.id === base);
+  const style = blankStyle(theme);
+  if (!raster) return style;
+  style.sources[`wr-base-${raster.id}`] = {
+    type: "raster",
+    tiles: raster.tiles,
+    tileSize: raster.tileSize ?? 256,
+    maxzoom: raster.maxzoom ?? 18,
+    attribution: raster.attribution,
+  };
+  style.layers.push({
+    id: `wr-base-${raster.id}`,
+    type: "raster",
+    source: `wr-base-${raster.id}`,
+  });
+  return style;
+}
+
+/** Overlays sit between the base map and the data; all are added, hidden unless chosen. */
+function addOverlays(map: maplibregl.Map, s: Latest) {
+  const dark = s.theme === "dark";
+  for (const l of s.layers) {
+    if (l.kind !== "overlay") continue;
+    const id = `wr-ov-${l.id}`;
+    if (map.getLayer(id)) continue;
+    const visibility = s.choice.overlays.includes(l.id) ? "visible" : "none";
+    if (l.type === "hillshade") {
+      map.addSource(id, {
+        type: "raster-dem",
+        tiles: l.tiles,
+        tileSize: l.tileSize ?? 256,
+        maxzoom: l.maxzoom ?? 15,
+        encoding: l.encoding ?? "terrarium",
+        attribution: l.attribution,
+      });
+      map.addLayer({
+        id,
+        type: "hillshade",
+        source: id,
+        layout: { visibility },
+        paint: {
+          "hillshade-exaggeration": l.opacity ?? 0.45,
+          "hillshade-shadow-color": dark ? "#000000" : "#3b4148",
+          "hillshade-highlight-color": dark ? "#5b6168" : "#ffffff",
+        },
+      });
+    } else {
+      map.addSource(id, {
+        type: "raster",
+        tiles: l.tiles,
+        tileSize: l.tileSize ?? 256,
+        maxzoom: l.maxzoom ?? 18,
+        attribution: l.attribution,
+      });
+      map.addLayer({
+        id,
+        type: "raster",
+        source: id,
+        layout: { visibility },
+        paint: { "raster-opacity": l.opacity ?? 0.6 },
+      });
+    }
+  }
+}
+
+function matchBins(prop: string, ramp: string[], fallback: string): Expr {
+  return ["match", ["get", prop], ...ramp.flatMap((color, bin) => [bin, color]), fallback] as unknown as Expr;
+}
+
+/** Fill colour by metric; presence and "not enough data" look the same in both. */
+export function fillColor(theme: "light" | "dark", metric: MapMetric): Expr {
+  const dark = theme === "dark";
+  const none = dark ? "#16191d" : "#ffffff";
+  const values =
+    metric === "lift"
+      ? matchBins("liftBin", liftRampFor(theme), none)
+      : metric === "today"
+        ? matchBins("todayBin", liftRampFor(theme), none)
+        : matchBins("bin", rampFor(theme), rampFor(theme)[0] ?? "#888888");
+  return [
+    "case",
+    ["get", "presence"],
+    dark ? "#e0a458" : "#b4630e",
+    ["get", "insufficient"],
+    dark ? "#8a9099" : "#9aa1a9",
+    values,
+  ] as unknown as Expr;
+}
+
+function fillOpacity(metric: MapMetric, k = 1): Expr {
+  return [
+    "*",
+    k,
+    [
+      "case",
+      ["get", "presence"],
+      0.45,
+      ["get", "insufficient"],
+      0.12,
+      // Cells with no comparison stay faint in the "compared" and "today" views.
+      metric === "lift" ? ["==", ["get", "liftBin"], -1] : metric === "today" ? ["==", ["get", "todayBin"], -1] : false,
+      0.15,
+      ["==", ["get", "confidence"], "low"],
+      0.4,
+      0.72,
+    ],
+  ] as unknown as Expr;
+}
+
+const HATCH = "wr-hatch";
+
+/** A small diagonal-line tile so "not enough data" is hatched on the map, as in the legend. */
+function hatchImage(theme: "light" | "dark"): {
+  width: number;
+  height: number;
+  data: Uint8Array;
+} {
+  const size = 8;
+  const data = new Uint8Array(size * size * 4);
+  const [r, g, b] = theme === "dark" ? [170, 176, 184] : [110, 117, 125];
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      if ((x + y) % size < 2) {
+        const o = (y * size + x) * 4;
+        data.set([r, g, b, 200], o);
+      }
+    }
+  }
+  return { width: size, height: size, data };
+}
+
+/** Plain dots, or sized by value (5-22 px) when places carry one. */
+function placeRadius(selected: string | null): Expr {
+  return [
+    "+",
+    ["case", ["==", ["get", "id"], selected ?? ""], 2, 0],
+    ["case", [">=", ["get", "value"], 0], ["+", 6, ["*", 16, ["sqrt", ["get", "value"]]]], 5],
+  ] as unknown as Expr;
+}
+
+function placeColor(theme: "light" | "dark"): Expr {
+  const ramp = rampFor(theme);
+  const plain = theme === "dark" ? "#ffffff" : "#1b1f24";
+  return [
+    "case",
+    [">=", ["get", "value"], 0],
+    ["interpolate", ["linear"], ["get", "value"], 0, ramp[1] ?? plain, 0.5, ramp[3] ?? plain, 1, ramp[5] ?? plain],
+    plain,
+  ] as unknown as Expr;
+}
+
+function placesData(places: MapPlace[]): GeoData {
+  return {
+    type: "FeatureCollection",
+    features: places.map((p) => ({
+      type: "Feature",
+      properties: {
+        id: p.id,
+        name: p.name,
+        value: p.value ?? -1,
+        popup: p.note ? `${p.name}: ${p.note}` : p.name,
+      },
+      geometry: { type: "Point", coordinates: [p.lon, p.lat] },
+    })),
+  } as GeoData;
+}
+
+function addLayers(map: maplibregl.Map, s: Latest) {
+  if (map.getSource(SRC)) return;
+  addOverlays(map, s);
+  const dark = s.theme === "dark";
+  map.addSource(SRC, { type: "geojson", data: s.data as unknown as GeoData });
+  if (map.hasImage(HATCH)) map.removeImage(HATCH);
+  map.addImage(HATCH, hatchImage(s.theme));
+  map.addLayer({
+    id: "wr-fill",
+    type: "fill",
+    source: SRC,
+    paint: {
+      "fill-color": fillColor(s.theme, s.metric),
+      "fill-opacity": fillOpacity(s.metric, s.choice.dataOpacity),
+    },
+  });
+  map.addLayer({
+    id: "wr-hatch",
+    type: "fill",
+    source: SRC,
+    filter: ["==", ["get", "insufficient"], true],
+    paint: { "fill-pattern": HATCH, "fill-opacity": s.choice.dataOpacity },
+  });
+  // Over imagery, cells need an edge to stay readable.
+  map.addLayer({
+    id: "wr-outline",
+    type: "line",
+    source: SRC,
+    layout: { visibility: s.choice.base === "map" || s.choice.base === "plain" ? "none" : "visible" },
+    paint: { "line-color": "#ffffff", "line-width": 0.6, "line-opacity": 0.55 },
+  });
+  map.addLayer({
+    id: "wr-insufficient",
+    type: "line",
+    source: SRC,
+    filter: ["==", ["get", "insufficient"], true],
+    paint: {
+      "line-color": dark ? "#c3c8cf" : "#5b6168",
+      "line-width": 1,
+      "line-dasharray": [2, 2],
+    },
+  });
+  map.addLayer({
+    id: "wr-selected",
+    type: "line",
+    source: SRC,
+    filter: ["==", ["get", "cell"], s.selectedCell ?? ""],
+    paint: { "line-color": dark ? "#ffffff" : "#111111", "line-width": 2.5 },
+  });
+
+  map.addSource(PLACES, { type: "geojson", data: placesData(s.places) });
+  map.addLayer({
+    id: "wr-places",
+    type: "circle",
+    source: PLACES,
+    paint: {
+      "circle-radius": placeRadius(s.selectedPlace),
+      "circle-color": placeColor(s.theme),
+      "circle-stroke-color": dark ? "#1b1f24" : "#ffffff",
+      "circle-stroke-width": 2,
+    },
+  });
+  // Labels need the basemap's fonts; the plain fallback style has none, so names show on hover.
+  if (map.getStyle().glyphs) {
+    map.addLayer({
+      id: "wr-place-labels",
+      type: "symbol",
+      source: PLACES,
+      layout: {
+        "text-field": ["get", "name"],
+        "text-size": 12,
+        "text-offset": [0, 0.9],
+        "text-anchor": "top",
+        "text-optional": true,
+      },
+      paint: {
+        "text-color": dark ? "#f2f4f6" : "#1b1f24",
+        "text-halo-color": dark ? "#1b1f24" : "#ffffff",
+        "text-halo-width": 1.5,
+      },
+    });
+  }
+}
+
+interface Latest {
+  data: FeatureCollection;
+  theme: "light" | "dark";
+  metric: MapMetric;
+  selectedCell: string | null;
+  places: MapPlace[];
+  layers: MapLayerConfig[];
+  choice: LayerChoice;
+  selectedPlace: string | null;
+  onSelect?: MapViewProps["onSelect"];
+  onPlace?: MapViewProps["onPlace"];
+  describe?: MapViewProps["describe"];
+}
+
+export default function MapView({
+  data,
+  bounds,
+  theme,
+  basemap,
+  metric = "chance",
+  selectedCell = null,
+  onSelect,
+  places = [],
+  selectedPlace = null,
+  onPlace,
+  describe,
+  label,
+  short = false,
+  layers = NO_LAYERS,
+}: MapViewProps) {
+  const stored = useLayerChoice();
+  const hasBasemap = basemapUrl(basemap, theme) !== null;
+  const choice = useMemo(() => effectiveChoice(stored, layers, hasBasemap), [stored, layers, hasBasemap]);
+  const container = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
+  const latest = useRef<Latest>({
+    data,
+    theme,
+    metric,
+    selectedCell,
+    places,
+
+    layers,
+    choice,
+    selectedPlace,
+    onSelect,
+    onPlace,
+    describe,
+  });
+  useLayoutEffect(() => {
+    latest.current = {
+      data,
+      theme,
+      metric,
+      selectedCell,
+      places,
+
+      layers,
+      choice,
+      selectedPlace,
+      onSelect,
+      onPlace,
+      describe,
+    };
+  });
+
+  // Create the map once.
+  useEffect(() => {
+    if (!container.current) return;
+    let styleLoaded = false;
+    const map = new maplibregl.Map({
+      container: container.current,
+      style: styleFor(basemap, theme, choice.base, layers),
+      bounds: bounds ?? undefined,
+      fitBoundsOptions: { padding: 24 },
+      attributionControl: {
+        compact: false,
+        customAttribution: basemap.attribution,
+      },
+      cooperativeGestures: true,
+    });
+    mapRef.current = map;
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+    const popup = new maplibregl.Popup({
+      closeButton: false,
+      closeOnClick: false,
+      className: "wr-popup",
+      maxWidth: "240px",
+    });
+
+    map.on("style.load", () => {
+      styleLoaded = true;
+      addLayers(map, latest.current);
+    });
+    // If the basemap can't be reached, fall back to a plain background so the data still shows.
+    map.on("error", (e: { error?: { message?: string } }) => {
+      if (!styleLoaded && /style|fetch|Failed/i.test(String(e.error?.message ?? ""))) {
+        styleLoaded = true;
+        map.setStyle(blankStyle(latest.current.theme));
+      }
+    });
+
+    // Places drawn over the cells take hover and taps before the cell under them.
+    const overlayAt = (e: MapLayerMouseEvent) =>
+      map.getLayer("wr-places") ? map.queryRenderedFeatures(e.point, { layers: ["wr-places"] })[0] : undefined;
+    const showCell = (e: MapLayerMouseEvent) => {
+      const props = e.features?.[0]?.properties as CellFeatureProps | undefined;
+      const text = props && latest.current.describe?.(props);
+      if (text) popup.setLngLat(e.lngLat).setText(text).addTo(map);
+    };
+
+    map.on("click", "wr-fill", (e: MapLayerMouseEvent) => {
+      if (overlayAt(e)) return; // the place handles it
+      const f = e.features?.[0];
+      showCell(e);
+      latest.current.onSelect?.({
+        lat: e.lngLat.lat,
+        lon: e.lngLat.lng,
+        cell: (f?.properties?.cell as string) ?? null,
+      });
+    });
+    map.on("mousemove", "wr-fill", (e: MapLayerMouseEvent) => {
+      if (!overlayAt(e)) showCell(e);
+    });
+    map.on("mouseleave", "wr-fill", () => popup.remove());
+    map.on("click", "wr-places", (e: MapLayerMouseEvent) => {
+      const id = e.features?.[0]?.properties?.id as string | undefined;
+      if (id) latest.current.onPlace?.(id);
+    });
+    map.on("mousemove", "wr-places", (e: MapLayerMouseEvent) => {
+      const text = e.features?.[0]?.properties?.popup as string | undefined;
+      if (text) popup.setLngLat(e.lngLat).setText(text).addTo(map);
+    });
+    for (const layer of ["wr-fill", "wr-places"]) {
+      map.on("mouseenter", layer, () => (map.getCanvas().style.cursor = "pointer"));
+      map.on("mouseleave", layer, () => (map.getCanvas().style.cursor = ""));
+    }
+    return () => {
+      popup.remove();
+      map.remove();
+      mapRef.current = null;
+    };
+    // The map is created once; later prop changes are applied by the effects below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Theme or basemap change: swap the style; layers are re-added on style.load.
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    mapRef.current?.setStyle(styleFor(basemap, theme, choice.base, layers));
+  }, [theme, basemap, choice.base, layers]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    for (const l of layers) {
+      const id = `wr-ov-${l.id}`;
+      if (l.kind === "overlay" && map.getLayer(id))
+        map.setLayoutProperty(id, "visibility", choice.overlays.includes(l.id) ? "visible" : "none");
+    }
+  }, [choice.overlays, layers]);
+
+  useEffect(() => {
+    const src = mapRef.current?.getSource(SRC) as GeoJSONSource | undefined;
+    src?.setData(data as unknown as GeoData);
+  }, [data]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map?.getLayer("wr-fill")) return;
+    map.setPaintProperty("wr-fill", "fill-color", fillColor(theme, metric));
+    map.setPaintProperty("wr-fill", "fill-opacity", fillOpacity(metric, choice.dataOpacity));
+    if (map.getLayer("wr-hatch")) map.setPaintProperty("wr-hatch", "fill-opacity", choice.dataOpacity);
+  }, [metric, theme, choice.dataOpacity]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map?.getLayer("wr-selected")) map.setFilter("wr-selected", ["==", ["get", "cell"], selectedCell ?? ""]);
+  }, [selectedCell]);
+
+  useEffect(() => {
+    const src = mapRef.current?.getSource(PLACES) as GeoJSONSource | undefined;
+    src?.setData(placesData(places));
+  }, [places]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map?.getLayer("wr-places")) map.setPaintProperty("wr-places", "circle-radius", placeRadius(selectedPlace));
+  }, [selectedPlace]);
+
+  useEffect(() => {
+    if (bounds && mapRef.current) mapRef.current.fitBounds(bounds, { padding: 24, duration: 0 });
+  }, [bounds]);
+
+  // MapLibre's canvas is focusable (keyboard pan and zoom), so the description goes on it
+  // rather than on a wrapping role="img".
+  useEffect(() => {
+    mapRef.current?.getCanvas().setAttribute("aria-label", label);
+  }, [label]);
+
+  return (
+    <div className="map-frame">
+      <div ref={container} className={short ? "map map-short" : "map"} data-testid="map" />
+      <LayerPicker layers={layers} hasBasemap={hasBasemap} choice={choice} />
+    </div>
+  );
+}

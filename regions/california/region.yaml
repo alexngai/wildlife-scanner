@@ -1,0 +1,10 @@
+# California: the shared pack for California regions. Its curated files (statuses.yaml,
+# datasets.yaml) apply to every pack that `inherits: california`; each status applies only
+# where its scope does (e.g. ca-southern-central-coast). It is also a valid, very large region.
+id: california
+name: California
+timezone: America/Los_Angeles
+bbox: [-124.5, 32.5, -114.1, 42.0]
+scopes: [global, us, us-ca, california]
+inat_place_scopes: {"1": us, "14": us-ca}
+inat_innermost_place: "14"

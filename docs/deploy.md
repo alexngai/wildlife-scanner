@@ -1,0 +1,196 @@
+# Deploying: R2 + fly.io
+
+How the pieces fit together, and the steps to bring them up. Nothing here has been created yet:
+the code and configs are tested locally, against a folder standing in for the bucket and with
+a mocked S3 API. Design background: [`design/data-platform.md`](design/data-platform.md) §5.
+
+```
+             every 30 min                        CURRENT pointer               on request
+ ┌──────────────────────────┐  push   ┌──────────────────────────┐  pull  ┌──────────────────┐
+ │ worker (fly.io + volume) │───────▶ │  R2: publish bucket      │──────▶ │ API (fly.io,     │
+ │ runs stale jobs → audit  │         │  region=<id>/CURRENT     │        │ auto-stop)       │
+ │ → publish → push         │         │  region=<id>/version=<v>/│        │ mirrors CURRENT  │
+ └──────────────────────────┘         └──────────────────────────┘        └──────────────────┘
+        ▲ GBIF, iNaturalist, NOAA                    │ static products → frontend (CDN)
+```
+
+## Parts
+
+| Part | Command | Where |
+|---|---|---|
+| Worker | `wildlife-radar worker --region R1,R2 --db '/data/{region}.duckdb' --lake /data/lake --ingest-snapshots --every 30` | fly.io app with a volume (`deploy/fly.worker.toml`) |
+| Publish bucket | `region=<id>/version=<v>/{serving.duckdb, manifest.json}` and `region=<id>/CURRENT` | Cloudflare R2 |
+| API | `wildlife-radar serve --region R1,R2 --cache-dir /tmp/bundles` with `WILDLIFE_RADAR_PUBLISH_URL` set | fly.io app, auto-stop (`deploy/fly.api.toml`) |
+| Static products | `version=<v>/static/{index,taxa}.json`, `static/maps/…`, `static/places/…` | same bucket, served by R2's public domain / CDN |
+
+- **The worker** ticks every 30 minutes. Each tick runs only stale jobs (`Job.max_age`):
+  - live iNaturalist records: every tick;
+  - NOAA signals: daily;
+  - the GBIF snapshot check: weekly, with a full rebuild when a new monthly snapshot appears;
+  - model refits: monthly.
+
+  Then it pushes the new version and prunes old ones (keeps 6). Publishing is **gated on the
+  tier audit**: a blocked publish fails the job, the bucket keeps the last audited version, and
+  the next tick retries. The last tick's summary is in `/data/lake/worker/region=<id>.json`.
+- **The bucket:** the worker uploads every file of a version, and only then the `CURRENT`
+  pointer. So anyone reading `CURRENT` finds a complete version. Versioned files are marked
+  immutable. `CURRENT` is marked `no-cache`.
+- **The API** downloads the current bundle at startup and checks `CURRENT` every 60 s. It swaps
+  in a new version between requests. A cold start after auto-stop downloads the bundle before
+  serving, so the first request after idle is slower.
+- **Rollback:** point `CURRENT` at a kept version:
+  - `fly ssh console -a <worker>`, then rewrite the pointer;
+  - or upload a one-line `CURRENT` file with any S3 tool.
+
+## Static products (for the frontend)
+
+Built by `publish` from the finished bundle, through the same query layer as the API, before
+`CURRENT` moves (`src/wildlife_radar/pipeline/static.py`):
+
+- `version=<v>/static/index.json`: the entry point. The frontend reads `CURRENT`, then this
+  index, which lists every other file's path (relative to `region=<id>/`).
+- `version=<v>/static/taxa.json`: search index (names, aliases, group, tier, records), each
+  species' map path, a 52-week season summary and an openly licensed photo (hotlinked).
+- `static/maps/<taxon>.<key>.json`: the species' year of maps by ISO week, as H3 cells × weeks
+  matrices (weekly for openly mapped taxa, monthly at landscape scale for coarse ones). Weeks
+  a taxon is withheld are absent. Withheld taxa are absent everywhere.
+- `static/places/<place>.<key>.json` and `static/places/<place>.<key>/wNN.json`: a place's
+  header (names, groups, week paths) and one file per week of lists.
+
+The formats (currently format 3) are specified in
+[`design/static-products.md`](design/static-products.md), which the web app relies on.
+
+Maps and place lists are content-addressed, so a live publish rebuilds only the index and
+search index. Only files whose inputs changed (a new baseline, a tier change) are regenerated
+and uploaded. The bucket needs public read access (an R2 custom domain or `r2.dev`) for these
+paths. Everything published is already policy-filtered. `--no-static` skips them.
+
+## Several regions
+
+- **One worker, several regions:** each tick runs the regions in turn. They share the volume and
+  the **reference store** (`lake/ref`: name identities and raw iNaturalist taxon records), so a
+  new region reuses what the others already resolved. Status lookups are still parsed and
+  cached per region, because which statuses apply depends on the region's places.
+- **Workers on several machines:** set `WILDLIFE_RADAR_LAKE_URL` (or `--lake-url`) to a
+  **private** bucket. Each tick then copies new reference parts both ways. The parts are
+  immutable and uniquely named, so workers never conflict.
+- **One API, several regions:** `serve --region a,b` opens each region's bundle on first use.
+  - Point and place requests go to the smallest region that contains the point, or to the
+    place's own region.
+  - Taxon requests (`/taxa`, `/species/{id}/map`) take `region=`, which is required when more
+    than one region is served.
+  - `/regions` lists the regions, and `/health` reports each one.
+  - A region with nothing published yet answers 503.
+  - Two served regions may not share a place id.
+
+## Configuration
+
+| Variable | Used by | Value |
+|---|---|---|
+| `WILDLIFE_RADAR_PUBLISH_URL` | worker, API | `s3://<bucket>[/prefix]`, or a local folder |
+| `AWS_ENDPOINT_URL_S3` | worker, API | `https://<account id>.r2.cloudflarestorage.com` (secret) |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | worker, API | R2 API token key pair (secrets) |
+| `AWS_REGION` | worker, API | `auto` (R2) |
+| `WILDLIFE_RADAR_CORS_ORIGINS` | API | the frontend's origin(s), comma-separated; none by default |
+| `WILDLIFE_RADAR_SOURCE_URL` | API | link to the running source (AGPL §13) |
+| `WILDLIFE_RADAR_LAKE_URL` | worker | private bucket for the shared reference store (only with several worker machines) |
+| `WILDLIFE_RADAR_USER_AGENT` | worker | operator contact for outside APIs (optional; never the owner's personal details in the repo) |
+
+Credentials only ever go in fly secrets (`fly secrets set …`), never in `fly.toml` or the
+repository. Give the API a **read-only** R2 token and the worker a read-write one, both scoped
+to the publish bucket.
+
+## Bringing it up (when ready)
+
+1. **R2:** create a bucket (e.g. `wildlife-radar-publish`) and two API tokens scoped to it:
+   Object Read for the API, Object Read & Write for the worker.
+2. **Worker:**
+   ```bash
+   fly apps create <worker app>
+   fly volumes create worker_data --app <worker app> --region lax --size 40
+   fly secrets set --app <worker app> AWS_ACCESS_KEY_ID=… AWS_SECRET_ACCESS_KEY=… AWS_ENDPOINT_URL_S3=…
+   fly deploy --config deploy/fly.worker.toml --dockerfile deploy/Dockerfile --app <worker app>
+   ```
+   The first tick ingests the newest GBIF snapshot and builds everything: about 1.5 h for San
+   Diego. Later ticks take minutes.
+3. **API:**
+   ```bash
+   fly apps create <api app>
+   fly secrets set --app <api app> AWS_ACCESS_KEY_ID=… AWS_SECRET_ACCESS_KEY=… AWS_ENDPOINT_URL_S3=…
+   fly deploy --config deploy/fly.api.toml --dockerfile deploy/Dockerfile --app <api app>
+   ```
+4. Check `https://<api app>.fly.dev/health`: it names the bundle version it serves.
+
+## Running it locally
+
+The same commands work with a folder in place of the bucket:
+
+```bash
+uv run wildlife-radar worker --region sandiego --db data/sd.duckdb --lake data/lake \
+    --publish-url data/bucket --once
+WILDLIFE_RADAR_PUBLISH_URL=data/bucket uv run wildlife-radar serve --region sandiego
+```
+
+The image:
+
+```bash
+docker build -f deploy/Dockerfile -t wildlife-radar .
+docker run -p 8080:8080 -v "$PWD/data/bucket:/bucket:ro" -e WILDLIFE_RADAR_PUBLISH_URL=/bucket \
+    wildlife-radar wildlife-radar serve --region sandiego --host 0.0.0.0 --port 8080
+```
+
+The image starts as root only to give `/data` (a fly volume) to the `app` user, then runs the
+command as `app`.
+
+## Costs and sizing (to confirm against current fly.io and R2 pricing)
+
+- **API:** one small shared-CPU machine, stopped when idle. Billed only while it runs.
+- **Worker:** an always-on shared-CPU machine with 4 GB and a 40 GB volume. This is the largest
+  fixed cost. To make it cheaper later, start a stopped machine on a schedule and run
+  `worker --once`, which exits after one tick, so it's billed per tick. It would need an outside
+  cron (a GitHub Actions schedule or a Cloudflare Worker cron calling the fly machines API),
+  because fly's own machine schedules are at most hourly.
+- **R2:** a few versions of a few hundred MB each; R2 doesn't charge egress.
+
+## Not done yet
+
+- **Static products on real data** (format 3, Monterey Bay, 4,866 species):
+  - maps total 256 MB (50 MB gzipped), at most 166 KB per species;
+  - a place page loads a 162 KB header (34 KB gzipped) and a 38 KB week (10 KB gzipped);
+  - a full rebuild runs in parallel processes, and publishes between baseline rebuilds reuse
+    the files.
+
+  PMTiles was skipped: H3 cells render directly in the browser.
+- **Raw, norm and derived layers stay on the worker's volume.** Only `publish` (and `ref`, with
+  a lake bucket) is in R2. If the
+  volume is lost, the worker rebuilds from scratch (~1.5 h per region), and the API keeps
+  serving the last version meanwhile.
+- **Every tick republishes the whole bundle**, even when only the live aggregates changed.
+  Splitting the small live tables into their own file would make pushes and cold starts
+  cheaper; measure bundle sizes on real data first.
+
+
+## Private lake storage (R2)
+
+The lake's shared layers (`lake/ref`, `lake/norm`) live in a private R2 bucket, so a new
+machine restores them instead of re-downloading from GBIF.
+
+- **Address:** `r2://<account id>/<bucket>/lake` (`--lake-url` or `WILDLIFE_RADAR_LAKE_URL`).
+- **Token:** a Cloudflare API token with *Account → Workers R2 Storage → Edit*, sent as a
+  bearer header to `api.cloudflare.com`. In a cloud session it is a saved network secret that
+  the proxy injects; elsewhere set `CLOUDFLARE_API_TOKEN`. A token limited to one bucket's
+  objects is refused by the REST API.
+- **Limits:** one upload is at most 300 MiB; coverage tiles are written in files of about
+  200 MB, and `lake-sync --push` splits older, larger tiles first.
+
+```sh
+wildlife-radar lake-sync --push            # upload new files (add --prune after splits)
+wildlife-radar lake-sync --pull            # restore everything (~5 GB for California)
+wildlife-radar lake-sync --pull --pull-prefix ref --pull-prefix norm/observations/source=live
+```
+
+Region work stores are not synced: they are rebuilt from the tiles and the live log.
+
+After a new monthly snapshot is built, `wildlife-radar lake-prune` (add `--dry-run` to see the
+list) drops snapshots older than the previous one and live-log days the snapshot has
+absorbed, locally and in the bucket. This keeps the bucket at about 12–15 GB for California.
