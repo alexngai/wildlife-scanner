@@ -201,14 +201,24 @@ def ingest_region(
 
 
 def split_large(
-    lake: Path, coverage_id: str, snapshot_date: str, max_bytes: int = MAX_FILE_BYTES
+    lake: Path,
+    coverage_id: str,
+    snapshot_date: str,
+    max_bytes: int = MAX_FILE_BYTES,
+    limit: int | None = None,
 ) -> list[str]:
-    """Cut tile files over ``max_bytes`` (built before the size cap) into smaller parts, in
-    place. Returns the files that were split."""
+    """Cut tile files over ``limit`` (default: the largest single upload; tiles built before
+    the size cap) into parts of about ``max_bytes``, in place. Returns the files split.
+
+    The cap is approximate (DuckDB closes a file after it passes it), so pieces can be a
+    little over ``max_bytes``; only files over the upload limit are split again."""
+    from wildlife_radar.storage.objects import R2_MAX_PUT
+
+    limit = R2_MAX_PUT if limit is None else limit
     root = snapshot_dir(lake, coverage_id, snapshot_date)
     done: list[str] = []
     for path in sorted(root.glob("tlat=*/tlon=*/*.parquet")):
-        if path.stat().st_size <= max_bytes:
+        if path.stat().st_size <= limit:
             continue
         tmp = path.parent / f".split-{path.stem}"
         shutil.rmtree(tmp, ignore_errors=True)

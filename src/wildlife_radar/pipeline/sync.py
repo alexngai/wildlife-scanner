@@ -205,9 +205,13 @@ def sync_lake(
     pull: bool = False,
     pull_prefixes: tuple[str, ...] = LAKE_PREFIXES,
     workers: int = 4,
+    prune: bool = False,
     log=lambda _m: None,
 ) -> dict:
     """Copy the lake's shared layers to and from object storage.
+
+    ``prune`` deletes remote files inside snapshot folders that are complete here but no
+    longer hold them (e.g. tiles split into smaller parts): pulled, they would duplicate rows.
 
     Immutable files are matched by key and size; live-log cursors are pushed when their
     content changed and pulled only when missing. ``pull`` restores a fresh machine (limited
@@ -258,6 +262,21 @@ def sync_lake(
                         log(f"pushed {out['pushed']}/{len(todo)} ({out['pushed_bytes'] >> 20} MiB)")
         if too_big:
             out["too_big"] = too_big
+
+    if prune:
+        local_complete = {k.rsplit("/", 1)[0] for k in local if k.endswith("/_SUCCESS.json")}
+        stale = [
+            k
+            for k in remote
+            if k not in local
+            and "/source=gbif/" in k
+            and any(k.startswith(f"{folder}/") for folder in local_complete)
+        ]
+        if stale:
+            store.delete(stale)
+            for k in stale:
+                remote.pop(k, None)
+        out["pruned"] = len(stale)
 
     if pull:
         complete = {k.rsplit("/", 1)[0] for k in remote if k.endswith("/_SUCCESS.json")}
