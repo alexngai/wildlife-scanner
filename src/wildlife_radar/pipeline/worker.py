@@ -19,8 +19,12 @@ from pathlib import Path
 
 from wildlife_radar.core.time import utcnow
 from wildlife_radar.pipeline.runner import Job, JobContext, run
-from wildlife_radar.pipeline.sync import KEEP_VERSIONS, prune_local, push_publish, sync_ref
+from wildlife_radar.pipeline.sync import KEEP_VERSIONS, prune_local, push_publish, sync_lake
 from wildlife_radar.storage.objects import ObjectStore
+
+LAKE_PULL = ("ref", "norm/observations/source=live")
+"""What a tick pulls before running: the reference store and the live log (small). Snapshot
+tiles are pulled on demand with ``lake-sync --pull`` (gigabytes)."""
 
 
 def failed(results: list[dict]) -> list[str]:
@@ -44,14 +48,16 @@ def tick(
     started = utcnow()
     ref_sync: dict = {}
     if lake_store is not None:
-        try:  # identities and raw records other workers fetched
-            ref_sync["before"] = sync_ref(lake_store, ctx.lake / "ref")
+        try:  # identities, raw records and live-log parts other workers wrote
+            ref_sync["before"] = sync_lake(
+                lake_store, ctx.lake, push=False, pull=True, pull_prefixes=LAKE_PULL
+            )
         except Exception as exc:
             ref_sync["error"] = f"{type(exc).__name__}: {exc}"
     results = run("publish", ctx, jobs=jobs)
     if lake_store is not None:
         try:
-            ref_sync["after"] = sync_ref(lake_store, ctx.lake / "ref")
+            ref_sync["after"] = sync_lake(lake_store, ctx.lake, push=True)
         except Exception as exc:
             ref_sync["error"] = f"{type(exc).__name__}: {exc}"
     out: dict = {

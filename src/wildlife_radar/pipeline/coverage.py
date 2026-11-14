@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import shutil
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -31,6 +32,9 @@ from wildlife_radar.regions import Region
 
 SUCCESS = "_SUCCESS.json"
 DELTA = "delta.json"
+MAX_FILE_BYTES = 200_000_000
+"""Tile files are cut at about this size (a dense tile holds ~20 M rows, 650 MB): object
+storage uploads are limited (R2's REST API takes at most 300 MiB per object)."""
 
 
 def snapshot_dir(lake: Path, coverage_id: str, snapshot_date: str) -> Path:
@@ -104,7 +108,7 @@ def build(
                 WHERE floor(decimallatitude)::INTEGER = {int(band)}
             ) TO '{out_dir.as_posix()}'
             (FORMAT parquet, COMPRESSION zstd, PARTITION_BY (tlat, tlon), OVERWRITE_OR_IGNORE,
-             FILENAME_PATTERN 'part-{{i}}')
+             FILENAME_PATTERN 'part-{{i}}', FILE_SIZE_BYTES {MAX_FILE_BYTES})
             """
         )
         log(f"coverage {coverage.id} {snapshot_date}: wrote latitude band {band}")
@@ -194,3 +198,40 @@ def ingest_region(
     return remote.ingest_staged(
         db, files, region.bbox, workers, log=log, reconcile_taken=taken, live_keys=live_keys
     )
+
+
+def split_large(
+    lake: Path, coverage_id: str, snapshot_date: str, max_bytes: int = MAX_FILE_BYTES
+) -> list[str]:
+    """Cut tile files over ``max_bytes`` (built before the size cap) into smaller parts, in
+    place. Returns the files that were split."""
+    root = snapshot_dir(lake, coverage_id, snapshot_date)
+    done: list[str] = []
+    for path in sorted(root.glob("tlat=*/tlon=*/*.parquet")):
+        if path.stat().st_size <= max_bytes:
+            continue
+        tmp = path.parent / f".split-{path.stem}"
+        shutil.rmtree(tmp, ignore_errors=True)
+        con = duckdb.connect()
+        con.execute("SET preserve_insertion_order = false")
+        con.execute(
+            f"COPY (SELECT * FROM read_parquet('{path.as_posix()}', hive_partitioning = false)) "
+            f"TO '{tmp.as_posix()}' (FORMAT parquet, COMPRESSION zstd, "
+            f"FILE_SIZE_BYTES {int(max_bytes)}, FILENAME_PATTERN 'part-{{i}}')"
+        )
+        before = con.execute(
+            f"SELECT count(*) FROM read_parquet('{path.as_posix()}', hive_partitioning = false)"
+        ).fetchone()[0]
+        after = con.execute(
+            f"SELECT count(*) FROM read_parquet('{(tmp / '*.parquet').as_posix()}', "
+            "hive_partitioning = false)"
+        ).fetchone()[0]
+        if before != after:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise RuntimeError(f"split of {path} lost rows ({before} -> {after})")
+        for i, piece in enumerate(sorted(tmp.glob("*.parquet"))):
+            os.replace(piece, path.parent / f"{path.stem}-s{i}.parquet")
+        path.unlink()
+        shutil.rmtree(tmp, ignore_errors=True)
+        done.append(str(path.relative_to(root)))
+    return done
