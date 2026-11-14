@@ -31,6 +31,7 @@ import hashlib
 import json
 import math
 import os
+import re
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
 from multiprocessing import get_context
@@ -50,7 +51,7 @@ from wildlife_radar.serving.queries import (
     week_thursday,
 )
 
-FORMAT = 3
+FORMAT = 4
 """Bump when the shape of a static file changes, so every file is regenerated."""
 P_SCALE = 100_000
 """Probabilities are stored as integers: ``p = value / P_SCALE``."""
@@ -371,7 +372,7 @@ def build_static(
                     seasons[ident] = seas
             elif kind == "map":
                 files["maps"].pop(ident, None)  # nothing visible after all
-        photos = _photos(q._conn)
+        photos = {t: c for t, p in _photos(q._conn).items() if (c := compact_photo(p))}
         for entry in search:
             taxon_id = entry["id"]
             if taxon_id in files["maps"]:
@@ -393,6 +394,7 @@ def build_static(
             "p_scale": P_SCALE,
             "paths_relative_to": f"region={region.id}/",
             "taxa": f"version={version}/{STATIC_DIR}/taxa.json",
+            "photos": PHOTO_URLS,
             "places": {
                 p.place_id: {
                     "name": p.name,
@@ -466,6 +468,33 @@ def in_use(rel: str, used: set[str]) -> bool:
 def needs_taxa(index: dict) -> bool:
     """Format 3+ indexes leave map paths to ``taxa.json``."""
     return int(index.get("format") or 0) >= 3
+
+
+PHOTO_URLS = {
+    "image": "https://inaturalist-open-data.s3.amazonaws.com/photos/{id}/{size}.{ext}",
+    "page": "https://www.inaturalist.org/photos/{id}",
+    "sizes": {"thumb": "square", "medium": "small"},
+    "source": "iNaturalist",
+}
+"""How a client builds a taxon's photo URLs from ``photo.id`` and ``photo.ext`` (format 4)."""
+
+_PHOTO_URL = re.compile(
+    r"https://inaturalist-open-data\.s3\.amazonaws\.com/photos/(\d+)/square\.([A-Za-z0-9]*)"
+)
+
+
+def compact_photo(photo: dict) -> dict | None:
+    """``{id, ext, license, attribution}``: the URLs follow from ``PHOTO_URLS``. Photos whose
+    URL doesn't fit the template (or names another photo) are left out rather than guessed."""
+    m = _PHOTO_URL.fullmatch(photo.get("url") or "")
+    if not m or not photo.get("source_url", "").endswith(f"/photos/{m.group(1)}"):
+        return None
+    return {
+        "id": int(m.group(1)),
+        "ext": m.group(2),
+        "license": photo["license"],
+        "attribution": photo["attribution"],
+    }
 
 
 def _photos(conn) -> dict[str, dict]:

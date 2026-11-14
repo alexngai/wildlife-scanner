@@ -1,4 +1,4 @@
-# Static products: file formats (format 3)
+# Static products: file formats (format 4)
 
 **This is a contract** with the web app (`web/`, branch `claude/web-app`), as is the API's
 `/openapi.json`. Breaking changes bump `format` (every file carries it), are listed below, and
@@ -9,6 +9,7 @@ fields they don't know.
 
 | Date | Change | Breaking |
 |---|---|---|
+| 2026-11-14 | **Format 4.** A `taxa.json` photo is `{id, ext, license, attribution}`; build its URLs from `index.json`'s `photos` templates (San Diego: `taxa.json` 3.7 → 2.6 MB, 525 → 458 KB gzipped). Every file says `"format": 4`; nothing else changed. | yes (format 3 → 4) |
 | 2026-11-14 | **Format 3.** `index.json` no longer has `maps`: each `taxa.json` entry carries its `map` path. Place files are a header (`places/<place>.<key>.json`: names, groups, item fields, and `weeks`, a list of 52 paths) plus one file per week (`places/<place>.<key>/wNN.json`). Every file says `"format": 3`. | yes (format 2 → 3) |
 | 2026-11-14 | `taxa.json` entries may carry `season` (52 levels 0–9, OPEN/GENERALIZED only) and `photo` (an openly licensed iNaturalist photo, hotlinked, with its credit). Common names are title-cased when a source gives them all in lowercase. | no (additions) |
 | 2026-11-14 | API: `GET /species/{id}/forecast/map?date=&cells=` (the day's forecast for every cell of the week's map, or for up to 2,000 listed cells, in one call). | no (addition) |
@@ -41,13 +42,16 @@ Read `CURRENT` (no-cache), then `index.json`. Every other path is in the index o
 
 ```json
 {
-  "format": 3,
+  "format": 4,
   "region": {"id": "montereybay", "name": "Monterey Bay", "bbox": [-122.55, 35.95, -121.1, 37.2]},
   "version": "20261113T090000",
   "baseline": {"model_version": "baseline-v1", "built_at": "2026-11-12T10:21:53+00:00"},
   "year_basis": 2026,
   "p_scale": 100000,
   "taxa": "version=20261113T090000/static/taxa.json",
+  "photos": {"image": "https://inaturalist-open-data.s3.amazonaws.com/photos/{id}/{size}.{ext}",
+             "page": "https://www.inaturalist.org/photos/{id}",
+             "sizes": {"thumb": "square", "medium": "small"}, "source": "iNaturalist"},
   "places": {"point-lobos": {"name": "Point Lobos", "kind": "park", "lat": 36.518,
              "lon": -121.942, "file": "static/places/point-lobos.9c1d….json"}}
 }
@@ -65,10 +69,8 @@ season, photo}`, most recorded first: enough for a client-side name search and f
  "mode": "forecast", "records": 41234,
  "map": "static/maps/aphelocoma-californica.5b0e….json",
  "season": [8, 8, 8, "…", 9, 8],
- "photo": {"url": "https://inaturalist-open-data.s3.amazonaws.com/photos/12345678/square.jpg",
-           "url_medium": "https://inaturalist-open-data.s3.amazonaws.com/photos/12345678/small.jpg",
-           "license": "cc-by-nc", "attribution": "(c) A. Photographer, some rights reserved (CC BY-NC)",
-           "source": "iNaturalist", "source_url": "https://www.inaturalist.org/photos/12345678"}}
+ "photo": {"id": 12345678, "ext": "jpg", "license": "cc-by-nc",
+           "attribution": "(c) A. Photographer, some rights reserved (CC BY-NC)"}}
 ```
 
 - **map**: the species' map file (absent when nothing is mapped).
@@ -78,9 +80,12 @@ season, photo}`, most recorded first: enough for a client-side name search and f
   only weekly segments.
 - **photo**: the first photo in iNaturalist's order for the taxon whose licence is CC0, CC BY,
   CC BY-SA, CC BY-NC or CC BY-NC-SA (never all rights reserved or no-derivatives), served from
-  iNaturalist's open-data bucket (hotlinked). `url` is the 75 px square, `url_medium` the
-  240 px "small" size. Show `attribution` (verbatim) with the photo, and link `source_url`.
-  Absent when no photo qualifies; withheld taxa have no entry at all.
+  iNaturalist's open-data bucket (hotlinked). Build the URLs from `index.json`'s `photos`:
+  the thumbnail is `image` with `size` = `sizes.thumb` (75 px square), the larger image
+  `size` = `sizes.medium` (240 px), and the credit link `page`, each with this photo's `id`
+  and `ext`. `ext` is kept as iNaturalist stores it (`jpg`, `jpeg`, `JPG`, `png`, …) and is
+  empty for some old uploads, whose URL ends in `square.`. Show `attribution` (verbatim) with
+  the photo. Absent when no photo qualifies; withheld taxa have no entry at all.
 - **common_name**: as the source writes it, title-cased when the source gives it all in
   lowercase ("coyote brush" → "Coyote Brush").
 
@@ -92,7 +97,7 @@ year, so the same file serves any year. Map a date to its ISO week (1–52; fold
 
 ```json
 {
-  "format": 3,
+  "format": 4,
   "taxon": {"taxon_id": "falco-sparverius", "common_name": "American Kestrel", "tier": 0, "…": "…"},
   "effort_group": "birds:checklist", "method": "birding_checklist",
   "label": "…what the number means…", "license": {"…": "…"},
@@ -142,7 +147,7 @@ header and the week it shows.
 
 ```json
 {
-  "format": 3, "place": {"place_id": "point-lobos", "…": "…"}, "year_basis": 2026,
+  "format": 4, "place": {"place_id": "point-lobos", "…": "…"}, "year_basis": 2026,
   "p_scale": 100000,
   "item_fields": ["taxon_id", "p", "lift_x100", "seasonal_index_x100", "confidence", "res"],
   "resolutions_km": [1.41, 9.85],
@@ -157,7 +162,7 @@ header and the week it shows.
 A week file:
 
 ```json
-{"format": 3, "week": 1,
+{"format": 4, "week": 1,
  "groups": {"birds:checklist": {"most_likely": [["sitta-carolinensis", 4120, 180, 95, "h", 0]],
                                 "special_here": ["…"], "peaking_now": ["…"]}},
  "awareness": ["enhydra-lutris"], "area_fallback": []}
@@ -177,7 +182,7 @@ A week file:
 
 ## Sizes (Monterey Bay, 4,866 taxa)
 
-| | Format 1 | Format 2 | Format 3 |
+| | Format 1 | Format 2 | Format 3–4 |
 |---|---|---|---|
 | All species maps | 5.3 GB (two years) | 256 MB (50 MB gzipped), one file per species | same as format 2 |
 | Largest map (western scrub-jay) | ~1 MB (239 KB gzipped) | 166 KB (56 KB gzipped) | same |
