@@ -521,6 +521,7 @@ def cmd_lake_sync(args: argparse.Namespace) -> int:
             pull=args.pull,
             pull_prefixes=tuple(args.pull_prefix) if args.pull_prefix else ("ref", "norm"),
             workers=args.workers,
+            prune=args.prune,
             log=lambda m: print(m, file=sys.stderr, flush=True),
         )
     )
@@ -824,6 +825,11 @@ def register(sub: argparse._SubParsersAction) -> None:
         help="with --pull: only keys under this prefix (repeatable), e.g. ref",
     )
     p.add_argument("--workers", type=int, default=4, help="parallel transfers")
+    p.add_argument(
+        "--prune",
+        action="store_true",
+        help="with --push: delete remote snapshot files this lake no longer has (split tiles)",
+    )
     p.set_defaults(func=cmd_lake_sync)
 
     p = sub.add_parser("push-publish", help="upload the current published version")

@@ -145,6 +145,14 @@ def test_sync_lake_push_then_restore(tmp_path):
     }
     assert sync_lake(store, fresh, push=False, pull=True)["pulled"] == 3
     assert set(lake_files(fresh)) == keys
+    # A tile replaced by smaller parts here: prune drops the old remote copy.
+    tile = snap / "tlat=36/tlon=-122"
+    (tile / "part-0.parquet").rename(tile / "part-0-s0.parquet")
+    out = sync_lake(store, lake, push=True, prune=True)
+    assert out["pushed"] == 1 and out["pruned"] == 1
+    assert [k for k in store.list("norm/") if "tlon=-122" in k] == [
+        str((tile / "part-0-s0.parquet").relative_to(lake))
+    ]
 
 
 def test_split_large_tiles_keeps_every_row(tmp_path):
@@ -158,8 +166,15 @@ def test_split_large_tiles_keeps_every_row(tmp_path):
     )
     small = folder / "part-1.parquet"
     duckdb.connect().execute(f"COPY (SELECT 1 AS gbifid, 'x' AS h) TO '{small}' (FORMAT parquet)")
-    done = coverage.split_large(lake, "california", "2026-11-01", max_bytes=2_000_000)
+    done = coverage.split_large(
+        lake, "california", "2026-11-01", max_bytes=2_000_000, limit=5_000_000
+    )
     assert done == ["tlat=36/tlon=-122/part-0.parquet"]
+    # Pieces may overshoot the target a little, but stay under the limit: not split again.
+    assert (
+        coverage.split_large(lake, "california", "2026-11-01", max_bytes=2_000_000, limit=5_000_000)
+        == []
+    )
     pieces = sorted(p.name for p in folder.glob("*.parquet"))
     assert "part-0.parquet" not in pieces and "part-1.parquet" in pieces and len(pieces) > 2
     rows, ids = (
