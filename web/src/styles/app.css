@@ -549,6 +549,77 @@ details.more > p {
   background: var(--accent);
 }
 
+.map-frame {
+  position: relative;
+}
+
+.layer-picker {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  max-width: calc(100% - 70px);
+  font-size: 0.85rem;
+}
+
+.layer-picker > summary {
+  display: inline-block;
+  list-style: none;
+  cursor: pointer;
+  padding: 6px 12px;
+  min-height: 32px;
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.15);
+  font-weight: 600;
+}
+
+.layer-picker > summary::-webkit-details-marker {
+  display: none;
+}
+
+.layer-panel {
+  margin-top: 6px;
+  padding: 8px 12px;
+  width: 220px;
+  max-width: 100%;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.2);
+}
+
+.layer-panel fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0 0 8px;
+}
+
+.layer-panel legend {
+  font-weight: 600;
+  padding: 0;
+  margin-bottom: 2px;
+}
+
+.layer-panel label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+}
+
+.layer-panel input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.layer-panel p {
+  margin: 6px 0 0;
+}
+
 .map-placeholder {
   display: grid;
   place-items: center;
