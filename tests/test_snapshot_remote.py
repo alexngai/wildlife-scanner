@@ -129,6 +129,11 @@ def test_snapshot_job_ingests_only_newer_snapshots(bucket, tmp_path):
     m = latest(c.lake, "socal", "snapshot")
     assert m["outputs"]["snapshot_date"] == "2026-11-01" and m["version"] != version
     assert calls == ["down", "down"]
+    # Re-ingesting the same date is possible on request.
+    c.params["reingest_snapshot"] = True
+    run("down", c, jobs=jobs, force=("snapshot",))
+    assert latest(c.lake, "socal", "snapshot")["outputs"]["snapshot_date"] == "2026-11-01"
+    assert calls == ["down", "down", "down"]
 
 
 def test_snapshot_job_without_ingest_registers_store(tmp_path):
@@ -138,3 +143,86 @@ def test_snapshot_job_without_ingest_registers_store(tmp_path):
     with ObservationStore(c.db) as store:
         store.add(SyntheticWorld(observers=2, visits_per_observer=2).generate()[:3])
     assert run("snapshot", c, jobs=jobs)[0]["outcome"]["observations"] == 3
+
+
+def test_coverage_snapshot_tiles_delta_and_reconciliation(tmp_path, monkeypatch):
+    import duckdb
+
+    from wildlife_radar.pipeline import coverage
+
+    oct_file, nov_file = tmp_path / "oct.parquet", tmp_path / "nov.parquet"
+    _write_snapshot(oct_file)
+    duckdb.connect().execute(
+        f"COPY (SELECT * FROM read_parquet('{oct_file}') WHERE gbifid <> '2') "
+        f"TO '{nov_file}' (FORMAT parquet)"
+    )
+    files = {
+        "occurrence/2026-10-01/occurrence.parquet/000000": oct_file.read_bytes(),
+        "occurrence/2026-11-01/occurrence.parquet/000000": nov_file.read_bytes(),
+    }
+    monkeypatch.setattr(
+        remote,
+        "make_client",
+        lambda timeout=30.0: httpx.Client(
+            transport=_bucket(files, ["2026-10-01", "2026-11-01"], {"2026-10-01", "2026-11-01"})
+        ),
+    )
+    california = load_region("california")
+    lake = tmp_path / "lake"
+    quiet = {"log": lambda _m: None}
+    built = coverage.build(california, "2026-10-01", lake, workers=2, **quiet)
+    assert built["rows"] == 2 and built["tiles"] == {"32_-118": 2}  # the Dakota row is outside
+    assert coverage.build(california, "2026-10-01", lake, **quiet)["reused"]
+    region = load_region("sandiego")
+    assert region.coverage == "california"
+    db = tmp_path / "sd.duckdb"
+    first = coverage.ingest_region(region, db, lake, "california", "2026-10-01", workers=1, **quiet)
+    assert first["total"] == 2
+    # Live-dataset rows: one pulled before the next snapshot was taken, one after.
+    with ObservationStore(db) as store:
+        for key, when in (("live-old", "2026-10-15"), ("live-new", "2026-11-05")):
+            store.conn.execute(
+                "INSERT INTO observations (dedupe_key, obs_id, source_id, dataset_key, lat, lon, "
+                "ingested_at) VALUES (?, ?, 'gbif', 'whale-feed', 32.8, -117.3, ?)",
+                [key, key, when],
+            )
+        # A live copy of snapshot record 1, pulled after the next snapshot was taken.
+        (key,) = store.conn.execute(
+            "SELECT dedupe_key FROM observations WHERE source_record_id = '1'"
+        ).fetchone()
+        store.conn.execute(
+            "UPDATE observations SET source_id = 'inaturalist', ingested_at = '2026-11-06' "
+            "WHERE dedupe_key = ?",
+            [key],
+        )
+    nov = coverage.build(california, "2026-11-01", lake, workers=2, **quiet)
+    assert nov["delta"]["totals"]["removed"] == 1
+    assert nov["delta"]["datasets"]["ds-1"]["removed"] == 1
+    second = coverage.ingest_region(
+        region, db, lake, "california", "2026-11-01", workers=1, live_keys=["whale-feed"], **quiet
+    )
+    with ObservationStore(db) as store:
+        keys = {k for (k,) in store.conn.execute("SELECT dedupe_key FROM observations").fetchall()}
+    assert second["removed"] == 2  # record 2 (gone from GBIF) and the old live-dataset row
+    assert "live-new" in keys and "live-old" not in keys and len(keys) == 2
+    with ObservationStore(db) as store:
+        kept = store.conn.execute(
+            "SELECT source_id FROM observations WHERE dedupe_key = ?", [key]
+        ).fetchone()
+    assert kept == ("inaturalist",)  # the newer live row wins over the snapshot's copy
+
+
+def test_big_files_are_cut_into_row_ranges(tmp_path):
+    path = tmp_path / "tile.parquet"
+    _write_snapshot(path)
+    whole = remote._segments([str(path)])
+    assert len(whole) == 1 and whole[0][0][1] == 0
+    cut = remote._segments([str(path)], rows_per_chunk=1)
+    n_rows = whole[0][-1][2]
+    assert len(cut) == n_rows and all(len(c) == 1 for c in cut)
+    parsed = [
+        remote._parse_chunk((str(tmp_path / f"c{i}.parquet"), segs, SOCAL))[1]
+        for i, segs in enumerate(cut)
+    ]
+    assert sum(parsed) == remote._parse_chunk((str(tmp_path / "w.parquet"), whole[0], SOCAL))[1]
+    assert sum(parsed) == 2

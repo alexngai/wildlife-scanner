@@ -7,10 +7,12 @@ The file formats are documented for frontend use in ``docs/design/static-product
 
 Layout under ``publish/region=<id>/``::
 
-    version=<v>/static/index.json      entry point: what exists and where (small, per version)
-    version=<v>/static/taxa.json       search index: names, aliases, group, tier
+    version=<v>/static/index.json      entry point: region, versions, places (small)
+    version=<v>/static/taxa.json       search index: names, aliases, group, tier, map path,
+                                       season summary, photo
     static/maps/<taxon>.<key>.json     the year's maps as cells × weeks (or months) matrices
-    static/places/<place>.<key>.json   weekly place lists
+    static/places/<place>.<key>.json   a place's names, groups and week file paths
+    static/places/<place>.<key>/wNN.json  one week's lists (format 3)
 
 Maps and place lists are **content-addressed**: ``key`` hashes everything that determines the
 file (baseline build, the taxon's tier for each week, names, gates, licenses, format version),
@@ -27,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
@@ -47,7 +50,7 @@ from wildlife_radar.serving.queries import (
     week_thursday,
 )
 
-FORMAT = 2
+FORMAT = 3
 """Bump when the shape of a static file changes, so every file is regenerated."""
 P_SCALE = 100_000
 """Probabilities are stored as integers: ``p = value / P_SCALE``."""
@@ -202,17 +205,64 @@ def _init_worker(bundle: str, region: Region, now: datetime, profiles) -> None:
     _WORKER["region"] = region
 
 
-def _run_job(job: tuple) -> tuple[str, str, bool]:
+def _run_job(job: tuple) -> tuple[str, str, bool, list | None]:
     kind, ident, year, path, meta = job
     q = _WORKER["q"]
     if kind == "map":
         doc = map_doc(q, ident, year, meta)
-    else:
-        doc = place_doc(q, _WORKER["region"].place(ident), year)
-    if doc is None:
-        return kind, ident, False
-    _write(Path(path), doc)
-    return kind, ident, True
+        if doc is None:
+            return kind, ident, False, None
+        _write(Path(path), doc)
+        return kind, ident, True, season(doc)
+    write_place(place_doc(q, _WORKER["region"].place(ident), year), Path(path))
+    return kind, ident, True, None
+
+
+def week_dir(header: str) -> str:
+    """A place's week files live next to its header: ``<place>.<key>.json`` →
+    ``<place>.<key>/``."""
+    return header.removesuffix(".json")
+
+
+def write_place(doc: dict, header: Path) -> None:
+    """Format 3: one small file per week, then the header (names, groups, week paths).
+    The header goes last, so a reader (or a reuse check) never finds it without its weeks."""
+    weeks = doc.pop("weeks")
+    folder = Path(week_dir(str(header)))
+    rel_folder = week_dir(header.relative_to(header.parents[2]).as_posix())
+    paths = []
+    for week in weeks:
+        name = f"w{week['week']:02d}.json"
+        _write(folder / name, {"format": FORMAT, **week})
+        paths.append(f"{rel_folder}/{name}")
+    _write(header, {**doc, "weeks": paths})
+
+
+SEASON_LEVELS = 9
+
+
+def season(doc: dict) -> list | None:
+    """A taxon's regional season, one 0–9 level per ISO week (relative to its own peak week),
+    from the map's ``region_p``; ``None`` for weeks withheld or shown only coarsely (tier 2+
+    or monthly segments). ``None`` overall when no week qualifies."""
+    values: list[int | None] = [None] * 52
+    for seg in doc.get("segments") or []:
+        if seg.get("tier", 9) >= 2 or seg.get("granularity") != "week":
+            continue
+        for period, v in zip(seg["periods"], seg.get("region_p") or [], strict=False):
+            if 1 <= period <= 52:
+                values[period - 1] = v
+    peak = max((v for v in values if v is not None), default=None)
+    if peak is None:
+        return None
+    return [
+        None
+        if v is None
+        else 0
+        if v <= 0 or not peak
+        else max(1, min(SEASON_LEVELS, math.ceil(SEASON_LEVELS * v / peak)))
+        for v in values
+    ]
 
 
 def build_static(
@@ -255,6 +305,7 @@ def build_static(
             for t in taxa
         ]
         stats = {"maps": 0, "maps_reused": 0, "places": 0, "places_reused": 0}
+        seasons: dict[str, list | None] = {}
         files: dict = {"maps": {}, "places": {}}
         jobs: list[tuple] = []
         all_tiers: dict[str, list[int]] = {}
@@ -283,6 +334,7 @@ def build_static(
             files["maps"][taxon_id] = rel
             if (region_dir / rel).exists():
                 stats["maps_reused"] += 1
+                seasons[taxon_id] = season(json.loads((region_dir / rel).read_text("utf-8")))
             else:
                 jobs.append(("map", taxon_id, year, str(region_dir / rel), meta))
         names = {t: (q._taxa[t].name, q.common_name(t)) for t in sorted(q._taxa)}
@@ -312,11 +364,22 @@ def build_static(
         else:
             _WORKER.update(q=q, region=region)
             results = [_run_job(j) for j in jobs]
-        for kind, ident, written in results:
+        for kind, ident, written, seas in results:
             if written:
                 stats["maps" if kind == "map" else "places"] += 1
+                if kind == "map":
+                    seasons[ident] = seas
             elif kind == "map":
                 files["maps"].pop(ident, None)  # nothing visible after all
+        photos = _photos(q._conn)
+        for entry in search:
+            taxon_id = entry["id"]
+            if taxon_id in files["maps"]:
+                entry["map"] = files["maps"][taxon_id]
+            if seasons.get(taxon_id) and entry["tier"] < 2:
+                entry["season"] = seasons[taxon_id]
+            if taxon_id in photos:
+                entry["photo"] = photos[taxon_id]
         out_dir = version_dir / STATIC_DIR
         _write(out_dir / "taxa.json", search)
         version = version or version_dir.name.removeprefix("version=")
@@ -330,7 +393,6 @@ def build_static(
             "p_scale": P_SCALE,
             "paths_relative_to": f"region={region.id}/",
             "taxa": f"version={version}/{STATIC_DIR}/taxa.json",
-            "maps": files["maps"],
             "places": {
                 p.place_id: {
                     "name": p.name,
@@ -344,6 +406,7 @@ def build_static(
         }
         _write(out_dir / INDEX, index)
         stats["taxa"] = len(search)
+        stats["photos"] = sum(1 for e in search if "photo" in e)
         log(f"static: {stats}")
         return stats
     finally:
@@ -373,14 +436,43 @@ def before_swap(region: Region, now: datetime, profiles=None, log=lambda _m: Non
     return hook
 
 
-def referenced(index: dict) -> set[str]:
-    """Shared static files (paths relative to the region folder) an index points at
-    (format 2; format-1 indexes nested files by year)."""
+def referenced(index: dict, taxa: list | None = None) -> set[str]:
+    """Shared static files (paths relative to the region folder) a version points at.
+
+    Format 3 keeps map paths in ``taxa.json`` (pass it as ``taxa``); formats 1–2 kept them in
+    the index (format 1 nested them by year). A place header's week files are covered by
+    ``in_use``."""
     out: set[str] = set()
     for entry in index.get("maps", {}).values():
         out |= set(entry.values()) if isinstance(entry, dict) else {entry}
+    for t in taxa or []:
+        if t.get("map"):
+            out.add(t["map"])
     for p in index.get("places", {}).values():
         if p.get("file"):
             out.add(p["file"])
         out |= set((p.get("files") or {}).values())
     return out
+
+
+def in_use(rel: str, used: set[str]) -> bool:
+    """Is a shared file referenced, directly or as a week file of a referenced place?"""
+    if rel in used:
+        return True
+    folder = rel.rsplit("/", 1)[0]
+    return f"{folder}.json" in used
+
+
+def needs_taxa(index: dict) -> bool:
+    """Format 3+ indexes leave map paths to ``taxa.json``."""
+    return int(index.get("format") or 0) >= 3
+
+
+def _photos(conn) -> dict[str, dict]:
+    tables = {r[0] for r in conn.execute("SHOW TABLES").fetchall()}
+    if "taxon_photos" not in tables:
+        return {}
+    return {
+        t: json.loads(p)
+        for t, p in conn.execute("SELECT taxon_id, photo FROM taxon_photos").fetchall()
+    }

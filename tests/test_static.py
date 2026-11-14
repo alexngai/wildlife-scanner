@@ -9,7 +9,7 @@ import h3
 from test_publish import NOW, store  # noqa: F401  (fixture)
 
 from wildlife_radar.pipeline.publish import publish_bundle
-from wildlife_radar.pipeline.static import before_swap, referenced
+from wildlife_radar.pipeline.static import before_swap, in_use, referenced
 from wildlife_radar.pipeline.sync import prune_local, push_publish
 from wildlife_radar.policy.tiers import rule_for
 from wildlife_radar.storage.objects import LocalStore
@@ -23,23 +23,79 @@ def _index(result):
     return json.loads((result.path / "static" / "index.json").read_text(encoding="utf-8"))
 
 
+def _taxa(result):
+    return json.loads((result.path / "static" / "taxa.json").read_text(encoding="utf-8"))
+
+
+def _used(result):
+    return referenced(_index(result), _taxa(result))
+
+
+def _shared_files(region_dir, used):
+    shared = (p.relative_to(region_dir).as_posix() for p in (region_dir / "static").rglob("*.json"))
+    return sorted(rel for rel in shared if in_use(rel, used))
+
+
+def _photo(pid, license_code):
+    return {
+        "photo": {
+            "id": pid,
+            "license_code": license_code,
+            "attribution": f"(c) someone {pid}",
+            "url": f"https://inaturalist-open-data.s3.amazonaws.com/photos/{pid}/square.jpg",
+        }
+    }
+
+
 def test_static_products_follow_policy(store, tmp_path):  # noqa: F811
+    from wildlife_radar.connectors.inaturalist_taxa import RECORDS_SCHEMA
+
     st, region = store
+    st.conn.execute(RECORDS_SCHEMA)
+    records = {
+        # All rights reserved first, then CC BY: the open one is chosen.
+        "vernalis-litoralis": [_photo(11, None), _photo(12, "cc-by"), _photo(13, "cc0")],
+        "raritas-orientalis": [_photo(21, "cc-by-nd")],  # no open licence: no photo
+        "secretus-maximus": [_photo(31, "cc0")],  # withheld: never published
+    }
+    for taxon_id, photos in records.items():
+        st.conn.execute(
+            "INSERT INTO inat_taxon_records VALUES (?, '1', ?, now())",
+            [taxon_id, json.dumps({"id": 1, "taxon_photos": photos})],
+        )
     result = _publish(st, region, tmp_path)
     index = _index(result)
     region_dir = tmp_path / "region=socal"
-    taxa = json.loads((result.path / "static" / "taxa.json").read_text(encoding="utf-8"))
-    ids = {t["id"] for t in taxa}
-    assert "vernalis-litoralis" in ids and "secretus-maximus" not in ids
-    assert "secretus-maximus" not in index["maps"]
+    taxa = _taxa(result)
+    by_id = {t["id"]: t for t in taxa}
+    assert "vernalis-litoralis" in by_id and "secretus-maximus" not in by_id
+    assert index["format"] == 3 and "maps" not in index  # map paths moved to taxa.json
+    maps = {t["id"]: t["map"] for t in taxa if "map" in t}
+    assert "secretus-maximus" not in maps
+    # Photos: the first openly licensed one, hotlinked, credit kept.
+    photo = by_id["vernalis-litoralis"]["photo"]
+    assert photo == {
+        "url": "https://inaturalist-open-data.s3.amazonaws.com/photos/12/square.jpg",
+        "url_medium": "https://inaturalist-open-data.s3.amazonaws.com/photos/12/small.jpg",
+        "license": "cc-by",
+        "attribution": "(c) someone 12",
+        "source": "iNaturalist",
+        "source_url": "https://www.inaturalist.org/photos/12",
+    }
+    assert "photo" not in by_id["raritas-orientalis"]
+    # Season summary: OPEN taxa only (from the published regional values), 0–9 per week.
+    seas = by_id["vernalis-litoralis"]["season"]
+    assert len(seas) == 52 and max(v for v in seas if v is not None) == 9
+    assert all(v is None or 0 <= v <= 9 for v in seas)
+    assert "season" not in by_id["raritas-orientalis"]  # COARSE: monthly, no ribbon
     # Withheld taxa appear in no file at all.
     files = list(region_dir.rglob("static/**/*.json"))
     assert len(files) >= 9  # index, search index, maps and place lists
     for path in files:
         assert "secretus" not in path.read_text(encoding="utf-8").lower(), path
     # COARSE (IUCN EN): monthly maps at the landscape resolution only.
-    coarse = json.loads((region_dir / index["maps"]["raritas-orientalis"]).read_text())
-    assert coarse["format"] == 2 and len(coarse["segments"]) == 1
+    coarse = json.loads((region_dir / maps["raritas-orientalis"]).read_text())
+    assert coarse["format"] == 3 and len(coarse["segments"]) == 1
     seg = coarse["segments"][0]
     assert (
         seg["tier"] == 2 and seg["granularity"] == "month" and seg["periods"] == list(range(1, 13))
@@ -48,7 +104,7 @@ def test_static_products_follow_policy(store, tmp_path):  # noqa: F811
     assert all(h3.get_resolution(c) <= finest for c in seg["cells"])
     assert seg["ref"]["resolution"] is None and set(seg["ref"]["p"]) == {"region"}
     # OPEN: weekly maps; integer probabilities, one confidence code per week.
-    open_map = json.loads((region_dir / index["maps"]["vernalis-litoralis"]).read_text())
+    open_map = json.loads((region_dir / maps["vernalis-litoralis"]).read_text())
     seg = open_map["segments"][0]
     assert seg["granularity"] == "week" and seg["periods"] == list(range(1, 53))
     assert len(seg["p"]) == len(seg["cells"]) and all(len(row) == 52 for row in seg["p"])
@@ -60,10 +116,12 @@ def test_static_products_follow_policy(store, tmp_path):  # noqa: F811
     # Places from the region pack, weekly lists without life-list items.
     place = index["places"]["la-jolla-cove"]
     doc = json.loads((region_dir / place["file"]).read_text())
-    assert len(doc["weeks"]) == 52 and doc["weeks"][0]["week"] == 1
+    assert len(doc["weeks"]) == 52 and doc["weeks"][0].endswith("/w01.json")
+    weeks = [json.loads((region_dir / path).read_text()) for path in doc["weeks"]]
+    assert [w["week"] for w in weeks] == list(range(1, 53)) and weeks[0]["format"] == 3
     items = [
         row
-        for w in doc["weeks"]
+        for w in weeks
         for lists in w["groups"].values()
         for key, rows in lists.items()
         for row in rows
@@ -72,10 +130,10 @@ def test_static_products_follow_policy(store, tmp_path):  # noqa: F811
     assert all(r[0] in doc["taxa"] for r in items)  # names once, in the taxa table
     assert all(
         set(lists) <= {"most_likely", "special_here", "peaking_now"}  # no life-list items
-        for w in doc["weeks"]
+        for w in weeks
         for lists in w["groups"].values()
     )
-    assert set(doc["groups"]) >= {g for w in doc["weeks"] for g in w["groups"]}
+    assert set(doc["groups"]) >= {g for w in weeks for g in w["groups"]}
     # The manifest records what was built.
     manifest = json.loads((result.path / "manifest.json").read_text())
     assert manifest["static"]["taxa"] == len(taxa)
@@ -85,21 +143,35 @@ def test_unchanged_inputs_reuse_files_and_push_only_new_ones(store, tmp_path):  
     st, region = store
     bucket = LocalStore(tmp_path / "bucket")
     first = _publish(st, region, tmp_path / "publish")
+    region_dir = tmp_path / "publish" / "region=socal"
     pushed = push_publish(tmp_path / "publish", bucket, "socal")
-    shared = len(referenced(_index(first)))
-    assert pushed["uploaded"] == shared + len(list(first.path.rglob("*.*")))
+    shared = _shared_files(region_dir, _used(first))
+    assert any("/w52.json" in rel for rel in shared)  # place week files count as used
+    assert pushed["uploaded"] == len(shared) + len(list(first.path.rglob("*.*")))
     second = _publish(st, region, tmp_path / "publish", now=datetime(2026, 1, 21, tzinfo=UTC))
     stats = json.loads((second.path / "manifest.json").read_text())["static"]
     assert stats["maps"] == 0 and stats["maps_reused"] > 0 and stats["places"] == 0
-    assert referenced(_index(second)) == referenced(_index(first))
+    assert _used(second) == _used(first)
     again = push_publish(tmp_path / "publish", bucket, "socal")
     assert again["uploaded"] == len(list(second.path.rglob("*.*")))  # the version only
     # Pruning to one version keeps the shared files the current version still uses.
     prune_local(tmp_path / "publish", "socal", keep=1)
     push_publish(tmp_path / "publish", bucket, "socal", keep=1)
-    for rel in referenced(_index(second)):
-        assert (tmp_path / "publish" / "region=socal" / rel).exists()
+    for rel in _shared_files(region_dir, _used(second)):
+        assert (region_dir / rel).exists()
         assert bucket.get_text(f"region=socal/{rel}") is not None
+    assert len(_shared_files(region_dir, _used(second))) == len(shared)  # nothing lost
+
+
+def test_display_common_names():
+    from wildlife_radar.core.names import display_common_name as d
+
+    assert d("coyote brush") == "Coyote Brush"
+    assert d("bird's-foot trefoil") == "Bird's-foot Trefoil"
+    assert d("pride of madeira") == "Pride of Madeira"
+    assert d("European Searocket") == "European Searocket"  # source casing kept
+    assert d("Black-crowned Night-Heron") == "Black-crowned Night-Heron"
+    assert d(None) is None and d("") == ""
 
 
 def test_batched_maps_equal_single_maps(store):  # noqa: F811

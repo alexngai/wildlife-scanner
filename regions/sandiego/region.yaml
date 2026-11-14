@@ -3,6 +3,7 @@
 id: sandiego
 name: San Diego County
 timezone: America/Los_Angeles
+coverage: california
 inherits: california
 bbox: [-117.62, 32.53, -116.08, 33.51]
 scopes: [global, us, us-ca, california, ca-southern-central-coast, socal]
