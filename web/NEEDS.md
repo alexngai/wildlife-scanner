@@ -145,3 +145,49 @@ Seen in a full `run publish --region montereybay` (not app code, for the data se
 - so `nowcast` and the final `publish` were skipped. Running `publish --region montereybay`
   separately worked. Without conditions, every forecast is Level 0, with the note "no condition
   model has passed its backtest gate".
+
+## 15. A representative photo per taxon, chosen at publish
+
+**What:** add an optional `photo` to each entry in `taxa.json` (the app already reads it; see
+`TaxonPhoto` in `web/src/products/types.ts`):
+
+```json
+"photo": {
+  "url": "https://inaturalist-open-data.s3.amazonaws.com/photos/12345678/square.jpg",
+  "url_medium": "https://inaturalist-open-data.s3.amazonaws.com/photos/12345678/medium.jpg",
+  "license": "cc-by",
+  "attribution": "(c) A. Photographer, some rights reserved (CC BY)",
+  "source": "iNaturalist",
+  "source_url": "https://www.inaturalist.org/photos/12345678"
+}
+```
+
+`url` and `url_medium` may instead be paths relative to the region root (like map paths), if
+the images are copied into the bucket. Leave `photo` out (or `null`) when nothing qualifies.
+
+**How (prototyped against Monterey Bay: 40 of the 40 most-recorded taxa got a photo):**
+1. Find the iNaturalist taxon: the ingest crosswalk may already hold its id; otherwise
+   `GET /v1/taxa?q=<scientific name>&is_active=true` and require an exact name match.
+2. `GET /v1/taxa/{id}` (or `/v1/taxa?id=a,b,c…`, about 30 per call) and walk `taxon_photos` in
+   order. Take the first photo whose `license_code` is one of `cc0`, `cc-by`, `cc-by-sa`,
+   `cc-by-nc`, `cc-by-nc-sa`. **Skip "all rights reserved" (`license_code: null`) and the ND
+   licences.** The default photo is often all rights reserved (e.g. California Scrub-Jay's), so
+   don't just take `default_photo`.
+3. `url` is the photo's `square` size, and `url_medium` is the same URL with `/medium.`.
+   Openly licensed photos are on `inaturalist-open-data.s3.amazonaws.com` (AWS Open Data).
+4. Keep `attribution` verbatim and record the licence code.
+
+**Be a good API citizen:** about 1 request per second, an identifying User-Agent with no personal
+details, and cache results between publishes. Photos rarely change, so refresh them weekly or
+when a taxon is new. Please check iNaturalist's current API guidance (I couldn't open it from
+here).
+
+**Optional but better: copy the thumbnails into the bucket** (`static/photos/<taxon>.jpg`, both
+sizes, about 5–40 KB each) and publish relative paths. Visitors then never contact third parties,
+and images can't disappear between publishes. CC licences allow redistribution with credit;
+keep `attribution`, `license` and `source_url` with each.
+
+**App behaviour:** it re-checks the licence and URL (https or a bucket path only), shows the
+credit with every photo (visible on the species page, under "Photo credits" in lists), loads
+lazily with no referrer, and falls back to a group placeholder if an image fails to load, e.g.
+if it moved or was deleted after publishing.

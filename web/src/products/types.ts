@@ -47,6 +47,25 @@ export interface StaticIndex {
 
 export type TaxonMode = "forecast" | "awareness";
 
+/**
+ * A representative photo for a taxon, chosen when the data is published (NEEDS.md §15).
+ * Only openly licensed photos are published; the credit must be shown with the image.
+ */
+export interface TaxonPhoto {
+  /** Small square thumbnail: an absolute https URL, or a path relative to the region root. */
+  url: string;
+  /** A larger version (about 500 px), same rules as `url`. */
+  url_medium?: string | null;
+  /** Licence code, e.g. "cc0", "cc-by", "cc-by-sa", "cc-by-nc", "cc-by-nc-sa". */
+  license: string;
+  /** Credit as the source gives it, e.g. "(c) Jane Doe, some rights reserved (CC BY)". */
+  attribution: string;
+  /** The photo's page at its source (e.g. iNaturalist). */
+  source_url?: string | null;
+  /** Where it comes from, e.g. "iNaturalist". */
+  source?: string | null;
+}
+
 export interface TaxonEntry {
   id: string;
   scientific_name: string | null;
@@ -56,6 +75,8 @@ export interface TaxonEntry {
   tier: number;
   mode: TaxonMode;
   records: number;
+  /** Absent or null when there's no usable photo. */
+  photo?: TaxonPhoto | null;
 }
 
 export interface MapSegment {

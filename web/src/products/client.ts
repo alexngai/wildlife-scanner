@@ -89,6 +89,16 @@ export class StaticClient {
     return this.json<PlaceFile>(join(this.regionRoot(region), ref.file));
   }
 
+  /**
+   * A URL for a published asset (e.g. a photo): absolute https URLs pass through; a relative
+   * path is resolved against the region root, like map and place paths. Anything else is null.
+   */
+  assetUrl(region: string, path: string): string | null {
+    if (/^https:\/\//i.test(path)) return path;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(path) || path.startsWith("//") || path.split("/").includes("..")) return null;
+    return join(this.regionRoot(region), path);
+  }
+
   /** The live version right now (never memoised): used to notice a newer publish. */
   async latestVersion(region: string): Promise<string> {
     const text = await this.getText(join(this.regionRoot(region), "CURRENT"), { cache: "no-cache" });

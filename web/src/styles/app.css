@@ -1056,7 +1056,6 @@ select:focus-visible {
 }
 
 .result-meta {
-  grid-column: 1;
   display: block;
   color: var(--muted);
 }
@@ -2047,5 +2046,120 @@ details.fold[open] > summary {
 
   .site-footer .footer-inner {
     max-width: calc(1040px - 48px);
+  }
+}
+
+/* ───────────────────────────── Species photos ───────────────────────────── */
+
+.thumb {
+  flex: none;
+  display: block;
+  object-fit: cover;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+}
+
+.thumb-sm {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+}
+
+.thumb-md {
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+}
+
+.thumb-lg {
+  width: 88px;
+  height: 88px;
+  border-radius: 16px;
+}
+
+.thumb-empty {
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+  background: var(--surface-2);
+}
+
+.thumb-empty svg {
+  width: 50%;
+  height: 50%;
+}
+
+.species-title {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 4px 16px;
+}
+
+.species-title h1 {
+  margin-bottom: 2px;
+}
+
+.species-title .chips {
+  margin-top: 6px;
+}
+
+.photo-caption {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  margin: 2px 0 0;
+  font-size: 0.75rem;
+}
+
+.photo-caption a {
+  color: inherit;
+}
+
+.photo-credits {
+  margin-top: 10px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.photo-credits > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.photo-credits ul {
+  margin: 6px 0 0;
+  padding-left: 1.1rem;
+}
+
+.photo-credits a {
+  color: inherit;
+}
+
+.result {
+  grid-template-columns: auto 1fr auto;
+}
+
+.result-text {
+  display: block;
+  min-width: 0;
+}
+
+.result-text em {
+  display: none;
+}
+
+.result-ribbon {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+@media (min-width: 760px) {
+  .thumb-lg {
+    width: 112px;
+    height: 112px;
+  }
+
+  .result-text em {
+    display: inline;
   }
 }

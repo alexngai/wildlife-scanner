@@ -180,3 +180,60 @@ export function PlaceKindIcon({ kind }: { kind: string }) {
   if (/beach|coast/i.test(kind)) return <BeachIcon />;
   return <NearbyIcon />;
 }
+
+const FishIcon = () => (
+  <Svg>
+    <path d="M3 12c3-4.5 9-6 14-2l4-3v10l-4-3c-5 4-11 2.5-14-2z" />
+    <circle cx="8" cy="11" r="0.8" fill="currentColor" />
+  </Svg>
+);
+
+const LeafIcon = () => (
+  <Svg>
+    <path d="M5 19c0-8 5-13 15-14-1 10-6 15-14 15" />
+    <path d="M5 19 13 11" />
+  </Svg>
+);
+
+const PawIcon = () => (
+  <Svg>
+    <circle cx="7" cy="9" r="1.8" />
+    <circle cx="12" cy="6.5" r="1.8" />
+    <circle cx="17" cy="9" r="1.8" />
+    <path d="M12 12c-3 0-5.5 3-5.5 5.2 0 1.5 1.2 2.3 2.6 2.3 1.2 0 1.8-.6 2.9-.6s1.7.6 2.9.6c1.4 0 2.6-.8 2.6-2.3C17.5 15 15 12 12 12z" />
+  </Svg>
+);
+
+const BugIcon = () => (
+  <Svg>
+    <rect x="8" y="8" width="8" height="11" rx="4" />
+    <path d="M12 8V5M9.5 5.5 8 4M14.5 5.5 16 4M8 12H4M16 12h4M8 16l-3 2M16 16l3 2" />
+  </Svg>
+);
+
+const MushroomIcon = () => (
+  <Svg>
+    <path d="M3.5 12a8.5 8.5 0 0 1 17 0z" />
+    <path d="M10 12v6a2 2 0 0 0 4 0v-6" />
+  </Svg>
+);
+
+const PictureIcon = () => (
+  <Svg>
+    <rect x="3.5" y="5" width="17" height="14" rx="2.5" />
+    <circle cx="9" cy="10" r="1.6" />
+    <path d="m20.5 16-5-5-8 8" />
+  </Svg>
+);
+
+/** A placeholder picture for a species group (shown when there's no photo). */
+export function GroupIcon({ group }: { group: string | null | undefined }) {
+  const g = (group ?? "").toLowerCase();
+  if (/bird/.test(g)) return <BirdIcon />;
+  if (/fish|shark|ray/.test(g)) return <FishIcon />;
+  if (/plant|alga|seaweed/.test(g)) return <LeafIcon />;
+  if (/mammal|reptile|amphib/.test(g)) return <PawIcon />;
+  if (/insect|arachnid|arthropod|spider/.test(g)) return <BugIcon />;
+  if (/fung/.test(g)) return <MushroomIcon />;
+  return <PictureIcon />;
+}

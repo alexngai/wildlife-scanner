@@ -9,6 +9,8 @@ import { weekOf } from "../lib/weeks";
 import type { TaxonEntry } from "../products/types";
 import { SearchIcon } from "./Icons";
 import { SeasonRibbon } from "./SeasonRibbon";
+import { PhotoCredits, SpeciesThumb } from "./SpeciesPhoto";
+import { usePhotos } from "../hooks";
 
 /** Ribbons are drawn for this many results, each from its species map file. */
 const RIBBONS = 8;
@@ -55,6 +57,7 @@ export function SpeciesSearch({
   const [q, setQ] = useState("");
   const id = useId();
   const results = useMemo(() => searchTaxa(taxa, q), [taxa, q]);
+  const photos = usePhotos(region);
   const settledQ = useSettled(q, SETTLE_MS);
   // Awareness species get no ribbon: presence only, no timing.
   const ribbonIds = useMemo(
@@ -112,11 +115,14 @@ export function SpeciesSearch({
           {results.map((t) => (
             <li key={t.id}>
               <Link to={`/r/${region}/species/${encodeURIComponent(t.id)}`} className="result">
-                <span className="result-name">{displayName(t)}</span>
-                {t.common_name && t.scientific_name && <em className="muted small"> {t.scientific_name}</em>}
-                <span className="muted small result-meta">
-                  {groupLabel(t.group)}
-                  {t.mode === "awareness" && " · awareness only"}
+                <SpeciesThumb photo={photos.get(t.id)} group={t.group} />
+                <span className="result-text">
+                  <span className="result-name">{displayName(t)}</span>
+                  {t.common_name && t.scientific_name && <em className="muted small"> {t.scientific_name}</em>}
+                  <span className="muted small result-meta">
+                    {groupLabel(t.group)}
+                    {t.mode === "awareness" && " · awareness only"}
+                  </span>
                 </span>
                 {ribbons.has(t.id) && (
                   <span className="result-ribbon">
@@ -127,6 +133,14 @@ export function SpeciesSearch({
             </li>
           ))}
         </ul>
+      )}
+      {results.length > 0 && (
+        <PhotoCredits
+          items={results.flatMap((t) => {
+            const photo = photos.get(t.id);
+            return photo ? [{ name: displayName(t), photo }] : [];
+          })}
+        />
       )}
     </div>
   );

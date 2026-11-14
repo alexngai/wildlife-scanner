@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import { fixtureApi } from "./fixtureFetch";
@@ -118,6 +118,18 @@ describe("species page", () => {
     expect(requested.filter((u) => u.includes("/forecast")).length).toBe(12);
   });
 
+  it("shows the species photo with its credit, and a placeholder when the image fails", async () => {
+    renderApp("/r/testland/species/testus-primus?week=20");
+    const img = await screen.findByRole("img", { name: "Common Testbird" });
+    expect(img).toHaveAttribute("src", "/data/region=testland/static/photos/testus-primus.svg");
+    expect(img).toHaveAttribute("referrerpolicy", "no-referrer");
+    expect(screen.getByText(/Synthetic Fixture/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "CC BY" })).toHaveAttribute("rel", "license noreferrer");
+    fireEvent.error(img);
+    expect(screen.queryByRole("img", { name: "Common Testbird" })).toBeNull();
+    expect(screen.queryByText(/Synthetic Fixture/)).toBeNull();
+  });
+
   it("explains when the API isn't configured", async () => {
     renderApp("/r/testland/species/testus-primus?place=test-cove", { config: { apiBase: "" } });
     expect(await screen.findByText(/Daily forecasts come from the live service/)).toBeInTheDocument();
@@ -201,6 +213,22 @@ describe("region and search", () => {
     expect(within(list).getAllByRole("link")).toHaveLength(2);
     expect(within(list).getAllByText(/species per outing/).length).toBeGreaterThan(0);
     expect(await screen.findByTestId("map")).toHaveAttribute("data-places", "2");
+  });
+
+  it("shows thumbnails in search results, only for openly licensed photos, with credits", async () => {
+    const user = userEvent.setup();
+    renderApp("/r/testland");
+    await user.type(await screen.findByLabelText("Search species"), "test");
+    const results = document.querySelector(".result-list") as HTMLElement;
+    const thumb = (name: RegExp) =>
+      within(results).getByRole("link", { name }).querySelector("img.thumb") as HTMLImageElement | null;
+    await waitFor(() => expect(thumb(/Common Testbird/)).not.toBeNull());
+    expect(thumb(/Seasonal Testfish/)).not.toBeNull();
+    expect(thumb(/Shy Testcat/)).toBeNull(); // no usable licence: placeholder
+    // A photo that has moved or gone falls back to the placeholder.
+    fireEvent.error(thumb(/Seasonal Testfish/)!);
+    expect(thumb(/Seasonal Testfish/)).toBeNull();
+    expect(screen.getByText("Photo credits")).toBeInTheDocument();
   });
 
   it("offers configured regions", async () => {

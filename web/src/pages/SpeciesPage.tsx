@@ -11,7 +11,7 @@ import { MapTable } from "../components/MapTable";
 import { Async, Loading, NotAvailable } from "../components/Status";
 import { WeekSlider } from "../components/WeekSlider";
 import { useServices } from "../context";
-import { useRegionIndex } from "../hooks";
+import { usePhotos, useRegionIndex } from "../hooks";
 import { displayName, groupLabel, km, methodLabel, percent, shortDate, times } from "../lib/format";
 import { roundCoord } from "../lib/geo";
 import {
@@ -32,6 +32,7 @@ import { useAsync } from "../lib/useAsync";
 import { isoDate, monthLabel, parseIsoDate, weekLabel, weekOf } from "../lib/weeks";
 import { CONDITION_CELLS, ConditionsSummaryView, useConditions } from "../components/Conditions";
 import { ArrowLeftIcon, WeatherIcon } from "../components/Icons";
+import { SpeciesFigure } from "../components/SpeciesPhoto";
 import type { SpeciesMapFile, StaticIndex } from "../products/types";
 import { useThemeContext } from "../themeContext";
 import { usePageTitle } from "../lib/usePageTitle";
@@ -61,6 +62,7 @@ export function SpeciesPage() {
 
 function SpeciesView({ region, index, map }: { region: string; index: StaticIndex; map: SpeciesMapFile }) {
   const { config, api } = useServices();
+  const photos = usePhotos(region);
   const { effective: theme } = useThemeContext();
   const [params, setParams] = useSearchParams();
   const t = map.taxon;
@@ -159,11 +161,16 @@ function SpeciesView({ region, index, map }: { region: string; index: StaticInde
   return (
     <article className="page">
       <header className="page-head species-head">
-        <h1>{displayName(t)}</h1>
-        {t.common_name && t.scientific_name && <p className="sci">{t.scientific_name}</p>}
-        <div className="chips">
-          <span className="chip">{groupLabel(t.group)}</span>
-          <span className={awareness ? "chip warn" : "chip accent"}>{TIER_NAME[t.tier] ?? `Tier ${t.tier}`}</span>
+        <div className="species-title">
+          <SpeciesFigure photo={photos.get(t.taxon_id) ?? null} group={t.group} name={displayName(t)} />
+          <div>
+            <h1>{displayName(t)}</h1>
+            {t.common_name && t.scientific_name && <p className="sci">{t.scientific_name}</p>}
+            <div className="chips">
+              <span className="chip">{groupLabel(t.group)}</span>
+              <span className={awareness ? "chip warn" : "chip accent"}>{TIER_NAME[t.tier] ?? `Tier ${t.tier}`}</span>
+            </div>
+          </div>
         </div>
         {!awareness && (
           <div className="what-number">
