@@ -153,8 +153,14 @@ function SpeciesView({ region, index, map }: { region: string; index: StaticInde
             What the number means
           </h2>
           <p>
-            <strong>Chance {methodLabel(map.method)}</strong> of recording this species. {map.label}
+            <strong>Chance {methodLabel(map.method)}</strong> of recording this species.
           </p>
+          {map.label && (
+            <details className="more">
+              <summary>How it's worked out</summary>
+              <p>{map.label}</p>
+            </details>
+          )}
         </section>
       )}
 

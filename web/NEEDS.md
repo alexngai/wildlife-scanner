@@ -88,3 +88,39 @@ modes.
 search all week, although its map file is published for its other weeks and opens by direct
 link. Each entry's `tier` and `mode` also describe only the publish day, so a species that
 becomes awareness-only later in the year is labelled `forecast` in search.
+
+## 9. Place files hold all 52 weeks (2.2 MB each with real data)
+
+**What:** split each place file by week (e.g. `places/<id>/w<NN>.json`, plus a small
+`places/<id>.json` with `place`, `taxa`, `groups` and the week paths), or publish the current
+and next few weeks separately.
+
+**Why:** measured on a Monterey Bay build (4 places, 1,333 taxa per place). A place file is
+about 2.2 MB, or 560 KB gzipped, and 2.37 MB of that is the `weeks` array. The page shows one
+week at a time. On a phone at about 1.6 Mbps, the place page took 16 s uncompressed and should
+take about 4 s gzipped. One week would be about 45 KB.
+
+## 10. Every page loads all of `index.json` to find one map path
+
+**What:** move each taxon's map path into its `taxa.json` entry (`map: "static/maps/…"`), or
+split `maps` out of `index.json` into its own file.
+
+**Why:** with 4,853 taxa, `index.json` is 379 KB, or 114 KB gzipped, and nearly all of it is the
+`maps` table. A species page needs one entry but has to load all of it before it can request
+the map. Search already loads `taxa.json` (835 KB, 145 KB gzipped), so a path there costs
+almost nothing more.
+
+## 11. Small per-taxon season summary in `taxa.json`
+
+**What:** a regional seasonal profile per taxon, for example `season: [0-9 × 52]` (each week's
+regional value as a 0–9 level, or null when withheld), only for tiers below 2.
+
+**Why:** search results and lists could show a tiny "when it's around" ribbon without
+fetching a map per result. It is region-wide and already published (`region_p`), so nothing
+finer is revealed. Until then the app fetches the map files for the first few results.
+
+## 12. Inconsistent capitalisation of common names
+
+Real data mixes "coyote brush" and "coastal sagewort" with "European Searocket" and "Alkali
+Heath" in the same list. The app shows names as published. Normalising at ingest, or
+preferring a source with consistent case, would read better.
