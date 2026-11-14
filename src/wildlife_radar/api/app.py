@@ -29,6 +29,7 @@ from wildlife_radar.serving.forecast import (
     Forecast,
     ForecastService,
     HourlyForecast,
+    MapForecast,
     RecentActivity,
     recent_activity,
 )
@@ -45,6 +46,8 @@ SOURCE_URL_ENV = "WILDLIFE_RADAR_SOURCE_URL"
 CORS_ENV = "WILDLIFE_RADAR_CORS_ORIGINS"
 DEFAULT_SOURCE_URL = "https://github.com/alexngai/wildlife-radar"
 NOT_AVAILABLE = "Not available: unknown taxon, sensitive taxon, or no data for this request."
+MAX_FORECAST_CELLS = 2000
+"""Cells per /forecast/map request (a whole map needs no list)."""
 
 
 def _parse_date(value: str | None) -> date:
@@ -393,6 +396,31 @@ def create_app(
         lat, lon, target = _location(lat, lon, place_id)
         try:
             return target.forecasts.forecast(taxon_id, lat, lon, _parse_date(date), method=method)
+        except NotAvailable:
+            raise HTTPException(status_code=404, detail=NOT_AVAILABLE) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+
+    @app.get("/species/{taxon_id}/forecast/map", response_model=MapForecast)
+    def forecast_map(
+        taxon_id: str,
+        date: str | None = None,
+        cells: str | None = None,
+        method: str | None = None,
+        region: str | None = None,
+    ):
+        """The day's forecast for every cell of the species' weekly map, or for ``cells``
+        (comma-separated H3 cells of that map), in one call: the batch form of
+        ``/species/{id}/forecast``."""
+        wanted = [c for c in (cells or "").split(",") if c] or None
+        if wanted and len(wanted) > MAX_FORECAST_CELLS:
+            raise HTTPException(
+                status_code=400, detail=f"at most {MAX_FORECAST_CELLS} cells per request"
+            )
+        try:
+            return for_region(region).forecasts.forecast_map(
+                taxon_id, _parse_date(date), cells=wanted, method=method
+            )
         except NotAvailable:
             raise HTTPException(status_code=404, detail=NOT_AVAILABLE) from None
         except ValueError as exc:

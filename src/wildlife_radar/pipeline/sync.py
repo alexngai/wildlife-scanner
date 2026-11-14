@@ -22,7 +22,7 @@ import shutil
 from pathlib import Path
 
 from wildlife_radar.pipeline.publish import BUNDLE_FILE, CURRENT, set_current
-from wildlife_radar.pipeline.static import INDEX, STATIC_DIR, referenced
+from wildlife_radar.pipeline.static import INDEX, STATIC_DIR, in_use, needs_taxa, referenced
 from wildlife_radar.storage.objects import NO_CACHE, ObjectStore
 
 KEEP_VERSIONS = 6
@@ -89,11 +89,19 @@ def prune_remote(store: ObjectStore, region_id: str, keep: int = KEEP_VERSIONS) 
     used: set[str] = set()
     for v in set(versions) - set(drop):
         text = store.get_text(f"{_region_prefix(region_id)}/version={v}/{STATIC_DIR}/{INDEX}")
-        if text:
-            used |= referenced(json.loads(text))
+        if not text:
+            continue
+        index = json.loads(text)
+        taxa = None
+        if needs_taxa(index):
+            taxa_text = store.get_text(f"{_region_prefix(region_id)}/{index['taxa']}")
+            if taxa_text is None:  # can't tell which maps are used: delete nothing shared
+                return drop
+            taxa = json.loads(taxa_text)
+        used |= referenced(index, taxa)
     shared = store.list(f"{_region_prefix(region_id)}/{STATIC_DIR}/")
     strip = len(_region_prefix(region_id)) + 1
-    store.delete([k for k in shared if k[strip:] not in used])
+    store.delete([k for k in shared if not in_use(k[strip:], used)])
     return drop
 
 
@@ -110,11 +118,21 @@ def prune_local(publish_root: Path, region_id: str, keep: int = KEEP_VERSIONS) -
     shared = region_dir / STATIC_DIR
     if shared.exists():
         used: set[str] = set()
-        for index in region_dir.glob(f"version=*/{STATIC_DIR}/{INDEX}"):
-            used |= referenced(json.loads(index.read_text(encoding="utf-8")))
+        for path in region_dir.glob(f"version=*/{STATIC_DIR}/{INDEX}"):
+            index = json.loads(path.read_text(encoding="utf-8"))
+            taxa = None
+            if needs_taxa(index):
+                taxa_path = region_dir / index["taxa"]
+                if not taxa_path.exists():  # can't tell which maps are used: keep them all
+                    return drop
+                taxa = json.loads(taxa_path.read_text(encoding="utf-8"))
+            used |= referenced(index, taxa)
         for path in [p for p in shared.rglob("*") if p.is_file()]:
-            if path.relative_to(region_dir).as_posix() not in used:
+            if not in_use(path.relative_to(region_dir).as_posix(), used):
                 path.unlink()
+        for folder in sorted((p for p in shared.rglob("*") if p.is_dir()), reverse=True):
+            if not any(folder.iterdir()):
+                folder.rmdir()
     return drop
 
 

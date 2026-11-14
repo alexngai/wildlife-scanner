@@ -61,6 +61,27 @@ class Forecast(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class CellForecast(BaseModel):
+    cell: str
+    p: float
+    p_level0: float
+    drivers: list[Driver] = Field(default_factory=list)
+
+
+class MapForecast(BaseModel):
+    """A day's forecast for every cell of a species' weekly map (or the cells asked for)."""
+
+    taxon: TaxonSummary
+    day: date
+    resolution_km: float
+    effort_group: str
+    method: str
+    level: int
+    """0 = baseline, 1 = conditions, 2 = conditions + recent sightings (same for every cell)."""
+    cells: list[CellForecast] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 class RecentItem(BaseModel):
     taxon_id: str
     scientific_name: str | None
@@ -309,6 +330,90 @@ class ForecastService:
             key=lambda d: -abs(d.contribution),
         )
         out.notes += notes
+        return out
+
+    def forecast_map(
+        self,
+        taxon_id: str,
+        on: date,
+        cells: list[str] | None = None,
+        method: str | None = None,
+    ) -> MapForecast:
+        """``forecast`` for many cells at once: the week's policy-filtered map (same cells,
+        resolution and baseline values as ``/species/{id}/map``), with the day's condition
+        model applied to every cell in one pass. ``cells`` limits it to those cells."""
+        smap = self.q.species_map(taxon_id, on, method=method)
+        taxon_id = smap.taxon.taxon_id
+        group_id = smap.effort_group
+        wanted = set(cells) if cells else None
+        base = [(c.cell, c.p) for c in smap.cells if wanted is None or c.cell in wanted]
+        out = MapForecast(
+            taxon=smap.taxon,
+            day=on,
+            resolution_km=smap.resolution_km,
+            effort_group=group_id,
+            method=smap.method,
+            level=0,
+            cells=[CellForecast(cell=c, p=round(p, 6), p_level0=round(p, 6)) for c, p in base],
+        )
+        if wanted is not None and len(base) < len(wanted):
+            out.notes.append(f"{len(wanted) - len(base)} requested cells are not on this map")
+        if PolicyTier(smap.taxon.tier) != PolicyTier.OPEN:
+            out.notes.append("daily conditions are shown only for openly mapped species")
+            return out
+        level_no, model = self._models.get((taxon_id, group_id), (0, None))
+        if model is None:
+            out.notes.append("no condition model has passed its backtest gate")
+            return out
+        if not base:
+            return out
+        notes: list[str] = []
+        rows: list[dict] = []
+        usable: list[int] = []
+        nowcast: dict[str, tuple[float, float]] = {}
+        for i, (cell, _p) in enumerate(base):
+            values = self._signals(model, cell, on, notes)
+            if any(not math.isfinite(v) for v in values.values()):
+                continue
+            if level_no == 2:
+                c1 = spatial.coarsen_cell(cell, self.q.level_res["parent"])
+                if c1 not in nowcast:
+                    nowcast[c1] = self._nowcast(taxon_id, group_id, c1, on)
+                k, n = nowcast[c1]
+                values["nowcast.log_detections"] = math.log1p(k)
+                values["nowcast.log_effort"] = math.log1p(n)
+            rows.append(values)
+            usable.append(i)
+        if len(usable) < len(base):
+            out.notes.append(
+                f"condition signals unavailable for {len(base) - len(usable)} cells: "
+                "their baseline is shown"
+            )
+        if not usable:
+            return out
+        arrays = {s: np.array([r[s] for r in rows]) for s in rows[0]}
+        p0 = np.array([base[i][1] for i in usable])
+        offset = np.log(p0 / (1 - p0))
+        p = model.predict(arrays, offset)
+        contributions = model.contributions(arrays)
+        for j, i in enumerate(usable):
+            cf = out.cells[i]
+            cf.p = round(float(p[j]), 6)
+            cf.drivers = sorted(
+                (
+                    Driver(
+                        term=t.name,
+                        signal=t.signal,
+                        value=round(float(arrays[t.signal][j]), 4),
+                        contribution=round(float(contributions[t.name][j]), 4),
+                        hypothesis=t.hypothesis,
+                    )
+                    for t in model.terms
+                ),
+                key=lambda d: -abs(d.contribution),
+            )
+        out.level = level_no
+        out.notes += sorted(set(notes))
         return out
 
     def hourly(

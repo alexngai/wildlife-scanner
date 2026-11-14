@@ -49,13 +49,15 @@ Built by `publish` from the finished bundle, through the same query layer as the
 
 - `version=<v>/static/index.json`: the entry point. The frontend reads `CURRENT`, then this
   index, which lists every other file's path (relative to `region=<id>/`).
-- `version=<v>/static/taxa.json`: search index (names, aliases, group, tier, records).
+- `version=<v>/static/taxa.json`: search index (names, aliases, group, tier, records), each
+  species' map path, a 52-week season summary and an openly licensed photo (hotlinked).
 - `static/maps/<taxon>.<key>.json`: the species' year of maps by ISO week, as H3 cells × weeks
   matrices (weekly for openly mapped taxa, monthly at landscape scale for coarse ones). Weeks
   a taxon is withheld are absent. Withheld taxa are absent everywhere.
-- `static/places/<place>.<key>.json`: weekly place lists for the region pack's places.
+- `static/places/<place>.<key>.json` and `static/places/<place>.<key>/wNN.json`: a place's
+  header (names, groups, week paths) and one file per week of lists.
 
-The formats (currently format 2) are specified in
+The formats (currently format 3) are specified in
 [`design/static-products.md`](design/static-products.md), which the web app relies on.
 
 Maps and place lists are content-addressed, so a live publish rebuilds only the index and
@@ -152,9 +154,9 @@ command as `app`.
 
 ## Not done yet
 
-- **Static products on real data** (format 2, Monterey Bay, 4,866 species):
+- **Static products on real data** (format 3, Monterey Bay, 4,866 species):
   - maps total 256 MB (50 MB gzipped), at most 166 KB per species;
-  - place lists are about 2 MB each;
+  - a place page loads a 162 KB header (34 KB gzipped) and a 38 KB week (10 KB gzipped);
   - a full rebuild runs in parallel processes, and publishes between baseline rebuilds reuse
     the files.
 
