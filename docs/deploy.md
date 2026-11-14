@@ -57,7 +57,7 @@ Built by `publish` from the finished bundle, through the same query layer as the
 - `static/places/<place>.<key>.json` and `static/places/<place>.<key>/wNN.json`: a place's
   header (names, groups, week paths) and one file per week of lists.
 
-The formats (currently format 3) are specified in
+The formats (currently format 4) are specified in
 [`design/static-products.md`](design/static-products.md), which the web app relies on.
 
 Maps and place lists are content-addressed, so a live publish rebuilds only the index and
@@ -154,7 +154,7 @@ command as `app`.
 
 ## Not done yet
 
-- **Static products on real data** (format 3, Monterey Bay, 4,866 species):
+- **Static products on real data** (format 4, Monterey Bay, 4,866 species):
   - maps total 256 MB (50 MB gzipped), at most 166 KB per species;
   - a place page loads a 162 KB header (34 KB gzipped) and a 38 KB week (10 KB gzipped);
   - a full rebuild runs in parallel processes, and publishes between baseline rebuilds reuse
