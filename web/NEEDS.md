@@ -5,7 +5,8 @@ app would like, each with the reason. Newest at the bottom; the data session dec
 
 **Status (2026-11-14):** §9–15 are done in static format 3 and the API (data branch 92e394f,
 contract in `docs/design/static-products.md`), and the app uses them. §14's failure is fixed
-there (f3e15a2).
+there (f3e15a2). Format 4 (24f8aff) then moved photos to an id plus URL templates in the
+index, to shrink `taxa.json`; the app reads that.
 
 ## 1. Awareness-mode species: numbers are still published (policy)
 

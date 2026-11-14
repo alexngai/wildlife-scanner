@@ -1,7 +1,7 @@
 # wildlife-radar web app
 
 The browser front end: React + Vite + TypeScript (strict), MapLibre GL for maps, H3 cells
-drawn with `h3-js`. It reads the **static products** (format 3,
+drawn with `h3-js`. It reads the **static products** (format 4,
 [`docs/design/static-products.md`](../docs/design/static-products.md)) and, when configured,
 the **API** (daily forecasts, hourly timing, recent activity). It builds to a static site for
 Cloudflare Pages. AGPL-3.0, like the rest of the repository.
@@ -49,7 +49,9 @@ Data arrives policy-filtered, and the app adds display rules on top. See
 - "Likely species per outing" adds up the published chances in a place's top list for one effort
   group. Places are only compared within a group, because chances from different methods don't
   mix.
-- Species photos are chosen when the data is published ([NEEDS.md](NEEDS.md) §15). Only openly
+- Species photos are chosen when the data is published ([NEEDS.md](NEEDS.md) §15). `taxa.json`
+  gives each photo's id, extension, licence and credit; `index.json`'s `photos` holds the URL
+  templates (format 4). The app checks the id and extension before filling a template. Only openly
   licensed ones are shown (CC0, BY, BY-SA, BY-NC, BY-NC-SA; never "all rights reserved" or ND),
   always with their credit. An image that fails to load falls back to a group placeholder.
 - Licence and attribution appear with every map and list, alongside a non-commercial notice
