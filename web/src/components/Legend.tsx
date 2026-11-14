@@ -1,6 +1,8 @@
 import { BIN_LABELS, LIFT_LABELS } from "../lib/maps";
 import { liftRampFor, rampFor, type MapMetric } from "./mapColors";
 
+const TODAY_LABELS = ["Under half of usual", "Below usual", "About usual", "Above usual", "Over twice usual"];
+
 export function Legend({
   theme,
   presence,
@@ -19,14 +21,17 @@ export function Legend({
       </ul>
     );
   }
-  const lift = metric === "lift";
+  const lift = metric === "lift" || metric === "today";
   const ramp = lift ? liftRampFor(theme) : rampFor(theme);
-  const labels = lift ? LIFT_LABELS : BIN_LABELS;
+  const labels = metric === "today" ? TODAY_LABELS : lift ? LIFT_LABELS : BIN_LABELS;
+  const name =
+    metric === "today"
+      ? "Map legend: the day's chance against the usual chance"
+      : lift
+        ? "Map legend: chance compared with the wider area"
+        : "Map legend: chance per outing";
   return (
-    <ul
-      className="legend"
-      aria-label={lift ? "Map legend: chance compared with the wider area" : "Map legend: chance per outing"}
-    >
+    <ul className="legend" aria-label={name}>
       {labels.map((label, i) => (
         <li key={label}>
           <span className="swatch" style={{ background: ramp[i] }} aria-hidden="true" /> {label}
@@ -37,7 +42,8 @@ export function Legend({
       </li>
       {lift ? (
         <li>
-          <span className="swatch swatch-none" aria-hidden="true" /> No comparison
+          <span className="swatch swatch-none" aria-hidden="true" />{" "}
+          {metric === "today" ? "No forecast" : "No comparison"}
         </li>
       ) : null}
       <li>

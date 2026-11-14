@@ -1,13 +1,15 @@
+import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { RecentPanel } from "../components/ApiPanels";
 import { ArrowLeftIcon } from "../components/Icons";
 import { ListsPanel } from "../components/ListsPanel";
 import { kindLabel } from "../components/PlaceCard";
-import { Async, NotAvailable } from "../components/Status";
+import { Async, Loading, NotAvailable } from "../components/Status";
 import { WeekSlider } from "../components/WeekSlider";
 import { useServices } from "../context";
 import { useRegionIndex } from "../hooks";
-import { listsFromPlaceFile } from "../lib/lists";
+import { listsFromPlace } from "../lib/lists";
+import type { PlaceWeek } from "../products/types";
 import { useAsync } from "../lib/useAsync";
 import { usePageTitle } from "../lib/usePageTitle";
 import { weekOf } from "../lib/weeks";
@@ -20,6 +22,11 @@ export function PlacePage() {
   const file = useAsync(() => products.place(region, placeId), [products, region, placeId]);
   const thisWeek = weekOf(new Date());
   const week = Math.min(52, Math.max(1, Number(params.get("week")) || thisWeek));
+  const weekFile = useAsync(() => products.placeWeek(region, placeId, week), [products, region, placeId, week]);
+  // Keep the last week's lists on screen while the next week's file loads.
+  const [shownWeek, setShownWeek] = useState<PlaceWeek | null>(null);
+  if (weekFile?.status === "ok" && weekFile.data !== shownWeek) setShownWeek(weekFile.data);
+  const currentWeek = weekFile?.status === "ok" ? weekFile.data : shownWeek;
   const year = new Date().getFullYear();
   const kind = index?.status === "ok" ? index.data.places[placeId]?.kind : undefined;
   usePageTitle(file?.status === "ok" ? file.data.place.name : file?.status === "error" ? "Not available" : null);
@@ -33,7 +40,7 @@ export function PlacePage() {
       </p>
       <Async state={file} what="This place">
         {(f) => {
-          const view = listsFromPlaceFile(f, week);
+          const view = currentWeek ? listsFromPlace(f, currentWeek) : null;
           return (
             <>
               <header className="page-head">
@@ -55,7 +62,13 @@ export function PlacePage() {
                   onChange={(w) => setParams(w === thisWeek ? {} : { week: String(w) }, { replace: true })}
                 />
                 <hr className="divider" />
-                {view ? <ListsPanel region={region} view={view} /> : <NotAvailable what="Lists for this week" />}
+                {view ? (
+                  <ListsPanel region={region} view={view} />
+                ) : weekFile?.status === "error" ? (
+                  <NotAvailable what="Lists for this week" />
+                ) : (
+                  <Loading />
+                )}
               </section>
               {week === thisWeek && (
                 <section aria-labelledby="recent-h" className="card">

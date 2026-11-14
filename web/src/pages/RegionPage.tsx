@@ -25,8 +25,9 @@ export function RegionPage() {
           <header className="page-head">
             <h1>{idx.region.name}</h1>
             <p className="subtitle small">
-              {Object.keys(idx.maps).length.toLocaleString("en")} species mapped · data updated{" "}
-              {shortDate(idx.published_at ?? idx.baseline.built_at)}
+              {taxa?.status === "ok" &&
+                `${taxa.data.filter((t) => t.map).length.toLocaleString("en")} species mapped · `}
+              data updated {shortDate(idx.published_at ?? idx.baseline.built_at)}
             </p>
           </header>
 

@@ -1,0 +1,443 @@
+{
+ "taxon": {
+  "taxon_id": "testus-primus",
+  "scientific_name": "Testus primus",
+  "common_name": "Common Testbird",
+  "group": "birds",
+  "records_visits": 5000,
+  "tier": 0,
+  "mode": "forecast",
+  "gate": null,
+  "effort_groups": []
+ },
+ "day": "2026-05-20",
+ "resolution_km": 3.72,
+ "effort_group": "birds:casual",
+ "method": "observer_visit",
+ "level": 1,
+ "cells": [
+  {
+   "cell": "8628348b7ffffff",
+   "p": 0.5466,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": 0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "862834987ffffff",
+   "p": 0.1646,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": -0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "862834997ffffff",
+   "p": 0.3,
+   "p_level0": 0.3,
+   "drivers": []
+  },
+  {
+   "cell": "86283499fffffff",
+   "p": 0.5466,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": 0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "8628349a7ffffff",
+   "p": 0.1646,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": -0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "8628349b7ffffff",
+   "p": 0.3,
+   "p_level0": 0.3,
+   "drivers": []
+  },
+  {
+   "cell": "862834c27ffffff",
+   "p": 0.5466,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": 0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "862834c2fffffff",
+   "p": 0.1646,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": -0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "862834d07ffffff",
+   "p": 0.3,
+   "p_level0": 0.3,
+   "drivers": []
+  },
+  {
+   "cell": "862834d0fffffff",
+   "p": 0.5466,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": 0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "862834d17ffffff",
+   "p": 0.1646,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": -0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "862834d1fffffff",
+   "p": 0.3,
+   "p_level0": 0.3,
+   "drivers": []
+  },
+  {
+   "cell": "862834d27ffffff",
+   "p": 0.5466,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": 0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "862834d2fffffff",
+   "p": 0.1646,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": -0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "862834d37ffffff",
+   "p": 0.3,
+   "p_level0": 0.3,
+   "drivers": []
+  },
+  {
+   "cell": "862834d47ffffff",
+   "p": 0.5466,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": 0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "862834d4fffffff",
+   "p": 0.1646,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": -0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "862834d57ffffff",
+   "p": 0.3,
+   "p_level0": 0.3,
+   "drivers": []
+  },
+  {
+   "cell": "862834d5fffffff",
+   "p": 0.5466,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": 0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "862834d67ffffff",
+   "p": 0.1646,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": -0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "862834d6fffffff",
+   "p": 0.3,
+   "p_level0": 0.3,
+   "drivers": []
+  },
+  {
+   "cell": "862834d77ffffff",
+   "p": 0.5466,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": 0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "86291a60fffffff",
+   "p": 0.1646,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": -0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "86291a61fffffff",
+   "p": 0.3,
+   "p_level0": 0.3,
+   "drivers": []
+  },
+  {
+   "cell": "86291a657ffffff",
+   "p": 0.5466,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": 0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "86291a65fffffff",
+   "p": 0.1646,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": -0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "86291a687ffffff",
+   "p": 0.3,
+   "p_level0": 0.3,
+   "drivers": []
+  },
+  {
+   "cell": "86291a68fffffff",
+   "p": 0.5466,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": 0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "86291a69fffffff",
+   "p": 0.1646,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": -0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "86291a6afffffff",
+   "p": 0.3,
+   "p_level0": 0.3,
+   "drivers": []
+  },
+  {
+   "cell": "86291a6c7ffffff",
+   "p": 0.5466,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": 0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "86291a6cfffffff",
+   "p": 0.1646,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": -0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "86291a6d7ffffff",
+   "p": 0.3,
+   "p_level0": 0.3,
+   "drivers": []
+  },
+  {
+   "cell": "86291a6dfffffff",
+   "p": 0.5466,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": 0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "86291a6e7ffffff",
+   "p": 0.1646,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": -0.6,
+     "hypothesis": true
+    }
+   ]
+  },
+  {
+   "cell": "86291a6efffffff",
+   "p": 0.3,
+   "p_level0": 0.3,
+   "drivers": []
+  },
+  {
+   "cell": "86291a6f7ffffff",
+   "p": 0.5466,
+   "p_level0": 0.3,
+   "drivers": [
+    {
+     "term": "temp",
+     "signal": "water_temperature",
+     "value": 14.2,
+     "contribution": 0.6,
+     "hypothesis": true
+    }
+   ]
+  }
+ ],
+ "notes": []
+}

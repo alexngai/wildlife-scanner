@@ -1,5 +1,5 @@
 import { FetchError, FormatError, NotAvailableError } from "../lib/errors";
-import type { PlaceFile, SpeciesMapFile, StaticIndex, TaxonEntry } from "./types";
+import type { PlaceFile, PlaceWeek, SpeciesMapFile, StaticIndex, TaxonEntry } from "./types";
 import { SUPPORTED_FORMAT } from "./types";
 
 type Fetcher = typeof fetch;
@@ -76,17 +76,36 @@ export class StaticClient {
 
   /** One species' year of maps; NotAvailable when the species isn't published (or is unknown). */
   async speciesMap(region: string, taxonId: string): Promise<SpeciesMapFile> {
-    const idx = await this.index(region);
-    const path = Object.hasOwn(idx.maps, taxonId) ? idx.maps[taxonId] : undefined;
+    const paths = await this.mapPaths(region);
+    const path = paths.get(taxonId);
     if (!path) throw new NotAvailableError();
     return this.json<SpeciesMapFile>(join(this.regionRoot(region), path));
   }
 
+  /** Map paths by taxon, from taxa.json (format 3 keeps them there, not in the index). */
+  private async mapPaths(region: string): Promise<Map<string, string>> {
+    const idx = await this.index(region);
+    return this.memo(`maps:${region}:${idx.version}`, async () => {
+      const out = new Map<string, string>();
+      for (const t of await this.taxa(region)) if (typeof t.map === "string" && t.map) out.set(t.id, t.map);
+      return out;
+    });
+  }
+
+  /** A place's header: names, groups and the paths of its 52 week files. */
   async place(region: string, placeId: string): Promise<PlaceFile> {
     const idx = await this.index(region);
     const ref = Object.hasOwn(idx.places, placeId) ? idx.places[placeId] : undefined;
     if (!ref) throw new NotAvailableError();
     return this.json<PlaceFile>(join(this.regionRoot(region), ref.file));
+  }
+
+  /** One ISO week of a place's lists. */
+  async placeWeek(region: string, placeId: string, week: number): Promise<PlaceWeek> {
+    const header = await this.place(region, placeId);
+    const path = header.weeks[week - 1];
+    if (!path) throw new NotAvailableError();
+    return this.json<PlaceWeek>(join(this.regionRoot(region), path));
   }
 
   /**

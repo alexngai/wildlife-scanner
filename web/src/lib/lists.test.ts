@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { PlaceFile } from "../products/types";
+import type { PlaceFile, PlaceWeek } from "../products/types";
 import { fixtureApi } from "../../tests/fixtureFetch";
-import { listsFromApi, listsFromPlaceFile, newForYou } from "./lists";
+import { listsFromApi, listsFromPlace, newForYou } from "./lists";
 import type { PlaceLists } from "../api/client";
 
 const file = JSON.parse(
@@ -11,6 +11,9 @@ const file = JSON.parse(
     "utf8",
   ),
 ) as PlaceFile;
+const PLACES = resolve(__dirname, "../../tests/fixtures/bucket/region=testland");
+const week = (w: number) => JSON.parse(readFileSync(resolve(PLACES, file.weeks[w - 1]!), "utf8")) as PlaceWeek;
+const listsFromPlaceFile = (f: PlaceFile, w: number) => listsFromPlace(f, week(w));
 
 describe("place lists", () => {
   it("decodes compact rows by item_fields", () => {

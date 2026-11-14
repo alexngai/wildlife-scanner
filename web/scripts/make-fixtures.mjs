@@ -1,4 +1,4 @@
-// Writes a small, entirely synthetic folder bucket (format 2) and API responses for tests.
+// Writes a small, entirely synthetic folder bucket (format 3) and API responses for tests.
 // No third-party data: names, places and numbers are invented and deterministic.
 // Usage: node scripts/make-fixtures.mjs  (writes tests/fixtures/)
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
@@ -153,7 +153,7 @@ for (const s of species) {
   const path = `static/maps/${s.id}.fixture.json`;
   maps[s.id] = path;
   write(path, {
-    format: 2,
+    format: 3,
     taxon: {
       taxon_id: s.id,
       scientific_name: s.scientific_name,
@@ -175,12 +175,34 @@ for (const s of species) {
 const taxaInfo = Object.fromEntries(
   species.map((s) => [s.id, { scientific_name: s.scientific_name, common_name: s.common_name, group: s.group }]),
 );
+function placeWeek(w) {
+  return {
+    format: 3,
+    week: w,
+    groups: {
+      "birds:casual": {
+        most_likely: [["testus-primus", Math.round(P_SCALE * seasonal(w, 20, 6, 0.7)), 120, 150, "h", 0]],
+        special_here:
+          w > 10 && w < 30 ? [["testus-primus", Math.round(P_SCALE * seasonal(w, 20, 6, 0.7)), 250, 150, "h", 0]] : [],
+        peaking_now: [],
+      },
+      "fishes:casual": {
+        most_likely: w >= 5 && (w < 23 || w > 35) ? [["testus-secundus", 1200, null, 90, "i", 1]] : [],
+      },
+    },
+    awareness: ["rarus-tertius"],
+    area_fallback: w >= 5 ? ["testus-secundus"] : [],
+  };
+}
+
 const placeFiles = {};
 for (const [id, p] of Object.entries(places)) {
   const file = `static/places/${id}.fixture.json`;
   placeFiles[id] = { ...p, file };
+  const weekPath = (w) => `static/places/${id}.fixture/w${String(w).padStart(2, "0")}.json`;
+  for (const w of weeks) write(weekPath(w), placeWeek(w));
   write(file, {
-    format: 2,
+    format: 3,
     place: { place_id: id, name: p.name, kind: p.kind, notes: "A synthetic place for tests." },
     year_basis: 2026,
     p_scale: P_SCALE,
@@ -204,33 +226,28 @@ for (const [id, p] of Object.entries(places)) {
         license,
       },
     },
-    weeks: weeks.map((w) => ({
-      week: w,
-      groups: {
-        "birds:casual": {
-          most_likely: [["testus-primus", Math.round(P_SCALE * seasonal(w, 20, 6, 0.7)), 120, 150, "h", 0]],
-          special_here:
-            w > 10 && w < 30
-              ? [["testus-primus", Math.round(P_SCALE * seasonal(w, 20, 6, 0.7)), 250, 150, "h", 0]]
-              : [],
-          peaking_now: [],
-        },
-        "fishes:casual": {
-          most_likely: w >= 5 && (w < 23 || w > 35) ? [["testus-secundus", 1200, null, 90, "i", 1]] : [],
-        },
-      },
-      awareness: ["rarus-tertius"],
-      area_fallback: w >= 5 ? ["testus-secundus"] : [],
-    })),
+    weeks: weeks.map(weekPath),
   });
 }
 
 write("static/photos/testus-primus.svg", PHOTO_SVG(140));
 write("static/photos/rarus-tertius.svg", PHOTO_SVG(30));
 
+// The regional season as published: 0-9 per ISO week relative to the species' peak, from the
+// weekly segments' region_p; null for weeks in no weekly segment (withheld or monthly).
+function season(sp) {
+  const byWeek = new Map();
+  for (const seg of sp.segments) {
+    if (seg.granularity !== "week") continue;
+    seg.periods.forEach((w, j) => byWeek.set(w, seg.region_p[j]));
+  }
+  const peak = Math.max(0, ...byWeek.values());
+  return weeks.map((w) => (byWeek.has(w) && peak > 0 ? Math.round((9 * byWeek.get(w)) / peak) : null));
+}
+
 write("CURRENT", `${VERSION}\n`);
 write(`version=${VERSION}/static/index.json`, {
-  format: 2,
+  format: 3,
   region: { id: REGION, name: "Testland", bbox: [-122.2, 36.3, -121.6, 36.9] },
   version: VERSION,
   baseline: { model_version: "baseline-test", built_at: "2026-01-01T00:00:00+00:00" },
@@ -239,12 +256,15 @@ write(`version=${VERSION}/static/index.json`, {
   p_scale: P_SCALE,
   paths_relative_to: `region=${REGION}/`,
   taxa: `version=${VERSION}/static/taxa.json`,
-  maps,
   places: placeFiles,
 });
 write(
   `version=${VERSION}/static/taxa.json`,
-  species.map((s) => Object.fromEntries(Object.entries(s).filter(([k]) => k !== "segments"))),
+  species.map((s) => ({
+    ...Object.fromEntries(Object.entries(s).filter(([k]) => k !== "segments")),
+    map: maps[s.id],
+    ...(s.tier < 2 ? { season: season(s) } : {}),
+  })),
 );
 
 // Synthetic API responses (shapes from web/api/openapi.json).
@@ -275,6 +295,29 @@ const api = {
       { term: "temp", signal: "water_temperature", value: 14.2, contribution: 0.35, hypothesis: true },
       { term: "wind", signal: "wind_speed", value: 7.5, contribution: -0.2, hypothesis: false },
     ],
+    notes: [],
+  },
+  // The day's forecast for every cell (GET /species/{id}/forecast/map): a mix of better, about the
+  // same and worse than usual, with invented drivers.
+  forecastMap: {
+    taxon: taxonSummary,
+    day: "2026-05-20",
+    resolution_km: 3.72,
+    effort_group: "birds:casual",
+    method: "observer_visit",
+    level: 1,
+    cells: cells6.map((cell, i) => {
+      const usual = 0.3;
+      const k = i % 3;
+      const contribution = k === 0 ? 0.6 : k === 1 ? -0.6 : 0;
+      return {
+        cell,
+        p: Number((usual * Math.exp(contribution)).toFixed(4)),
+        p_level0: usual,
+        drivers:
+          k === 2 ? [] : [{ term: "temp", signal: "water_temperature", value: 14.2, contribution, hypothesis: true }],
+      };
+    }),
     notes: [],
   },
   hourly: {

@@ -113,6 +113,10 @@ export interface CellFeatureProps {
   lift: number | null;
   /** Lift colour bin, or -1 when there's no lift. */
   liftBin: number;
+  /** The day's chance against usual (from the API), when the "today" view is on; else null. */
+  today?: number | null;
+  /** Its colour bin (as liftBin), or -1. */
+  todayBin?: number;
 }
 
 export interface FeatureCollection {
@@ -316,4 +320,15 @@ export function peakRuns(ribbon: RibbonWeek[]): [number, number][] {
     lastRun[1] = first[1];
   }
   return runs;
+}
+
+/**
+ * A ribbon from taxa.json's published `season` (levels 0-9 per ISO week, relative to the species'
+ * own peak; null when withheld). No map file needed.
+ */
+export function ribbonFromSeason(season: (number | null)[]): RibbonWeek[] {
+  return Array.from({ length: 52 }, (_, i): RibbonWeek => {
+    const level = season[i];
+    return typeof level === "number" && Number.isFinite(level) ? { kind: "value", p: level / 9 } : { kind: "none" };
+  });
 }

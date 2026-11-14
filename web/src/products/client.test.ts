@@ -27,11 +27,23 @@ describe("StaticClient", () => {
     await expect(c.index("no-region")).rejects.toBeInstanceOf(NotAvailableError);
   });
 
-  it("refuses formats it doesn't know", async () => {
-    const fetcher = (async (u: string) =>
-      u.endsWith("CURRENT")
-        ? new Response("v1")
-        : new Response(JSON.stringify({ format: 3 }))) as unknown as typeof fetch;
-    await expect(new StaticClient("/data", fetcher).index("x")).rejects.toBeInstanceOf(FormatError);
+  it("refuses formats it doesn't know (older or newer)", async () => {
+    for (const format of [2, 4]) {
+      const fetcher = (async (u: string) =>
+        u.endsWith("CURRENT")
+          ? new Response("v1")
+          : new Response(JSON.stringify({ format }))) as unknown as typeof fetch;
+      await expect(new StaticClient("/data", fetcher).index("x")).rejects.toBeInstanceOf(FormatError);
+    }
+  });
+
+  it("finds map paths in taxa.json and loads one week of a place", async () => {
+    const c = new StaticClient("/data", makeFixtureFetch().fetcher);
+    const map = await c.speciesMap("testland", "testus-primus");
+    expect(map.taxon.taxon_id).toBe("testus-primus");
+    await expect(c.speciesMap("testland", "nowhere")).rejects.toBeInstanceOf(NotAvailableError);
+    const w = await c.placeWeek("testland", "test-cove", 20);
+    expect(w.week).toBe(20);
+    expect(Object.keys(w.groups)).toContain("birds:casual");
   });
 });

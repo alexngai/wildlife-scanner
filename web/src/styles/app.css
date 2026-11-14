@@ -825,6 +825,13 @@ button.button {
   white-space: nowrap;
 }
 
+.segmented button svg {
+  width: 15px;
+  height: 15px;
+  vertical-align: -3px;
+  margin-right: 5px;
+}
+
 .segmented button:hover {
   color: var(--text);
 }

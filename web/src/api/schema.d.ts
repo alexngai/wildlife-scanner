@@ -183,6 +183,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/species/{taxon_id}/forecast/map": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Forecast Map
+         * @description The day's forecast for every cell of the species' weekly map, or for ``cells``
+         *     (comma-separated H3 cells of that map), in one call: the batch form of
+         *     ``/species/{id}/forecast``.
+         */
+        get: operations["forecast_map_species__taxon_id__forecast_map_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/species/{taxon_id}/forecast/hourly": {
         parameters: {
             query?: never;
@@ -354,6 +376,17 @@ export interface components {
             seasonal_index: number | null;
             confidence: components["schemas"]["Confidence"];
         };
+        /** CellForecast */
+        CellForecast: {
+            /** Cell */
+            cell: string;
+            /** P */
+            p: number;
+            /** P Level0 */
+            p_level0: number;
+            /** Drivers */
+            drivers?: components["schemas"]["Driver"][];
+        };
         /**
          * Confidence
          * @enum {string}
@@ -513,6 +546,30 @@ export interface components {
             /** Seasonal Index */
             seasonal_index: number | null;
             confidence: components["schemas"]["Confidence"];
+        };
+        /**
+         * MapForecast
+         * @description A day's forecast for every cell of a species' weekly map (or the cells asked for).
+         */
+        MapForecast: {
+            taxon: components["schemas"]["TaxonSummary"];
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Resolution Km */
+            resolution_km: number;
+            /** Effort Group */
+            effort_group: string;
+            /** Method */
+            method: string;
+            /** Level */
+            level: number;
+            /** Cells */
+            cells?: components["schemas"]["CellForecast"][];
+            /** Notes */
+            notes?: string[];
         };
         /** PlaceItem */
         PlaceItem: {
@@ -993,6 +1050,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Forecast"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    forecast_map_species__taxon_id__forecast_map_get: {
+        parameters: {
+            query?: {
+                date?: string | null;
+                cells?: string | null;
+                method?: string | null;
+                region?: string | null;
+            };
+            header?: never;
+            path: {
+                taxon_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MapForecast"];
                 };
             };
             /** @description Validation Error */

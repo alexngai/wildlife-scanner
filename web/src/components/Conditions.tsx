@@ -1,87 +1,39 @@
-import { cellToLatLng } from "h3-js";
 import { useMemo } from "react";
+import type { MapForecast } from "../api/client";
 import { useServices } from "../context";
-import {
-  directionOf,
-  summarizeConditions,
-  todayRatio,
-  type CellForecast,
-  type ConditionsSummary,
-} from "../lib/conditions";
-import { percent, shortDate, times } from "../lib/format";
-import type { FeatureCollection } from "../lib/maps";
+import { summarizeConditions, todayByCell, type ConditionsSummary, type TodayCell } from "../lib/conditions";
+import { shortDate, times } from "../lib/format";
 import { useAsync, type AsyncState } from "../lib/useAsync";
 import { humanize } from "./ApiPanels";
-import type { MapMarker } from "./MapView";
-
-/** How many of the week's highest cells get a daily forecast (one API call each). */
-export const CONDITION_CELLS = 12;
 
 /**
- * Daily forecasts for the week's highest cells. `load` is false until the person asks, so no
- * request is made by default.
+ * The day's forecast for every cell of the species' map, in one API call. `load` is false until
+ * the person picks the "Today vs usual" view, so nothing is requested by default.
  */
 export function useConditions(
   taxonId: string,
-  data: FeatureCollection,
+  region: string,
   date: string,
   load: boolean,
-): { state: AsyncState<CellForecast[]> | null; markers: MapMarker[]; summary: ConditionsSummary | null } {
+): { state: AsyncState<MapForecast> | null; byCell: Map<string, TodayCell>; summary: ConditionsSummary | null } {
   const { api } = useServices();
-  const cells = useMemo(
-    () =>
-      data.features
-        .filter((f) => f.properties.p !== null)
-        .sort((a, b) => (b.properties.p ?? 0) - (a.properties.p ?? 0))
-        .slice(0, CONDITION_CELLS)
-        .map((f) => {
-          const [lat, lon] = cellToLatLng(f.properties.cell);
-          return { cell: f.properties.cell, lat, lon };
-        }),
-    [data],
-  );
-  const key = cells.map((c) => c.cell).join(",");
-  const state = useAsync(
-    load && api.enabled && cells.length > 0
-      ? async () => {
-          const settled = await Promise.allSettled(
-            cells.map((c) => api.forecast(taxonId, { lat: c.lat, lon: c.lon }, date)),
-          );
-          const ok = cells.flatMap((c, i): CellForecast[] => {
-            const r = settled[i];
-            return r?.status === "fulfilled" ? [{ ...c, forecast: r.value }] : [];
-          });
-          if (ok.length === 0 && settled[0]?.status === "rejected") throw settled[0].reason;
-          return ok;
-        }
-      : null,
-    [api, taxonId, date, key, load],
-  );
-  const results = state?.status === "ok" ? state.data : null;
-  const markers = useMemo(
-    () =>
-      (results ?? []).map((r): MapMarker => {
-        const ratio = todayRatio(r.forecast);
-        return {
-          lat: r.lat,
-          lon: r.lon,
-          direction: directionOf(ratio),
-          text:
-            ratio === null
-              ? `${shortDate(r.forecast.day)}: ${percent(r.forecast.p)}`
-              : `${shortDate(r.forecast.day)}: ${percent(r.forecast.p)}, usually ${percent(r.forecast.p_level0)} (${times(ratio)})`,
-        };
-      }),
-    [results],
-  );
-  const summary = useMemo(() => (results ? summarizeConditions(results) : null), [results]);
-  return { state, markers, summary };
+  const state = useAsync(load && api.enabled ? () => api.forecastMap(taxonId, region, date) : null, [
+    api,
+    taxonId,
+    region,
+    date,
+    load,
+  ]);
+  const data = state?.status === "ok" ? state.data : null;
+  const byCell = useMemo(() => (data ? todayByCell(data) : new Map<string, TodayCell>()), [data]);
+  const summary = useMemo(() => (data ? summarizeConditions(data.level, data.cells ?? []) : null), [data]);
+  return { state, byCell, summary };
 }
 
 export function ConditionsSummaryView({ summary, date }: { summary: ConditionsSummary; date: string }) {
   if (summary.cells === 0)
     return <p className="muted small">No forecast is available for these cells on {shortDate(date)}.</p>;
-  if (summary.baselineOnly === summary.cells) {
+  if (summary.baselineOnly) {
     return (
       <p className="muted small">
         No daily factors are modelled for this species yet, so {shortDate(date)} looks like a usual day for this week.
@@ -92,7 +44,7 @@ export function ConditionsSummaryView({ summary, date }: { summary: ConditionsSu
   return (
     <div className="conditions" aria-live="polite">
       <p className="small">
-        On <strong>{shortDate(date)}</strong>, in the {summary.cells} highest cells: conditions raise the chance in{" "}
+        On <strong>{shortDate(date)}</strong>, across {summary.cells} cells: conditions raise the chance in{" "}
         <strong>{summary.up}</strong>, lower it in <strong>{summary.down}</strong>, and leave it about the same in{" "}
         {summary.same}.
       </p>

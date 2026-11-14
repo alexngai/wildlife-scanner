@@ -22,4 +22,5 @@ export function liftRampFor(theme: "light" | "dark"): string[] {
   return theme === "dark" ? LIFT_DARK : LIFT_LIGHT;
 }
 
-export type MapMetric = "chance" | "lift";
+/** What the cells are coloured by: chance, chance against the wider area, or the day against usual. */
+export type MapMetric = "chance" | "lift" | "today";

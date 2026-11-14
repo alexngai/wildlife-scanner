@@ -9,7 +9,7 @@ import { useServices } from "../context";
 import { useRegionIndex, useRegions } from "../hooks";
 import { km } from "../lib/format";
 import { inBbox, nearestPlaces, regionForPoint, roundCoord } from "../lib/geo";
-import { listsFromApi, listsFromPlaceFile } from "../lib/lists";
+import { listsFromApi, listsFromPlace } from "../lib/lists";
 import { useAsync } from "../lib/useAsync";
 import { weekOf } from "../lib/weeks";
 import type { StaticIndex } from "../products/types";
@@ -128,12 +128,13 @@ function NearbyResults({ region, index, pos }: { region: string; index: StaticIn
     pos.lat,
     pos.lon,
   ]);
-  const placeFile = useAsync(!api.enabled && closest ? () => products.place(region, closest.id) : null, [
-    api.enabled,
-    products,
-    region,
-    closest?.id,
-  ]);
+  const placeLists = useAsync(
+    !api.enabled && closest
+      ? async () =>
+          listsFromPlace(await products.place(region, closest.id), await products.placeWeek(region, closest.id, week))
+      : null,
+    [api.enabled, products, region, closest?.id, week],
+  );
 
   if (!inside) {
     const other =
@@ -189,11 +190,8 @@ function NearbyResults({ region, index, pos }: { region: string; index: StaticIn
         ) : closest ? (
           <>
             <p className="muted small">Lists for {closest.place.name}, the closest place.</p>
-            <Async state={placeFile} what="Lists here">
-              {(f) => {
-                const view = listsFromPlaceFile(f, week);
-                return view ? <ListsPanel region={region} view={view} /> : null;
-              }}
+            <Async state={placeLists} what="Lists here">
+              {(view) => <ListsPanel region={region} view={view} />}
             </Async>
           </>
         ) : (
