@@ -186,3 +186,38 @@ def test_split_large_tiles_keeps_every_row(tmp_path):
         .fetchone()
     )
     assert (rows, ids) == (300001, 300000)  # every row once; the small file repeats id 1
+
+
+def test_retention_keeps_two_snapshots_and_recent_live_days(tmp_path):
+    from datetime import UTC, datetime
+
+    from wildlife_radar.pipeline import livelog, retention
+
+    lake = tmp_path / "lake"
+    for d in ("2026-08-01", "2026-09-01", "2026-10-01", "2026-11-01"):
+        folder = coverage.snapshot_dir(lake, "california", d)
+        (folder / "tlat=36/tlon=-122").mkdir(parents=True)
+        (folder / "tlat=36/tlon=-122/part-0.parquet").write_bytes(b"x")
+        (folder / coverage.SUCCESS).write_text("{}")
+    unfinished = coverage.snapshot_dir(lake, "california", "2026-07-01")
+    unfinished.mkdir(parents=True)  # no _SUCCESS: never touched
+    log = livelog.log_dir(lake, "california")
+    for d in ("2026-08-20", "2026-09-05", "2026-10-30", "2026-11-12"):
+        (log / f"day={d}").mkdir(parents=True)
+        (log / f"day={d}/part-1-inat.parquet").write_bytes(b"x")
+    (log / "_cursor.json").write_text("{}")
+    store = LocalStore(tmp_path / "bucket")
+    sync_lake(store, lake, push=True)
+    now = datetime(2026, 11, 14, tzinfo=UTC)
+    planned = retention.plan(lake, now)
+    assert [p.split("snapshot=")[1][:10] for p in planned["snapshots"]] == [
+        "2026-08-01",
+        "2026-09-01",
+    ]
+    # Past 67 days (60 + margin) and older than the newest snapshot.
+    assert [p.rsplit("=", 1)[1] for p in planned["live_days"]] == ["2026-08-20", "2026-09-05"]
+    out = retention.prune(lake, now, store=store)
+    assert out["remote_deleted"] == 6  # 2 snapshots x (tile + marker), 2 live parts
+    assert unfinished.exists() and (log / "_cursor.json").exists()
+    assert set(lake_files(lake)) == set(store.list("norm/"))
+    assert retention.plan(lake, now) == {"snapshots": [], "live_days": []}

@@ -529,6 +529,20 @@ def cmd_lake_sync(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_lake_prune(args: argparse.Namespace) -> int:
+    """Drop coverage snapshots and live-log days the lake no longer needs (here and remotely)."""
+    from datetime import UTC, datetime
+
+    from wildlife_radar.pipeline import retention
+    from wildlife_radar.storage.objects import open_store
+
+    url = args.lake_url or os.environ.get(LAKE_URL_ENV)
+    store = open_store(url) if url and not args.local_only else None
+    out = retention.prune(Path(args.lake), datetime.now(UTC), store=store, dry_run=args.dry_run)
+    print(json.dumps(out, indent=2))
+    return 0
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     """Run the job graph up to a target, skipping jobs whose inputs haven't changed."""
     from wildlife_radar.pipeline.runner import JOBS, context, run
@@ -831,6 +845,16 @@ def register(sub: argparse._SubParsersAction) -> None:
         help="with --push: delete remote snapshot files this lake no longer has (split tiles)",
     )
     p.set_defaults(func=cmd_lake_sync)
+
+    p = sub.add_parser(
+        "lake-prune", help="drop old coverage snapshots and live-log days (keeps the newest two)"
+    )
+    common(p)
+    p.add_argument("--lake", default="data/lake", help="lake root")
+    p.add_argument("--lake-url", help=f"also delete remotely (${LAKE_URL_ENV})")
+    p.add_argument("--local-only", action="store_true", help="don't touch object storage")
+    p.add_argument("--dry-run", action="store_true", help="list what would be deleted")
+    p.set_defaults(func=cmd_lake_prune)
 
     p = sub.add_parser("push-publish", help="upload the current published version")
     common(p)
