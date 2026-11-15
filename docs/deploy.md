@@ -106,9 +106,13 @@ to the publish bucket.
 Addresses: the app at `https://wildlifescanner.com` (Cloudflare Pages), the static products at
 `https://data.wildlifescanner.com` (the publish bucket's custom domain) and the API at
 `https://api.wildlifescanner.com` (fly.io). The Cloudflare zone, the publish bucket's public
-domain and CORS, and Pages are covered with the web app's setup. This section covers the R2
-tokens, the worker, the API and the first data, and assumes those Cloudflare steps are done
-up to "the app is live" (the worker checks the app's `compat.json` before publishing).
+domain and CORS, and Pages are in the web app's guide, [`web/DEPLOY.md`](../web/DEPLOY.md),
+which is the overall checklist and links back here. This section covers the R2 tokens, the
+worker, the API and the first data.
+
+Deploy the app (with its `compat.json`) before the worker's first publish: the worker only
+publishes a static format the live app lists, so until the app is up, its pushes wait and
+retry each tick.
 
 ### 1. Buckets and R2 tokens
 

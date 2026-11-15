@@ -9,7 +9,7 @@ primary_region = "lax"
 [env]
   AWS_REGION = "auto"
   WILDLIFE_SCANNER_PUBLISH_URL = "s3://wildlife-scanner-publish"
-  WILDLIFE_SCANNER_CORS_ORIGINS = "https://wildlifescanner.com"
+  WILDLIFE_SCANNER_CORS_ORIGINS = "https://wildlifescanner.com,https://www.wildlifescanner.com"
   WILDLIFE_SCANNER_SOURCE_URL = "https://github.com/alexngai/wildlife-scanner"   # AGPL §13
 
 [processes]
