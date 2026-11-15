@@ -1,4 +1,4 @@
-# Wildlife-radar: species observation and occurrence data sources (as of 2026-11-11)
+# Wildlife Scanner: species observation and occurrence data sources (as of 2026-11-11)
 
 **What I could and could not check.** In this session WebFetch could not reach `inaturalist.org` or `api.inaturalist.org` (DNS blocked by the network allowlist). Per the tool's instruction I stopped trying other hosts with WebFetch. The shared web-search budget then ran out near the end. So everything below comes from web search results (official pages where they showed up, otherwise forum posts or docs), plus prior knowledge where marked **UNVERIFIED**.
 
@@ -173,7 +173,7 @@ I could not pull live record counts, such as how many *Atractoscion nobilis* obs
    - **Effort-corrected baseline:** SBC MBON integrated fish, REEF, KFM and Reef Check for white seabass; EBD + SED zero-filled for birds.
    - **Live layer:** iNat v2 incremental pulls (`updated_since`, ≤30–60 req/min, cached) and the eBird API. Add landing-count data for white seabass if a partnership is secured.
 2. **Fit models on detection/non-detection data with effort**, not presence-only data. Use iNat/GBIF presences as a bias-corrected supplement, for example with a target-group background.
-3. **Decide early whether wildlife-radar is "commercial".** Any for-profit operator counts as commercial under the eBird terms, and iNat restricts commercial use and commercial AI training. If commercial, seek written permission from Cornell (eBird) and iNat, and pursue data-sharing agreements with REEF and Reef Check.
+3. **Decide early whether wildlife-scanner is "commercial".** Any for-profit operator counts as commercial under the eBird terms, and iNat restricts commercial use and commercial AI training. If commercial, seek written permission from Cornell (eBird) and iNat, and pursue data-sharing agreements with REEF and Reef Check.
 4. **Respect geoprivacy end to end.**
    - Drop or down-weight records that are obscured or have positional accuracy worse than about 1 km for fine-scale predictions.
    - Never try to de-obscure.

@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from wildlife_radar.core import (
+from wildlife_scanner.core import (
     STANDARD_METHODS,
     Effort,
     Observation,
@@ -14,9 +14,9 @@ from wildlife_radar.core import (
     TimeWindow,
     parse_license,
 )
-from wildlife_radar.core.geometry import PointFootprint
-from wildlife_radar.core.spatial import cell_for_point
-from wildlife_radar.core.taxa import slugify_name
+from wildlife_scanner.core.geometry import PointFootprint
+from wildlife_scanner.core.spatial import cell_for_point
+from wildlife_scanner.core.taxa import slugify_name
 
 T0 = datetime(2026, 1, 1, tzinfo=UTC)
 

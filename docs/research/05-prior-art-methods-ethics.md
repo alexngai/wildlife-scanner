@@ -1,4 +1,4 @@
-# wildlife-radar: prior art, modeling methodology, and ethics/legal constraints
+# wildlife-scanner: prior art, modeling methodology, and ethics/legal constraints
 
 **How this was checked.** I confirmed claims with WebSearch on 2026-11-11. WebFetch could not reach `www.birds.cornell.edu` or `help.inaturalist.org` because the session's network allowlist blocks them, so I never read the full eBird or iNaturalist terms. Those points come from search-result excerpts. The web-search budget shared across agents also ran out before I had finished, so some citations come from my own knowledge and are marked **UNVERIFIED**. Before anything ships, a person should read the eBird Data Access Terms and the iNaturalist Terms directly.
 
@@ -27,7 +27,7 @@
 
 ### Marine mammals and conservation: the best fusion systems that already exist
 
-- **Whale Safe** (UCSB Benioff Ocean Science Lab) covers the Santa Barbara Channel and San Francisco. It fuses acoustic detections, trusted-observer sightings and a daily blue-whale habitat model (10 km cells, scored 0–100% suitability, *not* presence) into a categorical Whale Presence Rating ([methodology](https://whalesafe.com/methodology/), [BOSL](https://bosl.ucsb.edu/project/whale-safe)). **This is the closest design template for wildlife-radar.**
+- **Whale Safe** (UCSB Benioff Ocean Science Lab) covers the Santa Barbara Channel and San Francisco. It fuses acoustic detections, trusted-observer sightings and a daily blue-whale habitat model (10 km cells, scored 0–100% suitability, *not* presence) into a categorical Whale Presence Rating ([methodology](https://whalesafe.com/methodology/), [BOSL](https://bosl.ucsb.edu/project/whale-safe)). **This is the closest design template for wildlife-scanner.**
 - **EcoCast** (NOAA/Hazen et al. 2018, *Science Advances*) produces daily satellite-driven predictions for swordfish and bycatch species, with weights managers can adjust, served through ERDDAP ([NOAA CoastWatch](https://coastwatch.noaa.gov/cwn/news/2019-02-15/ecocast-tool-help-fishers-minimize-bycatch-us-west-coast.html)).
 - **Whale Alert** (IFAW/Conserve.IO) combines sightings, acoustic and aerial data to warn ship operators away from whales ([IFAW](https://www.ifaw.org/uk/campaigns/whale-alert)). **Ocean Wise Whale Report** deliberately **delays recent sightings by 24 hours for mariners who are not authorized** ([appadvice](https://appadvice.com/app/whale-report/6654889441)), which is a mitigation pattern worth copying. "Ocean Alert": **UNVERIFIED** (not found).
 - **Happywhale** does photo-ID of individual animals. Its public data are mostly CC-BY-NC, and some data are open only to collaborators ([OBIS-SEAMAP record](https://seamap.env.duke.edu/dataset/1723/html)).

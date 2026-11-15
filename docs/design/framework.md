@@ -1,4 +1,4 @@
-# wildlife-radar — framework design (draft v0.1)
+# wildlife-scanner — framework design (draft v0.1)
 
 Status: **draft for discussion**. Builds on [`../research/00-synthesis.md`](../research/00-synthesis.md).
 
@@ -281,7 +281,7 @@ Wikipedia facts may be stored as structured fields with a revision-ID citation, 
 
 **Principle: generated metadata enters as weak priors and hypotheses, never as ground truth.** A profile's assumptions about how a species behaves only shape predictions until observed data overrides them. Every candidate signal is a hypothesis that the evaluation harness measures (§9).
 
-**Implementation (Phase 2).** `src/wildlife_radar/profilegen/` implements steps 1, 3–5 and 7–9; step 2 is the existing tier table (`policy/statuses.py`), now fed verified iNaturalist ids from the crosswalk. Drafts are written to `data/profiles/generated/` (git-ignored) and enter `profiles/species/` only through `profilegen promote`, which records the reviewer and locks the checked fields. Not yet done: taxonomic imputation (step 6), trait databases beyond TetrapodTraits, Plazi/BHL sources, cross-model agreement, and calibrating per-field acceptance thresholds on the overlap with trait databases. Findings from the first runs: [`../research/09-effort-models-and-profiles-2026-11.md`](../research/09-effort-models-and-profiles-2026-11.md).
+**Implementation (Phase 2).** `src/wildlife_scanner/profilegen/` implements steps 1, 3–5 and 7–9; step 2 is the existing tier table (`policy/statuses.py`), now fed verified iNaturalist ids from the crosswalk. Drafts are written to `data/profiles/generated/` (git-ignored) and enter `profiles/species/` only through `profilegen promote`, which records the reviewer and locks the checked fields. Not yet done: taxonomic imputation (step 6), trait databases beyond TetrapodTraits, Plazi/BHL sources, cross-model agreement, and calibrating per-field acceptance thresholds on the overlap with trait databases. Findings from the first runs: [`../research/09-effort-models-and-profiles-2026-11.md`](../research/09-effort-models-and-profiles-2026-11.md).
 
 ### 4.4 Community contributions
 Contributions are typed, versioned and reviewed, like pull requests:
@@ -429,7 +429,7 @@ There is also evidence that **hunting next to viewing areas reduces viewing**: v
 **Agency data is used as coarse priors, never redistributed at fine scale.**
 - Agencies publish carnivore locations for *conflict awareness*, coarsened or delayed. Examples: CDFW wolf territories; ODFW areas of known wolf activity; WDFW pack polygons via ArcGIS REST; Colorado's monthly watershed map.
 - Fine-scale feeds (e.g., CDFW's daily collared-wolf tracker for livestock producers) are not ingested for redistribution.
-- Wildlife-radar applies its own policy and does not rely on upstream obscuring. For example, Wildlife Insights fuzzes only IUCN CR/EN/VU species, so LC pumas and wolves may be exact upstream.
+- Wildlife Scanner applies its own policy and does not rely on upstream obscuring. For example, Wildlife Insights fuzzes only IUCN CR/EN/VU species, so LC pumas and wolves may be exact upstream.
 
 **Two product modes for these species:**
 
@@ -593,8 +593,8 @@ Policy is part of the framework, not a feature. All outputs (API, exports, tiles
 The layout as built in Phase 0 is a single package with subpackages. It can be split into separate distributions later if needed.
 
 ```
-wildlife-radar/
-  src/wildlife_radar/
+wildlife-scanner/
+  src/wildlife_scanner/
     core/          # entities & schemas, H3/time utils, licenses, methods (as-of semantics)
     connectors/    # one module per source: inaturalist, gbif, noaa_coops, astronomy
     signals/       # signal registry (DAG), as-of store, derived-signal helpers

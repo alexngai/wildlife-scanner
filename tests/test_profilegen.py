@@ -8,11 +8,11 @@ import httpx
 import pytest
 import yaml
 
-from wildlife_radar.baseline import build_baseline
-from wildlife_radar.connectors.base import RateLimiter, make_client
-from wildlife_radar.profilegen.candidates import Candidate, Rank
-from wildlife_radar.profilegen.draft import build_draft, load_doc, promote, write_draft
-from wildlife_radar.profilegen.extract import (
+from wildlife_scanner.baseline import build_baseline
+from wildlife_scanner.connectors.base import RateLimiter, make_client
+from wildlife_scanner.profilegen.candidates import Candidate, Rank
+from wildlife_scanner.profilegen.draft import build_draft, load_doc, promote, write_draft
+from wildlife_scanner.profilegen.extract import (
     EXTRACTION_FIELDS,
     ClaudeExtractor,
     RawExtraction,
@@ -21,21 +21,21 @@ from wildlife_radar.profilegen.extract import (
     output_schema,
     verify,
 )
-from wildlife_radar.profilegen.identity import IdentityResolver, TaxonIdentity
-from wildlife_radar.profilegen.occurrence import (
+from wildlife_scanner.profilegen.identity import IdentityResolver, TaxonIdentity
+from wildlife_scanner.profilegen.occurrence import (
     diel_candidates,
     seasonality,
     seasonality_candidates,
     solar_elevation,
 )
-from wildlife_radar.profilegen.pipeline import Generator
-from wildlife_radar.profilegen.reconcile import reconcile
-from wildlife_radar.profilegen.traits import TetrapodTraits, activity_from
-from wildlife_radar.profilegen.wikipedia import Article
-from wildlife_radar.profiles import ProfileLibrary
-from wildlife_radar.profiles.schema import Provenance
-from wildlife_radar.storage import ObservationStore
-from wildlife_radar.synthetic import SyntheticWorld
+from wildlife_scanner.profilegen.pipeline import Generator
+from wildlife_scanner.profilegen.reconcile import reconcile
+from wildlife_scanner.profilegen.traits import TetrapodTraits, activity_from
+from wildlife_scanner.profilegen.wikipedia import Article
+from wildlife_scanner.profiles import ProfileLibrary
+from wildlife_scanner.profiles.schema import Provenance
+from wildlife_scanner.storage import ObservationStore
+from wildlife_scanner.synthetic import SyntheticWorld
 
 FIXTURES = Path(__file__).parent / "fixtures"
 NOW = datetime(2026, 11, 11, tzinfo=UTC)
@@ -297,7 +297,7 @@ def fake_client(stop_reason, text):
 
 
 def test_claude_extractor_request_and_parsing(monkeypatch):
-    monkeypatch.delenv("WILDLIFE_RADAR_EXTRACTION_MODEL", raising=False)
+    monkeypatch.delenv("WILDLIFE_SCANNER_EXTRACTION_MODEL", raising=False)
     with pytest.raises(ValueError):
         ClaudeExtractor()
     payload = {name: {"stated": False, "value": None, "evidence": ""} for name in EXTRACTION_FIELDS}
@@ -573,8 +573,8 @@ def test_generator_end_to_end(tmp_path, synthetic_store):
 
 
 def test_bulk_crosswalk_asks_wikidata_first_and_feeds_tiers(synthetic_store):
-    from wildlife_radar.policy.statuses import StatusLookup, build_tier_table
-    from wildlife_radar.profilegen.identity import save_identities
+    from wildlife_scanner.policy.statuses import StatusLookup, build_tier_table
+    from wildlife_scanner.profilegen.identity import save_identities
 
     calls = {"gbif": 0}
 
@@ -628,7 +628,7 @@ def test_bulk_crosswalk_asks_wikidata_first_and_feeds_tiers(synthetic_store):
 
 
 def test_same_epithet_tolerates_gender_agreement():
-    from wildlife_radar.profilegen.identity import same_epithet
+    from wildlife_scanner.profilegen.identity import same_epithet
 
     assert same_epithet("paxillifer", "paxillifera")
     assert same_epithet("cinereus", "cinerea")
@@ -692,10 +692,10 @@ def test_inat_search_and_wikidata_synonyms():
 def test_renamed_species_merge_through_aliases():
     import json as _json
 
-    from wildlife_radar.policy.statuses import TierService, observed_geoprivacy
-    from wildlife_radar.regions import load_region
-    from wildlife_radar.serving import BaselineQueries
-    from wildlife_radar.storage.aliases import build_alias_table
+    from wildlife_scanner.policy.statuses import TierService, observed_geoprivacy
+    from wildlife_scanner.regions import load_region
+    from wildlife_scanner.serving import BaselineQueries
+    from wildlife_scanner.storage.aliases import build_alias_table
 
     world = SyntheticWorld()
     store = ObservationStore()
@@ -729,7 +729,7 @@ def test_renamed_species_merge_through_aliases():
     # The alias's obscured record protects the merged concept.
     assert observed_geoprivacy(conn)["vernalis-litoralis"] == "obscured"
     build_tier_table_args = {"region_id": "socal", "scopes": ["global"]}
-    from wildlife_radar.policy.statuses import StaticStatusProvider, build_tier_table
+    from wildlife_scanner.policy.statuses import StaticStatusProvider, build_tier_table
 
     decisions = build_tier_table(conn, providers=[StaticStatusProvider()], **build_tier_table_args)
     assert decisions["vernalis-litoralis"].tier >= 2
@@ -739,7 +739,7 @@ def test_renamed_species_merge_through_aliases():
 
 
 def test_extraction_calibration_against_measured_traits(tmp_path):
-    from wildlife_radar.profilegen.calibrate import (
+    from wildlife_scanner.profilegen.calibrate import (
         load_accuracy,
         report,
         run_calibration,

@@ -3,14 +3,14 @@ from datetime import UTC, date, datetime, timedelta
 import httpx
 import pytest
 
-from wildlife_radar.baseline import build_baseline
-from wildlife_radar.connectors.base import RateLimiter, make_client
-from wildlife_radar.connectors.inaturalist_taxa import (
+from wildlife_scanner.baseline import build_baseline
+from wildlife_scanner.connectors.base import RateLimiter, make_client
+from wildlife_scanner.connectors.inaturalist_taxa import (
     InatTaxonStatusProvider,
     parse_taxon_statuses,
 )
-from wildlife_radar.policy import ConservationStatus, PolicyTier
-from wildlife_radar.policy.statuses import (
+from wildlife_scanner.policy import ConservationStatus, PolicyTier
+from wildlife_scanner.policy.statuses import (
     CachedStatusProvider,
     RegionStatusFile,
     StaticStatusProvider,
@@ -20,10 +20,10 @@ from wildlife_radar.policy.statuses import (
     build_tier_table,
     most_severe_geoprivacy,
 )
-from wildlife_radar.profiles import ProfileLibrary
-from wildlife_radar.regions import load_region, region_dir
-from wildlife_radar.storage import ObservationStore
-from wildlife_radar.synthetic import SyntheticWorld
+from wildlife_scanner.profiles import ProfileLibrary
+from wildlife_scanner.regions import load_region, region_dir
+from wildlife_scanner.storage import ObservationStore
+from wildlife_scanner.synthetic import SyntheticWorld
 
 NOW = datetime(2026, 11, 11, tzinfo=UTC)
 SCOPES = ["global", "us", "us-ca"]
@@ -150,7 +150,7 @@ def test_parse_inat_statuses():
 
 
 def test_status_scope_direction():
-    from wildlife_radar.connectors.inaturalist_taxa import status_scope
+    from wildlife_scanner.connectors.inaturalist_taxa import status_scope
 
     scopes = {"1": "us", "14": "us-ca"}
     michigan = {"id": 29, "ancestor_place_ids": [97394, 1, 29]}
@@ -214,10 +214,10 @@ def test_curated_statuses_match_crosswalk_aliases(tmp_path):
     # A curated entry keyed by an older name still applies after a rename (via the crosswalk).
     import json as _json
 
-    from wildlife_radar.baseline import build_baseline
-    from wildlife_radar.policy.statuses import RegionStatusFile, build_tier_table
-    from wildlife_radar.storage import ObservationStore
-    from wildlife_radar.synthetic import SyntheticWorld
+    from wildlife_scanner.baseline import build_baseline
+    from wildlife_scanner.policy.statuses import RegionStatusFile, build_tier_table
+    from wildlife_scanner.storage import ObservationStore
+    from wildlife_scanner.synthetic import SyntheticWorld
 
     world = SyntheticWorld()
     store = ObservationStore()
@@ -255,8 +255,8 @@ def test_curated_statuses_match_crosswalk_aliases(tmp_path):
 
 
 def test_natureserve_ranks_reach_tier_assignment():
-    from wildlife_radar.connectors.inaturalist_taxa import parse_taxon_statuses
-    from wildlife_radar.policy.assign import SensitivityInputs, assign_tier
+    from wildlife_scanner.connectors.inaturalist_taxa import parse_taxon_statuses
+    from wildlife_scanner.policy.assign import SensitivityInputs, assign_tier
 
     taxon = {
         "conservation_statuses": [

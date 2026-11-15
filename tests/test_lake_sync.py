@@ -9,10 +9,10 @@ import duckdb
 import httpx
 import pytest
 
-from wildlife_radar.pipeline import coverage
-from wildlife_radar.pipeline.sync import lake_files, sync_lake
-from wildlife_radar.storage import objects
-from wildlife_radar.storage.objects import LocalStore, R2RestStore, open_store
+from wildlife_scanner.pipeline import coverage
+from wildlife_scanner.pipeline.sync import lake_files, sync_lake
+from wildlife_scanner.storage import objects
+from wildlife_scanner.storage.objects import LocalStore, R2RestStore, open_store
 
 PREFIX = "/client/v4/accounts/acct/r2/buckets/lake-bucket/objects"
 
@@ -191,7 +191,7 @@ def test_split_large_tiles_keeps_every_row(tmp_path):
 def test_retention_keeps_two_snapshots_and_recent_live_days(tmp_path):
     from datetime import UTC, datetime
 
-    from wildlife_radar.pipeline import livelog, retention
+    from wildlife_scanner.pipeline import livelog, retention
 
     lake = tmp_path / "lake"
     for d in ("2026-08-01", "2026-09-01", "2026-10-01", "2026-11-01"):

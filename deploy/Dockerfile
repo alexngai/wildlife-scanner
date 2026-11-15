@@ -1,5 +1,5 @@
 # One image for the API and the scheduled worker (docs/deploy.md).
-# Build from the repository root: docker build -f deploy/Dockerfile -t wildlife-radar .
+# Build from the repository root: docker build -f deploy/Dockerfile -t wildlife-scanner .
 FROM python:3.13-slim
 
 RUN pip install --no-cache-dir uv==0.11.32
@@ -28,4 +28,4 @@ COPY deploy/entrypoint.sh /usr/local/bin/entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 EXPOSE 8080
-CMD ["wildlife-radar", "serve", "--host", "0.0.0.0", "--port", "8080", "--cache-dir", "/tmp/bundles"]
+CMD ["wildlife-scanner", "serve", "--host", "0.0.0.0", "--port", "8080", "--cache-dir", "/tmp/bundles"]

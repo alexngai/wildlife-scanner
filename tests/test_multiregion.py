@@ -7,18 +7,18 @@ from datetime import UTC, datetime
 
 import pytest
 
-from wildlife_radar.baseline import build_baseline
-from wildlife_radar.pipeline.publish import publish_bundle
-from wildlife_radar.policy.statuses import StaticStatusProvider, build_tier_table
-from wildlife_radar.regions import load_region
-from wildlife_radar.storage import ObservationStore
-from wildlife_radar.synthetic import SyntheticSpecies, SyntheticWorld
+from wildlife_scanner.baseline import build_baseline
+from wildlife_scanner.pipeline.publish import publish_bundle
+from wildlife_scanner.policy.statuses import StaticStatusProvider, build_tier_table
+from wildlife_scanner.regions import load_region
+from wildlife_scanner.storage import ObservationStore
+from wildlife_scanner.synthetic import SyntheticSpecies, SyntheticWorld
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     from fastapi.testclient import TestClient
 
-from wildlife_radar.api import create_app  # noqa: E402
+from wildlife_scanner.api import create_app  # noqa: E402
 
 NOW = datetime(2026, 1, 20, tzinfo=UTC)
 MONTEREY = (36.62, -121.90)

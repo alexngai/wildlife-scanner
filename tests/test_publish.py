@@ -5,24 +5,24 @@ from datetime import UTC, datetime
 import duckdb
 import pytest
 
-from wildlife_radar.baseline import build_baseline
-from wildlife_radar.pipeline.publish import (
+from wildlife_scanner.baseline import build_baseline
+from wildlife_scanner.pipeline.publish import (
     CURRENT,
     PublishBlocked,
     current_bundle,
     publish_bundle,
 )
-from wildlife_radar.policy import ConservationStatus
-from wildlife_radar.policy.statuses import StaticStatusProvider, StatusLookup, build_tier_table
-from wildlife_radar.regions import load_region
-from wildlife_radar.storage import ObservationStore
-from wildlife_radar.synthetic import DEFAULT_SPECIES, SyntheticSpecies, SyntheticWorld
+from wildlife_scanner.policy import ConservationStatus
+from wildlife_scanner.policy.statuses import StaticStatusProvider, StatusLookup, build_tier_table
+from wildlife_scanner.regions import load_region
+from wildlife_scanner.storage import ObservationStore
+from wildlife_scanner.synthetic import DEFAULT_SPECIES, SyntheticSpecies, SyntheticWorld
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     from fastapi.testclient import TestClient
 
-from wildlife_radar.api import create_app  # noqa: E402
+from wildlife_scanner.api import create_app  # noqa: E402
 
 SECRET = SyntheticSpecies(name="Secretus maximus", centers=((32.86, -117.25, 6.0),), base=0.3)
 NOW = datetime(2026, 1, 20, tzinfo=UTC)  # recent records exist before this date

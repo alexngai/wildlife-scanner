@@ -3,8 +3,8 @@ import math
 import h3
 import pytest
 
-from wildlife_radar.core import spatial
-from wildlife_radar.core.geometry import (
+from wildlife_scanner.core import spatial
+from wildlife_scanner.core.geometry import (
     CellsFootprint,
     PointFootprint,
     PolygonFootprint,

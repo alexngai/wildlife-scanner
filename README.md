@@ -1,4 +1,4 @@
-# wildlife-radar
+# wildlife-scanner
 
 An online resource to help people find wildlife. It fuses several data sources into predictions of when and where a species is likely to be:
 
@@ -46,15 +46,15 @@ uv run ruff check . && uv run ruff format --check .
 This builds a synthetic demo database and serves it:
 
 ```bash
-uv run wildlife-radar demo
+uv run wildlife-scanner demo
 ```
 
 ```bash
-uv run wildlife-radar query place --db data/demo.duckdb --lat 32.85 --lon -117.27 --date 2026-05-15
+uv run wildlife-scanner query place --db data/demo.duckdb --lat 32.85 --lon -117.27 --date 2026-05-15
 ```
 
 ```bash
-uv run wildlife-radar serve --db data/demo.duckdb
+uv run wildlife-scanner serve --db data/demo.duckdb
 ```
 
 Then open `http://127.0.0.1:8000/docs`.
@@ -66,61 +66,61 @@ Data goes in `data/`, which git ignores:
 1. Ingest the GBIF monthly snapshot (AWS open data, needs DuckDB's `httpfs` extension), keeping only records inside the region:
 
    ```bash
-   uv run wildlife-radar ingest-snapshot --region socal --snapshot-date 2026-11-01
+   uv run wildlife-scanner ingest-snapshot --region socal --snapshot-date 2026-11-01
    ```
 
 2. Build the Level-0 baseline and backtest it against a range-only map:
 
    ```bash
-   uv run wildlife-radar build-baseline --region socal
+   uv run wildlife-scanner build-baseline --region socal
    ```
 
    ```bash
-   uv run wildlife-radar evaluate-baseline --region socal --split 2025-01-01
+   uv run wildlife-scanner evaluate-baseline --region socal --split 2025-01-01
    ```
 
 3. Look up conservation statuses and assign sensitivity tiers. Without a completed lookup, taxa fail closed to awareness-only:
 
    ```bash
-   uv run wildlife-radar build-tiers --region socal
+   uv run wildlife-scanner build-tiers --region socal
    ```
 
 4. Query or serve:
 
    ```bash
-   uv run wildlife-radar query taxa
+   uv run wildlife-scanner query taxa
    ```
 
    ```bash
-   uv run wildlife-radar serve
+   uv run wildlife-scanner serve
    ```
 
 5. Generate draft species profiles (written to `data/profiles/generated/`). Download [TetrapodTraits](https://zenodo.org/records/11303604) into `data/` first if you want trait values:
 
    ```bash
-   uv run wildlife-radar profilegen generate "Puma concolor" "Limosa fedoa" --traits data/traits/TetrapodTraits_1.0.0.csv --db data/wildlife-radar.duckdb --region socal
+   uv run wildlife-scanner profilegen generate "Puma concolor" "Limosa fedoa" --traits data/traits/TetrapodTraits_1.0.0.csv --db data/wildlife-scanner.duckdb --region socal
    ```
 
    To resolve every baseline taxon (verified iNaturalist ids make `build-tiers` faster and robust to renamed taxa), run this before step 3:
 
    ```bash
-   uv run wildlife-radar profilegen crosswalk --db data/wildlife-radar.duckdb --region-id socal
+   uv run wildlife-scanner profilegen crosswalk --db data/wildlife-scanner.duckdb --region-id socal
    ```
 
-   LLM extraction from Wikipedia (`--extract`) needs the `llm` extra (`uv sync --extra llm`), an Anthropic API key, an extraction model (`--model` or `WILDLIFE_RADAR_EXTRACTION_MODEL`), and a User-Agent with your contact details (Wikimedia policy). See [`profiles/README.md`](profiles/README.md) for review and promotion.
+   LLM extraction from Wikipedia (`--extract`) needs the `llm` extra (`uv sync --extra llm`), an Anthropic API key, an extraction model (`--model` or `WILDLIFE_SCANNER_EXTRACTION_MODEL`), and a User-Agent with your contact details (Wikimedia policy). See [`profiles/README.md`](profiles/README.md) for review and promotion.
 
 6. Phase 3, conditions and live signals. Download daily station signals (NOAA CO-OPS water/air temperature, wind, tides), then fit Level 1 (conditions) and Level 2 (recent sightings) for species profiles. Each level must beat the one below in a backtest:
 
    ```bash
-   uv run wildlife-radar fetch-signals --region socal --start 2010-01-01
+   uv run wildlife-scanner fetch-signals --region socal --start 2010-01-01
    ```
 
    ```bash
-   uv run wildlife-radar fit-conditions --region socal --split 2023-01-01 --since-year 2010
+   uv run wildlife-scanner fit-conditions --region socal --split 2023-01-01 --since-year 2010
    ```
 
    ```bash
-   uv run wildlife-radar scorecard --region socal
+   uv run wildlife-scanner scorecard --region socal
    ```
 
    The scorecard reports, for each condition term, whether it improves held-out predictions (supported, contradicted or inconclusive). `serve` then answers `/species/{id}/forecast?place_id=…&date=…` at the highest level that passed its gate, with each term's contribution.
@@ -130,7 +130,7 @@ Data goes in `data/`, which git ignores:
 7. Before publishing, check the tiers against every status signal in the store. The command exits non-zero on high-severity findings:
 
    ```bash
-   uv run wildlife-radar audit-tiers --region socal
+   uv run wildlife-scanner audit-tiers --region socal
    ```
 
 Data repairs: `repair-dates` re-dates records a dataset stamped with a placeholder date, using the date in their event ids (see `regions/california/datasets.yaml`).
@@ -140,17 +140,17 @@ Data repairs: `repair-dates` re-dates records a dataset stamped with a placehold
 After the first snapshot ingest, the steps above form a job graph ([`docs/design/data-platform.md`](docs/design/data-platform.md)). `run` brings a target up to date and skips every job whose inputs haven't changed. Each job records a manifest under `data/lake/manifests/`:
 
 ```bash
-uv run wildlife-radar run list
+uv run wildlife-scanner run list
 ```
 
 ```bash
-uv run wildlife-radar run publish --region socal
+uv run wildlife-scanner run publish --region socal
 ```
 
 `publish` writes a policy-filtered, read-only serving bundle per region, and only if the tier audit has no high-severity findings. The API serves the current bundle and switches to new ones as they are published, so rebuilds never block it:
 
 ```bash
-uv run wildlife-radar serve --region socal --bundle-dir data/lake/publish
+uv run wildlife-scanner serve --region socal --bundle-dir data/lake/publish
 ```
 
 Scheduled every 30 minutes, `run publish` refreshes recent iNaturalist records (the `live` job) and republishes. Signals refresh daily, and baselines, tiers and condition models monthly.
@@ -158,26 +158,26 @@ Scheduled every 30 minutes, `run publish` refreshes recent iNaturalist records (
 Other commands work without a database:
 
 ```bash
-uv run wildlife-radar astro --lat 32.8505 --lon -117.272 --date 2026-11-15 --utc-offset -8
+uv run wildlife-scanner astro --lat 32.8505 --lon -117.272 --date 2026-11-15 --utc-offset -8
 ```
 
 ```bash
-uv run wildlife-radar profiles tier atractoscion-nobilis --region socal --date 2026-05-01
+uv run wildlife-scanner profiles tier atractoscion-nobilis --region socal --date 2026-05-01
 ```
 
 ```bash
-uv run wildlife-radar tides --station 9410230 --start 2026-11-15 --days 2
+uv run wildlife-scanner tides --station 9410230 --start 2026-11-15 --days 2
 ```
 
 Where things live:
-- `src/wildlife_radar/`: the package. Its layout is in [`docs/design/framework.md`](docs/design/framework.md) §11.
+- `src/wildlife_scanner/`: the package. Its layout is in [`docs/design/framework.md`](docs/design/framework.md) §11.
 - `profiles/`: species profiles and guild templates (drafts). See [`profiles/README.md`](profiles/README.md).
 - `regions/socal/`: the first region pack (places, status scopes, curated statuses).
 - [`DATA_SOURCES.md`](DATA_SOURCES.md): the sources each connector uses and their terms.
 
 ## License
 
-wildlife-radar is an exclusively **non-commercial**, free, educational project.
+wildlife-scanner is an exclusively **non-commercial**, free, educational project.
 
 - **Code:** [GNU AGPL-3.0](LICENSE). If you run a modified version as a network service, you must offer its source to your users.
 - **Third-party data:** not included in this repository. Each source keeps its own license and terms; many are non-commercial. Anyone running this code is responsible for complying with them. See [`docs/design/licensing.md`](docs/design/licensing.md).

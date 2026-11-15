@@ -1,6 +1,6 @@
 import json
 
-from wildlife_radar.cli import main
+from wildlife_scanner.cli import main
 
 
 def test_demo_and_queries(tmp_path, capsys):

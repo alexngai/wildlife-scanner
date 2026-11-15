@@ -8,11 +8,11 @@ from datetime import UTC, datetime
 import h3
 from test_publish import NOW, store  # noqa: F401  (fixture)
 
-from wildlife_radar.pipeline.publish import publish_bundle
-from wildlife_radar.pipeline.static import before_swap, in_use, referenced
-from wildlife_radar.pipeline.sync import prune_local, push_publish
-from wildlife_radar.policy.tiers import rule_for
-from wildlife_radar.storage.objects import LocalStore
+from wildlife_scanner.pipeline.publish import publish_bundle
+from wildlife_scanner.pipeline.static import before_swap, in_use, referenced
+from wildlife_scanner.pipeline.sync import prune_local, push_publish
+from wildlife_scanner.policy.tiers import rule_for
+from wildlife_scanner.storage.objects import LocalStore
 
 
 def _publish(st, region, root, now=NOW):
@@ -48,7 +48,7 @@ def _photo(pid, license_code):
 
 
 def test_static_products_follow_policy(store, tmp_path):  # noqa: F811
-    from wildlife_radar.connectors.inaturalist_taxa import RECORDS_SCHEMA
+    from wildlife_scanner.connectors.inaturalist_taxa import RECORDS_SCHEMA
 
     st, region = store
     st.conn.execute(RECORDS_SCHEMA)
@@ -164,7 +164,7 @@ def test_unchanged_inputs_reuse_files_and_push_only_new_ones(store, tmp_path):  
 
 
 def test_display_common_names():
-    from wildlife_radar.core.names import display_common_name as d
+    from wildlife_scanner.core.names import display_common_name as d
 
     assert d("coyote brush") == "Coyote Brush"
     assert d("bird's-foot trefoil") == "Bird's-foot Trefoil"
@@ -175,8 +175,8 @@ def test_display_common_names():
 
 
 def test_batched_maps_equal_single_maps(store):  # noqa: F811
-    from wildlife_radar.policy.statuses import TierService
-    from wildlife_radar.serving.queries import BaselineQueries
+    from wildlife_scanner.policy.statuses import TierService
+    from wildlife_scanner.serving.queries import BaselineQueries
 
     st, region = store
     q = BaselineQueries(st.conn, region, TierService(st.conn, "socal"))
@@ -191,8 +191,8 @@ def test_batched_maps_equal_single_maps(store):  # noqa: F811
 
 def test_matrix_maps_equal_the_policy_filtered_maps(store):  # noqa: F811
     """The vectorized matrices carry exactly what species_maps (EgressFilter) returns."""
-    from wildlife_radar.policy.statuses import TierService
-    from wildlife_radar.serving.queries import BaselineQueries
+    from wildlife_scanner.policy.statuses import TierService
+    from wildlife_scanner.serving.queries import BaselineQueries
 
     st, region = store
     q = BaselineQueries(st.conn, region, TierService(st.conn, "socal"))
@@ -221,7 +221,7 @@ def test_matrix_maps_equal_the_policy_filtered_maps(store):  # noqa: F811
 
 
 def test_compact_photo_needs_a_url_that_fits_the_template():
-    from wildlife_radar.pipeline.static import compact_photo
+    from wildlife_scanner.pipeline.static import compact_photo
 
     base = "https://inaturalist-open-data.s3.amazonaws.com/photos/41"
     full = {

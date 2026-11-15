@@ -21,7 +21,7 @@ fields they don't know.
 
 What the frontend reads from the CDN. Everything here is already policy-filtered: withheld taxa
 are absent, sensitive taxa appear only at their tier's resolution and time granularity, and
-there are no individual records. Built by `publish` (`src/wildlife_radar/pipeline/static.py`).
+there are no individual records. Built by `publish` (`src/wildlife_scanner/pipeline/static.py`).
 
 ## Finding the files
 

@@ -1,4 +1,4 @@
-# Wildlife-radar: birding data sources and predictive signals
+# Wildlife Scanner: birding data sources and predictive signals
 
 **How this was checked.** Most official sites were unreachable for direct fetch in this session: science.ebird.org, birds.cornell.edu, ebird.github.io, CRAN, the eBird Postman docs and app.birdweather.com all failed. github.com worked. Web search worked until the shared 200-search budget ran out partway through. Facts confirmed in this session have a source URL next to them. Anything marked **UNVERIFIED** comes from memory and should be re-checked once those hosts are allowed.
 

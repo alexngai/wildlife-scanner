@@ -6,10 +6,10 @@ from datetime import UTC, datetime, timedelta
 
 import duckdb
 
-from wildlife_radar.connectors.inaturalist_taxa import InatTaxonStatusProvider, RecordCache
-from wildlife_radar.policy.statuses import TaxonInfo
-from wildlife_radar.profilegen.identity import IDENTITY_SCHEMA
-from wildlife_radar.storage.refstore import RefStore
+from wildlife_scanner.connectors.inaturalist_taxa import InatTaxonStatusProvider, RecordCache
+from wildlife_scanner.policy.statuses import TaxonInfo
+from wildlife_scanner.profilegen.identity import IDENTITY_SCHEMA
+from wildlife_scanner.storage.refstore import RefStore
 
 T0 = datetime(2026, 11, 1, tzinfo=UTC)
 

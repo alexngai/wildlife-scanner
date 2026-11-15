@@ -81,8 +81,8 @@ Authorities disagree on names: the GBIF backbone and base Catalogue of Life acce
 
 Two things block a live run from this environment, and both are operator settings:
 
-- **Wikipedia requires a contact in the User-Agent** (Wikimedia robot policy); the default `wildlife-radar/<version>` is refused with HTTP 403. Set `WILDLIFE_RADAR_USER_AGENT`.
-- **An Anthropic API key and an extraction model** (`--model` or `WILDLIFE_RADAR_EXTRACTION_MODEL`).
+- **Wikipedia requires a contact in the User-Agent** (Wikimedia robot policy); the default `wildlife-scanner/<version>` is refused with HTTP 403. Set `WILDLIFE_SCANNER_USER_AGENT`.
+- **An Anthropic API key and an extraction model** (`--model` or `WILDLIFE_SCANNER_EXTRACTION_MODEL`).
 
 The next step is to measure per-field accuracy on the overlap with TetrapodTraits and set acceptance thresholds from it (framework.md §4.3 step 5).
 

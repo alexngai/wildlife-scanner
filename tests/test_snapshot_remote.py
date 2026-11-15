@@ -8,12 +8,12 @@ import httpx
 import pytest
 from test_storage import _write_snapshot
 
-from wildlife_radar.connectors import gbif_snapshot_remote as remote
-from wildlife_radar.pipeline import runner
-from wildlife_radar.pipeline.runner import Job, JobContext, latest, run
-from wildlife_radar.regions import load_region
-from wildlife_radar.storage import ObservationStore
-from wildlife_radar.synthetic import SyntheticWorld
+from wildlife_scanner.connectors import gbif_snapshot_remote as remote
+from wildlife_scanner.pipeline import runner
+from wildlife_scanner.pipeline.runner import Job, JobContext, latest, run
+from wildlife_scanner.regions import load_region
+from wildlife_scanner.storage import ObservationStore
+from wildlife_scanner.synthetic import SyntheticWorld
 
 SOCAL = (-121.0, 32.4, -114.1, 35.8)
 
@@ -148,7 +148,7 @@ def test_snapshot_job_without_ingest_registers_store(tmp_path):
 def test_coverage_snapshot_tiles_delta_and_reconciliation(tmp_path, monkeypatch):
     import duckdb
 
-    from wildlife_radar.pipeline import coverage
+    from wildlife_scanner.pipeline import coverage
 
     oct_file, nov_file = tmp_path / "oct.parquet", tmp_path / "nov.parquet"
     _write_snapshot(oct_file)

@@ -5,7 +5,7 @@ usage: ingest_parallel.py db staging_dir lon_min lat_min lon_max lat_max [worker
 
 import sys
 
-from wildlife_radar.connectors.gbif_snapshot_remote import ingest_staged
+from wildlife_scanner.connectors.gbif_snapshot_remote import ingest_staged
 
 if __name__ == "__main__":
     bbox = tuple(map(float, sys.argv[3:7]))

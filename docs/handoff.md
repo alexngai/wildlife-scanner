@@ -4,7 +4,7 @@ For the next working session. Start here, then read the files it points to.
 
 ## 1. Where things stand
 
-- **Branch** `claude/brave-newton-ui859d`. **PR** [#1](https://github.com/alexngai/wildlife-radar/pull/1) was merged on 2026-11-13 (up to `534b5d3`). `main` has since been merged back into the branch without rewriting it. Later commits (deploy, Monterey Bay, static format 2, hourly factors, …) are not on `main` yet; open a new PR only when the owner asks.
+- **Branch** `claude/brave-newton-ui859d`. **PR** [#1](https://github.com/alexngai/wildlife-scanner/pull/1) was merged on 2026-11-13 (up to `534b5d3`). `main` has since been merged back into the branch without rewriting it. Later commits (deploy, Monterey Bay, static format 2, hourly factors, …) are not on `main` yet; open a new PR only when the owner asks.
 - **Web app:** a parallel session builds it on `claude/web-app` (React + Vite + TypeScript, MapLibre). It owns `web/` and `.github/workflows/web.yml`; don't edit them. Its change requests go in `web/NEEDS.md` on that branch.
 - **Contracts:** `docs/design/static-products.md` (static formats, with a changelog; bump `format` for breaking changes) and the API's `/openapi.json`.
 - **Done:**
@@ -24,15 +24,15 @@ For the next working session. Start here, then read the files it points to.
 - **Multi-region** from the start.
 - **Takedowns:** less stringent for now (handled at the next full rebuild).
 - **Data partners:** eBird/Cornell and IUCN partnerships are on hold. eBird data comes only via the GBIF EOD dataset (CC BY 4.0).
-- **Privacy:** never put the owner's name, email or other personal details into requests to outside services. The default User-Agent is `wildlife-radar/<version>` with no contact. Operators set `WILDLIFE_RADAR_USER_AGENT`.
+- **Privacy:** never put the owner's name, email or other personal details into requests to outside services. The default User-Agent is `wildlife-scanner/<version>` with no contact. Operators set `WILDLIFE_SCANNER_USER_AGENT`.
 - **No third-party data in the repository.** Data, caches, drafts and audit files go in the git-ignored `data/`.
 - **Sensitive species:** never publish fine-scale details. Tier assignment fails closed, and LLMs never set or lower statuses or tiers.
-- **Git:** develop on the branch above. **Don't open PRs unless asked.** Commit messages end with the session attribution lines. No model identifiers in commits, code or docs: the extraction model is configured at runtime (`--model` or `WILDLIFE_RADAR_EXTRACTION_MODEL`).
+- **Git:** develop on the branch above. **Don't open PRs unless asked.** Commit messages end with the session attribution lines. No model identifiers in commits, code or docs: the extraction model is configured at runtime (`--model` or `WILDLIFE_SCANNER_EXTRACTION_MODEL`).
 
 ## 3. Environment
 
 - **Before running uv:** `export UV_SYSTEM_CERTS=1; unset UV_NATIVE_TLS`, then `uv sync --all-extras`.
-- **The `wildlife-radar` cloud environment allows these hosts:**
+- **The `wildlife-scanner` cloud environment allows these hosts:**
   - Wikidata (`www.wikidata.org`, `query.wikidata.org`)
   - `en.wikipedia.org` (but see §4.3)
   - `api.inaturalist.org`, `api.gbif.org`
@@ -48,8 +48,8 @@ For the next working session. Start here, then read the files it points to.
 Data doesn't survive between sessions. To rebuild it (about 1.5 h, mostly downloads):
 
 ```bash
-uv run wildlife-radar run publish --region sandiego --db data/sd.duckdb --lake data/lake --ingest-snapshots
-uv run wildlife-radar serve --region sandiego --bundle-dir data/lake/publish
+uv run wildlife-scanner run publish --region sandiego --db data/sd.duckdb --lake data/lake --ingest-snapshots
+uv run wildlife-scanner serve --region sandiego --bundle-dir data/lake/publish
 ```
 
 - `--ingest-snapshots` makes the `snapshot` job find the newest complete monthly GBIF snapshot, extract the region with HTTPS range requests and ingest it (~45 min for San Diego; staging goes under `data/lake/raw/` and is deleted afterwards unless `--keep-staging`). Pin a snapshot with `--snapshot-date 2026-11-01`. The step-by-step scripts in `tools/` still work.

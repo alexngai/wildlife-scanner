@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 import h3
 import pytest
 
-from wildlife_radar.core import (
+from wildlife_scanner.core import (
     CellsFootprint,
     Observation,
     Outcome,
@@ -14,10 +14,10 @@ from wildlife_radar.core import (
     TimeWindow,
     parse_license,
 )
-from wildlife_radar.core.spatial import cell_for_point
-from wildlife_radar.core.time import Precision
-from wildlife_radar.models import NOWCAST, logit, sigmoid
-from wildlife_radar.policy import EgressFilter, PolicyTier, allowed_in_place_first_special
+from wildlife_scanner.core.spatial import cell_for_point
+from wildlife_scanner.core.time import Precision
+from wildlife_scanner.models import NOWCAST, logit, sigmoid
+from wildlife_scanner.policy import EgressFilter, PolicyTier, allowed_in_place_first_special
 
 NOW = datetime(2026, 11, 11, tzinfo=UTC)
 TIERS = {

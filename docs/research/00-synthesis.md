@@ -1,4 +1,4 @@
-# wildlife-radar — research synthesis (2026-11-11)
+# wildlife-scanner — research synthesis (2026-11-11)
 
 This summarizes five parallel research reports (files `01`–`05` in this folder). Those reports were written by AI research agents using web search. Network limits in the research session blocked direct reads of several key pages (eBird and iNaturalist terms, iNaturalist API, NOAA tides API). Claims marked **UNVERIFIED** in the source reports must be checked before anyone builds on them. Licensing items especially need a human read of the actual terms.
 

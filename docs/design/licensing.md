@@ -1,6 +1,6 @@
 # Licensing posture
 
-**Decision (2026-11-11):** wildlife-radar is **exclusively non-commercial**.
+**Decision (2026-11-11):** wildlife-scanner is **exclusively non-commercial**.
 - It is a free, educational service.
 - No monetization of any kind: no ads, paid tiers, affiliate or referral links, or commercial sponsorship of features.
 - It is not operated by or on behalf of a for-profit entity. **The operator is the project founder, as an individual.** It may move to a fiscal sponsor or nonprofit later, e.g., to accept grants.

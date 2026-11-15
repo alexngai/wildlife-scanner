@@ -43,7 +43,7 @@ public never sees its daily forecasts. Day-level products are for OPEN taxa only
 - **Marbled godwits:** days with *higher* lowest tides have slightly more records. A plausible reading is that birds crowd onto fewer exposed flats and roosts near observers. The effect is tiny either way.
 - **Recent sightings matter most for flocking birds:** a godwit flock seen nearby in the last two weeks predicts the next checklist far better than tides do.
 - **The scorecard works as intended.** It caught two hypotheses whose fitted direction contradicts the profile: those terms improve predictions, but not for the reason the profile gave.
-- **Follow-up (2026-11-12):** both profiles now claim no daily direction for those terms (leopard shark `sst`, marbled godwit `tide_daily_low`). The terms stay hypotheses, and the provenance points here. The scorecard now stores a `review` reason whenever a fitted direction contradicts the profile or a term makes held-out predictions worse; `wildlife-radar scorecard --review` lists them.
+- **Follow-up (2026-11-12):** both profiles now claim no daily direction for those terms (leopard shark `sst`, marbled godwit `tide_daily_low`). The terms stay hypotheses, and the provenance points here. The scorecard now stores a `review` reason whenever a fitted direction contradicts the profile or a term makes held-out predictions worse; `wildlife-scanner scorecard --review` lists them.
 
 ### Three gate fixes from the real data
 
@@ -53,7 +53,7 @@ public never sees its daily forecasts. Day-level products are for OPEN taxa only
 
 ## 2. The job graph on real data
 
-`wildlife-radar run publish` ran the whole graph from scratch:
+`wildlife-scanner run publish` ran the whole graph from scratch:
 
 | Job | Result |
 |---|---|
