@@ -1,14 +1,16 @@
 # The read-only API (docs/deploy.md). From the repository root:
 #   fly deploy --config deploy/fly.api.toml --dockerfile deploy/Dockerfile
-# Secrets (R2 read-only token): AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_ENDPOINT_URL_S3.
+# Secrets (R2 token, Object Read only, publish bucket only):
+#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_ENDPOINT_URL_S3.
+# Served at https://api.wildlifescanner.com (fly certs add api.wildlifescanner.com).
 app = "wildlife-scanner-api"      # choose your own app name
 primary_region = "lax"
 
 [env]
   AWS_REGION = "auto"
   WILDLIFE_SCANNER_PUBLISH_URL = "s3://wildlife-scanner-publish"
-  # WILDLIFE_SCANNER_CORS_ORIGINS = "https://<your frontend>.pages.dev"
-  # WILDLIFE_SCANNER_SOURCE_URL = "https://github.com/<you>/wildlife-scanner"  (AGPL §13)
+  WILDLIFE_SCANNER_CORS_ORIGINS = "https://wildlifescanner.com"
+  WILDLIFE_SCANNER_SOURCE_URL = "https://github.com/alexngai/wildlife-scanner"   # AGPL §13
 
 [processes]
   app = "wildlife-scanner serve --region sandiego,montereybay --host 0.0.0.0 --port 8080 --cache-dir /tmp/bundles --refresh-seconds 60"

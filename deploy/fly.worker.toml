@@ -1,8 +1,10 @@
 # The scheduled worker (docs/deploy.md): runs the job graph every 30 minutes for each region in
-# turn and pushes each audited version to R2. It owns the regions' work stores and the shared
-# reference store (lake/ref) on one volume. From the repository root:
+# turn and pushes each audited version to the public bucket. It owns the regions' work stores
+# on one volume, and shares the lake (coverage tiles, live log, reference store) through the
+# private lake bucket. From the repository root:
 #   fly deploy --config deploy/fly.worker.toml --dockerfile deploy/Dockerfile
-# Secrets (R2 read-write token): AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_ENDPOINT_URL_S3.
+# Secrets (one R2 token, Object Read & Write on both buckets):
+#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_ENDPOINT_URL_S3.
 # Optional: WILDLIFE_SCANNER_USER_AGENT with an operator contact.
 app = "wildlife-scanner-worker"   # choose your own app name
 primary_region = "lax"
@@ -10,6 +12,9 @@ primary_region = "lax"
 [env]
   AWS_REGION = "auto"
   WILDLIFE_SCANNER_PUBLISH_URL = "s3://wildlife-scanner-publish"
+  WILDLIFE_SCANNER_LAKE_URL = "s3://wildlife-scanner-lake/lake"
+  # A new static format only goes live once the deployed app lists it.
+  WILDLIFE_SCANNER_APP_COMPAT_URL = "https://wildlifescanner.com/compat.json"
 
 [processes]
   worker = "wildlife-scanner worker --region sandiego,montereybay --db /data/{region}.duckdb --lake /data/lake --ingest-snapshots --every 30"
@@ -17,10 +22,12 @@ primary_region = "lax"
 [[mounts]]
   source = "worker_data"
   destination = "/data"
-  initial_size = "40gb"
+  initial_size = "50gb"     # work stores ~6 GB, two snapshots of tiles ~10 GB, build scratch
   processes = ["worker"]
 
 [[vm]]
-  size = "shared-cpu-2x"
-  memory = "4gb"
+  # The monthly rebuild needs the memory (a 24 M-row reload, the backtests); routine ticks
+  # take minutes. Check the size against fly.io's current machine sizes and prices.
+  size = "shared-cpu-4x"
+  memory = "8gb"
   processes = ["worker"]

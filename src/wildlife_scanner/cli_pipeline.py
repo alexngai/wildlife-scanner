@@ -484,7 +484,12 @@ def cmd_push_publish(args: argparse.Namespace) -> int:
     if not url:
         raise SystemExit(f"--publish-url or {PUBLISH_URL_ENV} is required")
     region_id = load_region(args.region).id
-    out = push_publish(Path(args.lake) / "publish", open_store(url), region_id, args.keep)
+    from wildlife_scanner.pipeline.sync import APP_COMPAT_ENV
+
+    compat = None if args.skip_app_check else os.environ.get(APP_COMPAT_ENV)
+    out = push_publish(
+        Path(args.lake) / "publish", open_store(url), region_id, args.keep, compat_url=compat
+    )
     print(json.dumps(out, indent=2))
     return 0
 
@@ -866,6 +871,11 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--lake", default="data/lake", help="lake root (manifests, publish)")
     p.add_argument("--publish-url", help=f"default ${PUBLISH_URL_ENV}")
     p.add_argument("--keep", type=int, default=6, help="versions to keep remotely")
+    p.add_argument(
+        "--skip-app-check",
+        action="store_true",
+        help="don't ask the live app ($WILDLIFE_SCANNER_APP_COMPAT_URL) which formats it reads",
+    )
     p.set_defaults(func=cmd_push_publish)
 
     p = sub.add_parser("publish", help="write a policy-filtered serving bundle (audit-gated)")

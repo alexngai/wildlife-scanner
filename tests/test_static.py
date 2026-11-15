@@ -235,3 +235,32 @@ def test_compact_photo_needs_a_url_that_fits_the_template():
     assert compact_photo({**full, "url": "https://elsewhere.example/41/square.jpg"}) is None
     other = {**full, "source_url": "https://www.inaturalist.org/photos/42"}
     assert compact_photo({**other, "url": f"{base}/square.jpg"}) is None
+
+
+def test_push_refuses_a_format_the_live_app_cant_read(store, tmp_path):  # noqa: F811
+    import httpx
+    import pytest
+
+    from wildlife_scanner.connectors.base import make_client
+
+    st, region = store
+    _publish(st, region, tmp_path / "publish")
+    bucket = LocalStore(tmp_path / "bucket")
+
+    def app(formats):
+        def handler(request):
+            if formats is None:
+                return httpx.Response(503)
+            return httpx.Response(200, json={"formats": formats})
+
+        return make_client(transport=httpx.MockTransport(handler))
+
+    url = "https://app.example/compat.json"
+    with pytest.raises(RuntimeError, match=r"reads \[3\]"):
+        push_publish(tmp_path / "publish", bucket, "socal", compat_url=url, client=app([3]))
+    assert bucket.get_text("region=socal/CURRENT") is None  # nothing uploaded
+    with pytest.raises(httpx.HTTPStatusError):  # can't ask: fail closed
+        push_publish(tmp_path / "publish", bucket, "socal", compat_url=url, client=app(None))
+    assert bucket.get_text("region=socal/CURRENT") is None
+    out = push_publish(tmp_path / "publish", bucket, "socal", compat_url=url, client=app([4, 5]))
+    assert out["app_formats"] == [4, 5] and bucket.get_text("region=socal/CURRENT")

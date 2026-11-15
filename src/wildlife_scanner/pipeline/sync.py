@@ -42,16 +42,62 @@ def _versions_from_keys(keys: list[str], region_id: str) -> set[str]:
     return {k[len(prefix) :].split("/", 1)[0] for k in keys if k.startswith(prefix)}
 
 
+APP_COMPAT_ENV = "WILDLIFE_SCANNER_APP_COMPAT_URL"
+"""Where the live web app says which static formats it reads, e.g.
+``https://wildlifescanner.com/compat.json`` = ``{"formats": [4]}``."""
+
+
+def app_formats(url: str, client=None) -> list[int]:
+    """The static formats the live app reads (raises if it can't be told)."""
+    from wildlife_scanner.connectors.base import make_client
+
+    client = client or make_client(timeout=30)
+    resp = client.get(url, headers={"Cache-Control": "no-cache"})
+    resp.raise_for_status()
+    formats = resp.json().get("formats")
+    if not isinstance(formats, list) or not all(isinstance(f, int) for f in formats):
+        raise ValueError(f'{url}: expected {{"formats": [int, ...]}}')
+    return formats
+
+
+def version_format(version_dir: Path) -> int | None:
+    index = version_dir / STATIC_DIR / INDEX
+    if not index.exists():
+        return None  # a bundle without static products (--no-static)
+    return int(json.loads(index.read_text(encoding="utf-8")).get("format") or 0)
+
+
 def push_publish(
-    publish_root: Path, store: ObjectStore, region_id: str, keep: int = KEEP_VERSIONS
+    publish_root: Path,
+    store: ObjectStore,
+    region_id: str,
+    keep: int = KEEP_VERSIONS,
+    *,
+    compat_url: str | None = None,
+    client=None,
 ) -> dict:
-    """Upload the region's current local version (if new), swap the remote pointer, prune."""
+    """Upload the region's current local version (if new), swap the remote pointer, prune.
+
+    With ``compat_url``, the pointer only moves if the live app reads the version's static
+    format (docs/design/static-products.md, "Changing the format"); otherwise nothing is
+    uploaded and the error says why. The check fails closed: if the app can't be asked, the
+    bucket keeps its current version and the next push retries."""
     region_dir = publish_root / _region_prefix(region_id)
     version = local_current(region_dir)
     if version is None:
         raise RuntimeError(f"nothing published locally for region {region_id!r}")
     remote_version = (store.get_text(f"{_region_prefix(region_id)}/{CURRENT}") or "").strip()
     out: dict = {"version": version, "uploaded": 0}
+    if remote_version != version and compat_url:
+        fmt = version_format(region_dir / f"version={version}")
+        if fmt is not None:
+            readable = app_formats(compat_url, client)
+            if fmt not in readable:
+                raise RuntimeError(
+                    f"version {version} has static format {fmt}, but the app at {compat_url} "
+                    f"reads {readable}: ship an app that reads it first"
+                )
+            out["app_formats"] = readable
     if remote_version != version:
         # Shared static files first (only new ones: they are content-addressed).
         shared = region_dir / STATIC_DIR
