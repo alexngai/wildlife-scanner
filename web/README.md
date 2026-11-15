@@ -119,7 +119,7 @@ species and numbers. It covers:
   "regions": ["sandiego", "montereybay"],
   "basemap": { "light": "https://…/style.json", "dark": "https://…/style.json", "attribution": "…" },
   "layers": [{ "id": "satellite", "name": "Satellite", "kind": "base", "type": "raster", "tiles": ["https://…/{z}/{x}/{y}.jpg"], "attribution": "…" }],
-  "sourceUrl": "https://github.com/alexngai/wildlife-radar"
+  "sourceUrl": "https://github.com/alexngai/wildlife-scanner"
 }
 ```
 
