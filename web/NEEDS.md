@@ -46,7 +46,7 @@ are public, so anyone can read them.
 
 ## 4. Bug: `push-publish` with a relative `--publish-url`
 
-`wildlife-radar push-publish --publish-url data/bucket` uploads the files, then fails when
+`wildlife-scanner push-publish --publish-url data/bucket` uploads the files, then fails when
 pruning:
 
 ```
@@ -66,7 +66,7 @@ cover them. They're hand-typed in `web/src/api/client.ts` for now.
 
 ## 6. A richer demo for local development
 
-**What:** have `wildlife-radar demo` (or a `demo --full`) also produce:
+**What:** have `wildlife-scanner demo` (or a `demo --full`) also produce:
 - a gated Level-1 condition model with drivers;
 - a timed index (hourly forecast and `/timing`);
 - some live-source recent records (`/nearby/recent`, `picking_up`);

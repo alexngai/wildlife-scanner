@@ -13,11 +13,11 @@ export function AboutPage() {
   return (
     <div className="page">
       <header className="page-head">
-        <h1>About wildlife-radar</h1>
+        <h1>About Wildlife Scanner</h1>
       </header>
       <section className="card prose" aria-label="Introduction">
         <p>
-          wildlife-radar forecasts where and when you might encounter wildlife, for any species, from public
+          Wildlife Scanner forecasts where and when you might encounter wildlife, for any species, from public
           biodiversity records. It is a <strong>free, non-commercial, educational</strong> project run by an individual.
         </p>
       </section>

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-export const SITE_NAME = "wildlife-radar";
+export const SITE_NAME = "Wildlife Scanner";
 
 export function pageTitle(title: string | null | undefined): string {
   return title ? `${title} · ${SITE_NAME}` : SITE_NAME;

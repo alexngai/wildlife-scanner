@@ -91,7 +91,7 @@ export function Layout() {
             <span className="brand-mark">
               <LogoIcon />
             </span>
-            wildlife-radar
+            Wildlife Scanner
           </Link>
           <nav aria-label="Main" className="site-nav">
             {links("nav-link")}

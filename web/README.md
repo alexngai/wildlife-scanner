@@ -1,4 +1,4 @@
-# wildlife-radar web app
+# Wildlife Scanner web app
 
 The browser front end: React + Vite + TypeScript (strict), MapLibre GL for maps, H3 cells
 drawn with `h3-js`. It reads the **static products** (format 4,
@@ -67,20 +67,20 @@ npm run dev          # http://localhost:5173
 ```
 
 The dev server serves a local **folder bucket** at `/data` (default `../data/bucket`;
-override with `WR_BUCKET_DIR`). It proxies `/api` to the local API (default
-`http://127.0.0.1:8000`; override with `WR_API_URL`). To make synthetic data with the CLI,
+override with `WS_BUCKET_DIR`). It proxies `/api` to the local API (default
+`http://127.0.0.1:8000`; override with `WS_API_URL`). To make synthetic data with the CLI,
 from the repo root:
 
 ```bash
 export UV_SYSTEM_CERTS=1; unset UV_NATIVE_TLS
-uv run wildlife-radar demo
-uv run wildlife-radar publish --db data/demo.duckdb --out data/lake/publish
-uv run wildlife-radar push-publish --db data/demo.duckdb --publish-url "$PWD/data/bucket"   # absolute path: NEEDS.md §4
-WILDLIFE_RADAR_PUBLISH_URL="$PWD/data/bucket" uv run wildlife-radar serve --region socal --port 8000
+uv run wildlife-scanner demo
+uv run wildlife-scanner publish --db data/demo.duckdb --out data/lake/publish
+uv run wildlife-scanner push-publish --db data/demo.duckdb --publish-url "$PWD/data/bucket"   # absolute path: NEEDS.md §4
+WILDLIFE_SCANNER_PUBLISH_URL="$PWD/data/bucket" uv run wildlife-scanner serve --region socal --port 8000
 ```
 
 Or point the dev server at the test fixtures, with no Python needed:
-`WR_BUCKET_DIR=tests/fixtures/bucket npm run dev`. Then open `/r/testland`.
+`WS_BUCKET_DIR=tests/fixtures/bucket npm run dev`. Then open `/r/testland`.
 
 | Script | |
 |---|---|
@@ -125,7 +125,7 @@ species and numbers. It covers:
 
 - `staticBase`: the publish bucket's public URL. It contains `region=<id>/CURRENT`.
 - `apiBase`: `""` turns off the API panels; they then say the live service isn't connected.
-  Set `WILDLIFE_RADAR_CORS_ORIGINS` on the API to the site's origin.
+  Set `WILDLIFE_SCANNER_CORS_ORIGINS` on the API to the site's origin.
 - `regions`: empty means ask the API's `/regions`.
 - `layers`: extra base maps and overlays offered in every map's **Layers** picker. Each is
   `{id, name, kind: "base" | "overlay", type: "raster" | "hillshade", tiles, tileSize?, maxzoom?,

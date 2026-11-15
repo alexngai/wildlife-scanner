@@ -61,11 +61,17 @@ describe("species photos (format 4: id + templates)", () => {
 
   it("credits once even when the source's credit continues after the licence", () => {
     const p = usablePhoto(
-      { ...base, license: "cc-by-nc", attribution: "(c) A. Photographer, some rights reserved (CC BY-NC), uploaded by A. Photographer" },
+      {
+        ...base,
+        license: "cc-by-nc",
+        attribution: "(c) A. Photographer, some rights reserved (CC BY-NC), uploaded by A. Photographer",
+      },
       INAT,
       resolve,
     )!;
-    expect(creditText(p)).toBe("(c) A. Photographer, some rights reserved (CC BY-NC), uploaded by A. Photographer · iNaturalist");
+    expect(creditText(p)).toBe(
+      "(c) A. Photographer, some rights reserved (CC BY-NC), uploaded by A. Photographer · iNaturalist",
+    );
     const { container } = render(<PhotoCredit photo={p} />);
     expect(container.textContent).toBe(
       "Photo (c) A. Photographer, some rights reserved, uploaded by A. Photographer (CC BY-NC) · iNaturalist",

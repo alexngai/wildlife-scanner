@@ -37,7 +37,7 @@ describe("species page", () => {
     expect(screen.getByRole("img", { name: /Seasonal calendar/ })).toBeInTheDocument();
     expect(screen.getByText(/Non-commercial use only/)).toBeInTheDocument();
     expect(screen.getByText(/published after at least 24 hours/)).toBeInTheDocument();
-    expect(document.title).toBe("Common Testbird · wildlife-radar");
+    expect(document.title).toBe("Common Testbird · Wildlife Scanner");
   });
 
   it("shows awareness species without any numbers or calendar", async () => {
@@ -167,7 +167,7 @@ describe("place page", () => {
     const list = document.querySelector(".item-list") as HTMLElement;
     expect(within(list).getByRole("link", { name: "Common Testbird" })).toBeInTheDocument();
     await user.click(within(list).getByRole("button", { name: "Seen Common Testbird", pressed: false }));
-    expect(JSON.parse(localStorage.getItem("wildlife-radar:life-list:v1")!)).toEqual(["testus-primus"]);
+    expect(JSON.parse(localStorage.getItem("wildlife-scanner:life-list:v1")!)).toEqual(["testus-primus"]);
     expect(screen.getByText(/You've seen everything on these lists/)).toBeInTheDocument();
     expect(requested.join()).not.toContain("testus-primus,"); // life list never sent
   });

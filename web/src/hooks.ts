@@ -4,7 +4,7 @@ import { useServices } from "./context";
 import { useAsync } from "./lib/useAsync";
 import type { RegionInfo, StaticIndex } from "./products/types";
 
-const LAST_REGION = "wildlife-radar:region";
+const LAST_REGION = "wildlife-scanner:region";
 
 export function rememberRegion(id: string): void {
   try {

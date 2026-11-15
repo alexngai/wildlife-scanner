@@ -1,5 +1,5 @@
 /*
- * wildlife-radar styles. Mobile-first, one token system for light and dark.
+ * Wildlife Scanner styles. Mobile-first, one token system for light and dark.
  * The theme follows the system unless <html data-theme="light|dark"> overrides it.
  *
  * Structure: tokens → base → layout (header, tab bar, page) → components (cards, buttons,
