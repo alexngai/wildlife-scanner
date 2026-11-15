@@ -3,7 +3,7 @@
  * format; these types mirror it. Everything here is already policy-filtered upstream.
  */
 
-export const SUPPORTED_FORMAT = 4;
+// Which formats the app reads, and how, is in formats.ts; these types are the current format's.
 
 /** h(igh), m(edium), l(ow), i(nsufficient), - (none). */
 export type ConfidenceCode = "h" | "m" | "l" | "i" | "-";

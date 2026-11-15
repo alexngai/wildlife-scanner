@@ -1,6 +1,6 @@
-import { FetchError, FormatError, NotAvailableError } from "../lib/errors";
+import { FetchError, NotAvailableError } from "../lib/errors";
 import type { PlaceFile, PlaceWeek, SpeciesMapFile, StaticIndex, TaxonEntry } from "./types";
-import { SUPPORTED_FORMAT } from "./types";
+import { adapt, DEFAULT_FORMATS, type FileKind, type FormatRegistry } from "./formats";
 
 type Fetcher = typeof fetch;
 
@@ -19,6 +19,8 @@ export class StaticClient {
   constructor(
     private readonly base: string,
     private readonly fetcher: Fetcher = (...args) => fetch(...args),
+    /** Readable formats and their adapters (formats.ts); tests pass their own. */
+    private readonly formats: FormatRegistry = DEFAULT_FORMATS,
   ) {}
 
   private async getText(url: string, init?: RequestInit): Promise<string> {
@@ -39,11 +41,13 @@ export class StaticClient {
     return hit;
   }
 
-  private json<T extends { format?: number }>(url: string): Promise<T> {
+  /** A JSON file in the current format's shape (see formats.ts); `format` is for files without their own. */
+  private json<T>(url: string, kind: FileKind, format?: number): Promise<T> {
     return this.memo(url, async () => {
-      const data = JSON.parse(await this.getText(url)) as T;
-      if (!Array.isArray(data) && data.format !== SUPPORTED_FORMAT) throw new FormatError(data.format);
-      return data;
+      const data = JSON.parse(await this.getText(url)) as unknown;
+      const own =
+        data && typeof data === "object" && !Array.isArray(data) ? (data as { format?: unknown }).format : undefined;
+      return adapt<T>(this.formats, kind, own ?? format, data);
     });
   }
 
@@ -63,14 +67,15 @@ export class StaticClient {
 
   async index(region: string): Promise<StaticIndex> {
     const version = await this.current(region);
-    return this.json<StaticIndex>(join(this.regionRoot(region), `version=${version}/static/index.json`));
+    return this.json<StaticIndex>(join(this.regionRoot(region), `version=${version}/static/index.json`), "index");
   }
 
   async taxa(region: string): Promise<TaxonEntry[]> {
     const idx = await this.index(region);
     return this.memo(`taxa:${region}:${idx.version}`, async () => {
       const text = await this.getText(join(this.regionRoot(region), idx.taxa));
-      return JSON.parse(text) as TaxonEntry[];
+      // A plain list with no format of its own: it has its index's.
+      return adapt<TaxonEntry[]>(this.formats, "taxa", idx.format, JSON.parse(text));
     });
   }
 
@@ -79,7 +84,7 @@ export class StaticClient {
     const paths = await this.mapPaths(region);
     const path = paths.get(taxonId);
     if (!path) throw new NotAvailableError();
-    return this.json<SpeciesMapFile>(join(this.regionRoot(region), path));
+    return this.json<SpeciesMapFile>(join(this.regionRoot(region), path), "map");
   }
 
   /** Map paths by taxon, from taxa.json (format 3 keeps them there, not in the index). */
@@ -97,7 +102,7 @@ export class StaticClient {
     const idx = await this.index(region);
     const ref = Object.hasOwn(idx.places, placeId) ? idx.places[placeId] : undefined;
     if (!ref) throw new NotAvailableError();
-    return this.json<PlaceFile>(join(this.regionRoot(region), ref.file));
+    return this.json<PlaceFile>(join(this.regionRoot(region), ref.file), "place");
   }
 
   /** One ISO week of a place's lists. */
@@ -105,7 +110,7 @@ export class StaticClient {
     const header = await this.place(region, placeId);
     const path = header.weeks[week - 1];
     if (!path) throw new NotAvailableError();
-    return this.json<PlaceWeek>(join(this.regionRoot(region), path));
+    return this.json<PlaceWeek>(join(this.regionRoot(region), path), "placeWeek");
   }
 
   /**

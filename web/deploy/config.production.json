@@ -1,0 +1,6 @@
+{
+  "staticBase": "https://data.wildlifescanner.com",
+  "apiBase": "https://api.wildlifescanner.com",
+  "regions": ["montereybay", "sandiego"],
+  "sourceUrl": "https://github.com/alexngai/wildlife-scanner"
+}

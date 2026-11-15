@@ -10,12 +10,7 @@ export class NotAvailableError extends Error {
 }
 
 /** The data was published in a format this build does not understand. */
-export class FormatError extends Error {
-  constructor(found: unknown) {
-    super(`unsupported data format ${String(found)}`);
-    this.name = "FormatError";
-  }
-}
+export { FormatError } from "../products/formats";
 
 /** A network or server problem (as opposed to "not available"). */
 export class FetchError extends Error {

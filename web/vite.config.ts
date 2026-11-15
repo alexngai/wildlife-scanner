@@ -4,6 +4,29 @@ import { resolve, normalize, sep } from "node:path";
 import type { Connect, Plugin } from "vite";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { compatInfo } from "./src/products/formats.ts";
+
+/**
+ * `/compat.json`: the static-product formats this build reads ({"formats": [...], "current": N}).
+ * The publisher can fetch it from the live site and refuse to publish a format it doesn't list.
+ */
+function compatFile(): Plugin {
+  const body = JSON.stringify(compatInfo()) + "\n";
+  const serve: Connect.NextHandleFunction = (req, res, next) => {
+    if ((req.url ?? "").split("?")[0] !== "/compat.json") return next();
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Cache-Control", "no-cache");
+    res.end(body);
+  };
+  return {
+    name: "wildlife-scanner-compat",
+    configureServer: (server) => void server.middlewares.use(serve),
+    configurePreviewServer: (server) => void server.middlewares.use(serve),
+    generateBundle() {
+      this.emitFile({ type: "asset", fileName: "compat.json", source: body });
+    },
+  };
+}
 
 /**
  * Serve a local "folder bucket" (see docs/deploy.md) at /data, the way the CDN will serve it.
@@ -51,7 +74,7 @@ const proxy = {
 };
 
 export default defineConfig({
-  plugins: [react(), folderBucket()],
+  plugins: [react(), folderBucket(), compatFile()],
   server: { proxy },
   preview: { proxy },
   build: { sourcemap: true, chunkSizeWarningLimit: 1200 },
