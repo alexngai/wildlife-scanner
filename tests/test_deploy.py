@@ -8,18 +8,18 @@ from pathlib import Path
 
 import pytest
 
-from wildlife_radar.pipeline.publish import CURRENT, current_bundle, publish_bundle, set_current
-from wildlife_radar.pipeline.runner import Job, JobContext, run
-from wildlife_radar.pipeline.sync import prune_local, pull_current, push_publish
-from wildlife_radar.pipeline.worker import tick
-from wildlife_radar.regions import load_region
-from wildlife_radar.storage.objects import LocalStore, S3Store, open_store
+from wildlife_scanner.pipeline.publish import CURRENT, current_bundle, publish_bundle, set_current
+from wildlife_scanner.pipeline.runner import Job, JobContext, run
+from wildlife_scanner.pipeline.sync import prune_local, pull_current, push_publish
+from wildlife_scanner.pipeline.worker import tick
+from wildlife_scanner.regions import load_region
+from wildlife_scanner.storage.objects import LocalStore, S3Store, open_store
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     from fastapi.testclient import TestClient
 
-from wildlife_radar.api import create_app  # noqa: E402
+from wildlife_scanner.api import create_app  # noqa: E402
 
 
 @pytest.fixture(params=["local", "s3"])
@@ -158,10 +158,10 @@ def test_worker_blocked_publish_keeps_previous_remote(tmp_path):
 
 
 def test_api_serves_a_bundle_pulled_from_the_bucket(tmp_path, monkeypatch):
-    from wildlife_radar.baseline import build_baseline
-    from wildlife_radar.policy.statuses import StaticStatusProvider, build_tier_table
-    from wildlife_radar.storage import ObservationStore
-    from wildlife_radar.synthetic import SyntheticWorld
+    from wildlife_scanner.baseline import build_baseline
+    from wildlife_scanner.policy.statuses import StaticStatusProvider, build_tier_table
+    from wildlife_scanner.storage import ObservationStore
+    from wildlife_scanner.synthetic import SyntheticWorld
 
     region = load_region("socal")
     st = ObservationStore()
@@ -175,7 +175,7 @@ def test_api_serves_a_bundle_pulled_from_the_bucket(tmp_path, monkeypatch):
     bucket = LocalStore(tmp_path / "bucket")
     push_publish(tmp_path / "publish", bucket, "socal")
     assert pull_current(bucket, "socal", tmp_path / "cache")
-    monkeypatch.setenv("WILDLIFE_RADAR_CORS_ORIGINS", "https://app.example.org")
+    monkeypatch.setenv("WILDLIFE_SCANNER_CORS_ORIGINS", "https://app.example.org")
     client = TestClient(create_app(bundle_dir=tmp_path / "cache", region_id="socal", now=now))
     health = client.get("/health").json()
     assert health["bundle"].startswith("version=")
@@ -186,7 +186,7 @@ def test_api_serves_a_bundle_pulled_from_the_bucket(tmp_path, monkeypatch):
 
 
 def test_ref_parts_travel_between_workers(tmp_path):
-    from wildlife_radar.pipeline.sync import sync_ref
+    from wildlife_scanner.pipeline.sync import sync_ref
 
     lake_bucket = LocalStore(tmp_path / "lake-bucket")
     a, b = tmp_path / "a" / "ref", tmp_path / "b" / "ref"
@@ -202,7 +202,7 @@ def test_ref_parts_travel_between_workers(tmp_path):
 
 
 def test_worker_loop_ticks_every_region(tmp_path):
-    from wildlife_radar.pipeline import worker
+    from wildlife_scanner.pipeline import worker
 
     seen = []
 

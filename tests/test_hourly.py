@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import numpy as np
 from test_publish import NOW, store  # noqa: F401  (fixture)
 
-from wildlife_radar.conditions import factors, hourly, timed
+from wildlife_scanner.conditions import factors, hourly, timed
 
 LA_JOLLA = (32.867, -117.257)
 
@@ -156,13 +156,13 @@ def test_hourly_forecast_end_to_end_and_policy(store, tmp_path):  # noqa: F811
 
     import duckdb
 
-    from wildlife_radar.pipeline.publish import current_bundle, publish_bundle
+    from wildlife_scanner.pipeline.publish import current_bundle, publish_bundle
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         from fastapi.testclient import TestClient
 
-    from wildlife_radar.api import create_app
+    from wildlife_scanner.api import create_app
 
     st, region = store
     # A dawn-active pattern, fitted on synthetic hours, stored for an open and a coarse taxon.
@@ -222,7 +222,7 @@ def test_hourly_forecast_end_to_end_and_policy(store, tmp_path):  # noqa: F811
 
 
 def test_hourly_taxa_are_picked_across_groups():
-    from wildlife_radar.pipeline.runner import pick_timed_taxa
+    from wildlife_scanner.pipeline.runner import pick_timed_taxa
 
     info = {f"bird-{i}": ("birds", None, 1000 - i, 0) for i in range(10)}
     info |= {"fish-a": ("fishes", None, 50, 0), "fish-b": ("fishes", None, 40, 1)}

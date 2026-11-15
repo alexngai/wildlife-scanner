@@ -123,12 +123,12 @@ existence check (below).
 | Step | Status | Where |
 |---|---|---|
 | 1. Freshness metrics | done | `pipeline/freshness.py`; `freshness` table in bundles; `/health` |
-| 2. Coverage snapshot pass, delta, reconciliation | done | `pipeline/coverage.py`; `wildlife-radar-pipeline coverage-snapshot`; the `snapshot` job of regions with `coverage:` |
+| 2. Coverage snapshot pass, delta, reconciliation | done | `pipeline/coverage.py`; `wildlife-scanner-pipeline coverage-snapshot`; the `snapshot` job of regions with `coverage:` |
 | 3. Corrections layer | covered for now | event ids in `lake/ref` are re-applied after each ingest; no separate table |
 | 4. Live log | done | `pipeline/livelog.py`; the `live` job of regions with `coverage:` |
 | 5. Work store as cache | later | |
-| Retention (old snapshots, old live-log days) | done 2026-11-14 | `wildlife-radar lake-prune` (keeps the newest two complete snapshots; drops live days past 67 days and older than the newest snapshot, here and in the bucket) |
-| Bucket sync of `lake/ref` and `lake/norm` | done 2026-11-14 | `wildlife-radar lake-sync`; the worker pulls `ref/` and the live log before a tick and pushes after; see [`../deploy.md`](../deploy.md) |
+| Retention (old snapshots, old live-log days) | done 2026-11-14 | `wildlife-scanner lake-prune` (keeps the newest two complete snapshots; drops live days past 67 days and older than the newest snapshot, here and in the bucket) |
+| Bucket sync of `lake/ref` and `lake/norm` | done 2026-11-14 | `wildlife-scanner lake-sync`; the worker pulls `ref/` and the live log before a tick and pushes after; see [`../deploy.md`](../deploy.md) |
 
 **Deletions, as built.**
 - *Monthly:* when a region ingests a new snapshot, GBIF rows from earlier ingests that the

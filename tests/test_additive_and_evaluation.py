@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from wildlife_radar.evaluation import (
+from wildlife_scanner.evaluation import (
     Climatology,
     Event,
     Persistence,
@@ -12,7 +12,7 @@ from wildlife_radar.evaluation import (
     log_loss,
     reliability_table,
 )
-from wildlife_radar.models import NOWCAST, anomaly, combine, lift, logit, recompute_p, sigmoid
+from wildlife_scanner.models import NOWCAST, anomaly, combine, lift, logit, recompute_p, sigmoid
 
 
 def test_logit_sigmoid_roundtrip():
@@ -80,7 +80,7 @@ def test_baselines():
 
 
 def test_distinctiveness_prefers_likely_and_distinctive():
-    from wildlife_radar.serving.queries import distinctiveness
+    from wildlife_scanner.serving.queries import distinctiveness
 
     rare_fluke = distinctiveness(0.012, 80.0)  # rarely recorded, huge ratio
     local_specialty = distinctiveness(0.21, 50.0)  # e.g. pygmy nuthatch in the pines

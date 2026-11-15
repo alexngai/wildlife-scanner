@@ -2,8 +2,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from wildlife_radar.pipeline.runner import Job, JobContext, latest, order, run, staleness
-from wildlife_radar.regions import load_region
+from wildlife_scanner.pipeline.runner import Job, JobContext, latest, order, run, staleness
+from wildlife_scanner.regions import load_region
 
 
 def make_jobs(calls: list[str], fail: set[str] | None = None):
@@ -84,10 +84,10 @@ def test_failure_stops_and_reruns_next_time(tmp_path):
 
 
 def test_live_job_advances_its_cursor(tmp_path, monkeypatch):
-    from wildlife_radar.connectors import inaturalist
-    from wildlife_radar.pipeline import runner
-    from wildlife_radar.storage import ObservationStore
-    from wildlife_radar.synthetic import SyntheticWorld
+    from wildlife_scanner.connectors import inaturalist
+    from wildlife_scanner.pipeline import runner
+    from wildlife_scanner.storage import ObservationStore
+    from wildlife_scanner.synthetic import SyntheticWorld
 
     queries = []
 
@@ -111,7 +111,7 @@ def test_live_job_advances_its_cursor(tmp_path, monkeypatch):
 
 
 def test_region_pack_inherits_curated_files():
-    from wildlife_radar.pipeline.runner import context
+    from wildlife_scanner.pipeline.runner import context
 
     c = context("sandiego", "unused.duckdb", "unused-lake")
     assert c.region.inherits == "california"
@@ -120,9 +120,9 @@ def test_region_pack_inherits_curated_files():
 
 
 def test_live_job_pulls_registry_live_datasets_from_gbif(tmp_path):
-    from wildlife_radar.pipeline import runner
-    from wildlife_radar.storage import ObservationStore
-    from wildlife_radar.synthetic import SyntheticWorld
+    from wildlife_scanner.pipeline import runner
+    from wildlife_scanner.storage import ObservationStore
+    from wildlife_scanner.synthetic import SyntheticWorld
 
     registry = tmp_path / "datasets.yaml"
     registry.write_text(
@@ -160,10 +160,10 @@ def test_live_job_pulls_registry_live_datasets_from_gbif(tmp_path):
 
 
 def test_registry_live_datasets_are_live_in_training_views(tmp_path):
-    from wildlife_radar.baseline.builder import BaselineConfig, create_training_view
-    from wildlife_radar.baseline.effort import DatasetEntry, DatasetRegistry
-    from wildlife_radar.storage import ObservationStore
-    from wildlife_radar.synthetic import DEFAULT_SPECIES, SyntheticWorld
+    from wildlife_scanner.baseline.builder import BaselineConfig, create_training_view
+    from wildlife_scanner.baseline.effort import DatasetEntry, DatasetRegistry
+    from wildlife_scanner.storage import ObservationStore
+    from wildlife_scanner.synthetic import DEFAULT_SPECIES, SyntheticWorld
 
     world = SyntheticWorld(
         observers=5,
@@ -189,10 +189,10 @@ def test_registry_live_datasets_are_live_in_training_views(tmp_path):
 def test_repairs_resume_after_an_interruption(tmp_path, monkeypatch):
     from datetime import date
 
-    from wildlife_radar.connectors import gbif_events
-    from wildlife_radar.connectors.base import ConnectorError
-    from wildlife_radar.pipeline import runner
-    from wildlife_radar.storage import ObservationStore
+    from wildlife_scanner.connectors import gbif_events
+    from wildlife_scanner.connectors.base import ConnectorError
+    from wildlife_scanner.pipeline import runner
+    from wildlife_scanner.storage import ObservationStore
 
     registry = tmp_path / "datasets.yaml"
     registry.write_text(
@@ -246,9 +246,9 @@ def test_repairs_resume_after_an_interruption(tmp_path, monkeypatch):
 
 
 def test_crosswalk_also_resolves_curated_status_names(tmp_path, monkeypatch):
-    from wildlife_radar.pipeline import runner
-    from wildlife_radar.profilegen import identity
-    from wildlife_radar.storage import ObservationStore
+    from wildlife_scanner.pipeline import runner
+    from wildlife_scanner.profilegen import identity
+    from wildlife_scanner.storage import ObservationStore
 
     statuses = tmp_path / "statuses.yaml"
     statuses.write_text(
@@ -298,7 +298,7 @@ def test_unchanged_result_keeps_downstream_up_to_date(tmp_path):
 def _kelp_store(path, registry_dir):
     from datetime import date
 
-    from wildlife_radar.storage import ObservationStore
+    from wildlife_scanner.storage import ObservationStore
 
     registry = registry_dir / "datasets.yaml"
     registry.write_text(
@@ -319,9 +319,9 @@ def test_event_ids_survive_a_rebuild_through_the_reference_store(tmp_path, monke
     """Ids fetched once are re-applied from the reference store: no second fetch."""
     from datetime import date
 
-    from wildlife_radar.connectors import gbif_events
-    from wildlife_radar.pipeline import runner
-    from wildlife_radar.storage import ObservationStore
+    from wildlife_scanner.connectors import gbif_events
+    from wildlife_scanner.pipeline import runner
+    from wildlife_scanner.storage import ObservationStore
 
     events = [("SITE_20200101_A", 2), ("SITE_20200102_A", 2)]
     calls: list[str] = []
@@ -358,9 +358,9 @@ def test_event_ids_survive_a_rebuild_through_the_reference_store(tmp_path, monke
 
 def test_event_ids_from_earlier_runs_are_adopted(tmp_path, monkeypatch):
     """Stores repaired before the reference table existed keep their work."""
-    from wildlife_radar.connectors import gbif_events
-    from wildlife_radar.pipeline import runner
-    from wildlife_radar.storage import ObservationStore
+    from wildlife_scanner.connectors import gbif_events
+    from wildlife_scanner.pipeline import runner
+    from wildlife_scanner.storage import ObservationStore
 
     c = ctx(tmp_path / "a")
     c.lake = tmp_path / "lake"
@@ -376,8 +376,8 @@ def test_event_ids_from_earlier_runs_are_adopted(tmp_path, monkeypatch):
 
 
 def test_signals_job_keeps_going_when_one_fetch_fails(tmp_path):
-    from wildlife_radar.pipeline.runner import JOBS
-    from wildlife_radar.storage import ObservationStore
+    from wildlife_scanner.pipeline.runner import JOBS
+    from wildlife_scanner.storage import ObservationStore
 
     class Coops:
         def observations(self, station, lon, product, start, end):

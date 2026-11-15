@@ -5,24 +5,24 @@ from datetime import UTC, date, datetime
 import httpx
 import pytest
 
-from wildlife_radar.connectors.base import (
+from wildlife_scanner.connectors.base import (
     ConnectorError,
     ObservationQuery,
     RateLimiter,
     make_client,
     user_agent,
 )
-from wildlife_radar.connectors.gbif import GBIFConnector, parse_dwc_record, parse_event_date
-from wildlife_radar.connectors.inaturalist import (
+from wildlife_scanner.connectors.gbif import GBIFConnector, parse_dwc_record, parse_event_date
+from wildlife_scanner.connectors.inaturalist import (
     INaturalistConnector,
     obscured_uncertainty_m,
     parse_observation,
 )
-from wildlife_radar.connectors.noaa_coops import CoopsTideConnector, parse_predictions
-from wildlife_radar.core import EvidenceGrade, Modality, Outcome
-from wildlife_radar.core.time import DETERMINISTIC_ISSUE_TIME, Precision
-from wildlife_radar.signals import SignalStore
-from wildlife_radar.signals.derived import tide_stage
+from wildlife_scanner.connectors.noaa_coops import CoopsTideConnector, parse_predictions
+from wildlife_scanner.core import EvidenceGrade, Modality, Outcome
+from wildlife_scanner.core.time import DETERMINISTIC_ISSUE_TIME, Precision
+from wildlife_scanner.signals import SignalStore
+from wildlife_scanner.signals.derived import tide_stage
 
 NO_WAIT = RateLimiter(0)
 
@@ -132,8 +132,8 @@ def test_query_validation():
 
 
 def test_user_agent_override(monkeypatch):
-    assert user_agent().startswith("wildlife-radar/")
-    monkeypatch.setenv("WILDLIFE_RADAR_USER_AGENT", "my-deployment (ops@example.org)")
+    assert user_agent().startswith("wildlife-scanner/")
+    monkeypatch.setenv("WILDLIFE_SCANNER_USER_AGENT", "my-deployment (ops@example.org)")
     assert user_agent() == "my-deployment (ops@example.org)"
 
 

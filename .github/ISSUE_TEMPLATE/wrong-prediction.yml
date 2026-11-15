@@ -1,0 +1,39 @@
+name: A prediction looks wrong
+description: A species shown where or when it isn't seen, missing where it is, or a number that looks off.
+title: "Prediction: "
+labels: ["data quality"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks. Predictions come from historical records, so they can be off where few people
+        record wildlife. Details help us tell a data gap from a modelling bug.
+        **Is it a sensitive species shown too precisely? Please report it privately instead** (see SECURITY.md).
+  - type: input
+    id: region
+    attributes:
+      label: Region
+      placeholder: Monterey Bay
+    validations:
+      required: true
+  - type: input
+    id: species
+    attributes:
+      label: Species
+      description: Common or scientific name, or the page URL.
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where and when
+      description: A place, map area or cell, and the week or date.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you see versus what you expected
+      description: Your own observations, a guide, a published source — anything that supports it.
+    validations:
+      required: true

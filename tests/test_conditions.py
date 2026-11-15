@@ -5,24 +5,24 @@ from datetime import UTC, date, datetime, timedelta
 import numpy as np
 import pytest
 
-from wildlife_radar.conditions import terms_from_profile
-from wildlife_radar.conditions.daily import (
+from wildlife_scanner.conditions import terms_from_profile
+from wildlife_scanner.conditions.daily import (
     CoopsDailyFetcher,
     ensure_schema,
     moon_on,
     normals,
     store_rows,
 )
-from wildlife_radar.conditions.levels import run_conditions
-from wildlife_radar.conditions.model import OffsetLogit, TermSpec, block_bootstrap
-from wildlife_radar.core.geometry import PointFootprint
-from wildlife_radar.core.ids import hash_identifier
-from wildlife_radar.core.licenses import CC_BY
-from wildlife_radar.core.observations import EvidenceGrade, Modality, Observation, Outcome
-from wildlife_radar.core.taxa import TaxonRef, TaxonScheme
-from wildlife_radar.core.time import Precision, TimeWindow
-from wildlife_radar.profiles import ProfileLibrary
-from wildlife_radar.storage import ObservationStore
+from wildlife_scanner.conditions.levels import run_conditions
+from wildlife_scanner.conditions.model import OffsetLogit, TermSpec, block_bootstrap
+from wildlife_scanner.core.geometry import PointFootprint
+from wildlife_scanner.core.ids import hash_identifier
+from wildlife_scanner.core.licenses import CC_BY
+from wildlife_scanner.core.observations import EvidenceGrade, Modality, Observation, Outcome
+from wildlife_scanner.core.taxa import TaxonRef, TaxonScheme
+from wildlife_scanner.core.time import Precision, TimeWindow
+from wildlife_scanner.profiles import ProfileLibrary
+from wildlife_scanner.storage import ObservationStore
 
 SITE = (32.85, -117.27)
 BBOX = (-117.4, 32.7, -117.1, 33.0)
@@ -188,7 +188,7 @@ def test_profile_terms_map_daily_signals():
 def test_moon_and_coops_parsing():
     import httpx
 
-    from wildlife_radar.connectors.base import RateLimiter, make_client
+    from wildlife_scanner.connectors.base import RateLimiter, make_client
 
     full = moon_on(date(2026, 11, 24))  # full moon 2026-11-24
     new = moon_on(date(2026, 11, 9))  # new moon 2026-11-09
@@ -228,10 +228,10 @@ def test_moon_and_coops_parsing():
 
 
 def test_forecast_uses_gated_levels_and_explains(world):
-    from wildlife_radar.policy.statuses import StaticStatusProvider, TierService, build_tier_table
-    from wildlife_radar.regions import Region
-    from wildlife_radar.serving import BaselineQueries
-    from wildlife_radar.serving.forecast import ForecastService
+    from wildlife_scanner.policy.statuses import StaticStatusProvider, TierService, build_tier_table
+    from wildlife_scanner.regions import Region
+    from wildlife_scanner.serving import BaselineQueries
+    from wildlife_scanner.serving.forecast import ForecastService
 
     conn = world.conn
     sst_anomaly = TermSpec("sst_anomaly", "ocean.sst_anomaly_c", "linear", "moderate", True)
@@ -245,7 +245,7 @@ def test_forecast_uses_gated_levels_and_explains(world):
         station_coords={"TEST1": SITE},
         reps=50,
     )
-    from wildlife_radar.baseline import build_baseline
+    from wildlife_scanner.baseline import build_baseline
 
     build_baseline(conn, region_id="cond", bbox=BBOX)
     build_tier_table(conn, region_id="cond", scopes=["global"], providers=[StaticStatusProvider()])
@@ -298,9 +298,9 @@ def test_forecast_uses_gated_levels_and_explains(world):
 
 
 def test_nowcast_for_open_taxa_without_profiles(world):
-    from wildlife_radar.baseline import build_baseline
-    from wildlife_radar.conditions.nowcast import run_nowcasts
-    from wildlife_radar.policy.statuses import StaticStatusProvider, build_tier_table
+    from wildlife_scanner.baseline import build_baseline
+    from wildlife_scanner.conditions.nowcast import run_nowcasts
+    from wildlife_scanner.policy.statuses import StaticStatusProvider, build_tier_table
 
     conn = world.conn
     build_baseline(conn, region_id="now", bbox=BBOX)
@@ -331,11 +331,11 @@ def test_nowcast_for_open_taxa_without_profiles(world):
 def test_recent_activity_from_a_bundle(world, tmp_path):
     import duckdb
 
-    from wildlife_radar.pipeline.publish import publish_bundle
-    from wildlife_radar.policy.statuses import TierService
-    from wildlife_radar.regions import Region
-    from wildlife_radar.serving import BaselineQueries
-    from wildlife_radar.serving.forecast import ForecastService, recent_activity
+    from wildlife_scanner.pipeline.publish import publish_bundle
+    from wildlife_scanner.policy.statuses import TierService
+    from wildlife_scanner.regions import Region
+    from wildlife_scanner.serving import BaselineQueries
+    from wildlife_scanner.serving.forecast import ForecastService, recent_activity
 
     conn = world.conn  # nowcasts for region "now" were fitted by the previous test
     if not conn.execute("SELECT count(*) FROM conditions_gates WHERE region_id = 'now'").fetchone()[

@@ -1,13 +1,13 @@
 # Operator tools
 
 Standalone scripts for bulk data work. The range-request extractor now lives in the package
-(`wildlife_radar.connectors.gbif_snapshot_remote`), and the `snapshot` job runs all of it with
-`wildlife-radar run <target> --ingest-snapshots`. These scripts are thin wrappers for running
+(`wildlife_scanner.connectors.gbif_snapshot_remote`), and the `snapshot` job runs all of it with
+`wildlife-scanner run <target> --ingest-snapshots`. These scripts are thin wrappers for running
 the steps one at a time.
 
 ## Extracting a region from a GBIF snapshot without DuckDB's `httpfs`
 
-The normal path is `wildlife-radar ingest-snapshot --snapshot-date …`. It reads the snapshot directly from AWS, but needs DuckDB's `httpfs` extension, which DuckDB downloads at first use. Where that download is blocked, or to save bandwidth, these tools do the same with plain HTTPS range requests.
+The normal path is `wildlife-scanner ingest-snapshot --snapshot-date …`. It reads the snapshot directly from AWS, but needs DuckDB's `httpfs` extension, which DuckDB downloads at first use. Where that download is blocked, or to save bandwidth, these tools do the same with plain HTTPS range requests.
 
 | Script | What it does |
 |---|---|

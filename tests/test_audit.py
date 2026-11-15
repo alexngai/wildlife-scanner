@@ -1,10 +1,10 @@
 import json
 
-from wildlife_radar.baseline import build_baseline
-from wildlife_radar.policy.audit import audit_tiers, summarize
-from wildlife_radar.policy.statuses import StaticStatusProvider, StatusLookup, build_tier_table
-from wildlife_radar.storage import ObservationStore
-from wildlife_radar.synthetic import SyntheticWorld
+from wildlife_scanner.baseline import build_baseline
+from wildlife_scanner.policy.audit import audit_tiers, summarize
+from wildlife_scanner.policy.statuses import StaticStatusProvider, StatusLookup, build_tier_table
+from wildlife_scanner.storage import ObservationStore
+from wildlife_scanner.synthetic import SyntheticWorld
 
 
 def store_with_tiers():
@@ -64,7 +64,7 @@ def test_audit_flags_under_protected_taxa():
 def test_curated_status_reaches_a_renamed_taxon_through_its_resolved_name(tmp_path):
     """A curated status keyed by an older name (Euphydryas → Occidryas) applies once that name
     is resolved; a resolved name with no synonym in the region is merely absent."""
-    from wildlife_radar.policy.statuses import RegionStatusFile
+    from wildlife_scanner.policy.statuses import RegionStatusFile
 
     store = store_with_tiers()
     conn = store.conn

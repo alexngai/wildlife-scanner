@@ -2,13 +2,13 @@
 
 usage: extract_region.py parts.json staging_dir work_dir lon_min lat_min lon_max lat_max [workers]
 
-See ``wildlife_radar.connectors.gbif_snapshot_remote``.
+See ``wildlife_scanner.connectors.gbif_snapshot_remote``.
 """
 
 import json
 import sys
 
-from wildlife_radar.connectors.gbif_snapshot_remote import extract_region
+from wildlife_scanner.connectors.gbif_snapshot_remote import extract_region
 
 if __name__ == "__main__":
     with open(sys.argv[1], encoding="utf-8") as fh:

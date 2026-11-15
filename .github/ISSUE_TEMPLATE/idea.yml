@@ -1,0 +1,22 @@
+name: Idea or feature
+description: Something that would help people find wildlife, or a new region or data source.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would it solve, and for whom?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: For a data source, include its licence and terms. For a region, its extent.
+  - type: checkboxes
+    id: policy
+    attributes:
+      label: Sensitive species
+      options:
+        - label: This wouldn't reveal sensitive species more precisely than their tier allows.
+          required: true

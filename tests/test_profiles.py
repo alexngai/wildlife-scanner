@@ -2,9 +2,9 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from wildlife_radar.policy import PolicyTier
-from wildlife_radar.profiles import ProfileError, ProfileLibrary, SpeciesProfile, deep_merge
-from wildlife_radar.regions import load_region
+from wildlife_scanner.policy import PolicyTier
+from wildlife_scanner.profiles import ProfileError, ProfileLibrary, SpeciesProfile, deep_merge
+from wildlife_scanner.regions import load_region
 
 NOW = datetime(2026, 11, 11, tzinfo=UTC)
 VALIDATION_SPECIES = {

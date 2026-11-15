@@ -1,6 +1,6 @@
 # Factors: time of day, moon, tides and other conditions in forecasts
 
-One registry (`src/wildlife_radar/conditions/factors.py`) lists every environmental factor a
+One registry (`src/wildlife_scanner/conditions/factors.py`) lists every environmental factor a
 forecast can use, at two time scales. The scale decides how a factor is fitted and served.
 
 | Scale | Factors | Fitted from | Enters the forecast as | Code |
@@ -81,5 +81,5 @@ claim.
    - daily: in `DAILY_SIGNALS` and its fetcher (`conditions/daily.py`).
 3. **Make it a candidate:** add it to `GROUP_DEFAULTS` for the groups it plausibly affects,
    or declare it in profiles.
-4. **Rerun:** `wildlife-radar run publish --force timed` (hourly) or `--force conditions`
+4. **Rerun:** `wildlife-scanner run publish --force timed` (hourly) or `--force conditions`
    (daily). The gate and scorecard decide whether it helps.

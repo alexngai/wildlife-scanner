@@ -1,4 +1,4 @@
-# White seabass (WSB, *Atractoscion nobilis*): case study for a "wildlife-radar" forecast
+# White seabass (WSB, *Atractoscion nobilis*): case study for a "wildlife-scanner" forecast
 
 **How this was researched, and the limits.** The session's network policy blocked WebFetch and curl to `api.inaturalist.org` and `fisherybulletin.nmfs.noaa.gov`, so I stopped trying other hosts as the tool told me to. Partway through, the shared WebSearch budget for this turn ran out. As a result, everything below comes from search-result abstracts and snippets, not full-text reads of the papers. Facts I could not confirm are marked **UNVERIFIED**. Evidence strength is labelled **strong**, **moderate** or **anecdotal**. To re-run the iNaturalist count, `api.inaturalist.org` has to be added to the session's allowed network hosts.
 

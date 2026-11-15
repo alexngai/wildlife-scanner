@@ -2,7 +2,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
-from wildlife_radar.policy import (
+from wildlife_scanner.policy import (
     ConservationStatus,
     PolicyTier,
     SensitivityInputs,

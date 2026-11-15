@@ -2,9 +2,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from wildlife_radar.core.signals import SignalDefinition, SignalKind, SignalValue
-from wildlife_radar.signals import SignalRegistry, SignalStore, builtin_registry
-from wildlife_radar.signals.derived import interpolate_linear, tide_stage
+from wildlife_scanner.core.signals import SignalDefinition, SignalKind, SignalValue
+from wildlife_scanner.signals import SignalRegistry, SignalStore, builtin_registry
+from wildlife_scanner.signals.derived import interpolate_linear, tide_stage
 
 
 def utc(*a):

@@ -1498,7 +1498,7 @@ wheels = [
 ]
 
 [[package]]
-name = "wildlife-radar"
+name = "wildlife-scanner"
 version = "0.0.1"
 source = { editable = "." }
 dependencies = [

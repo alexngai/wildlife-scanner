@@ -1,0 +1,28 @@
+name: Bug
+description: Something in the code, the API or the app doesn't work.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Commands, API calls or pages, in order.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: What happened, and what you expected
+      description: Include error messages or tracebacks (as text, not screenshots).
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: "`wildlife-scanner --version`, or the commit you're on."
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, Python version, browser (for the app).
