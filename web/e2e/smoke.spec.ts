@@ -121,3 +121,41 @@ test("species photos load, and a missing one falls back to the placeholder", asy
   await expect(fish.locator(".thumb-empty")).toBeVisible();
   await expect(fish.locator("img")).toHaveCount(0);
 });
+
+test("runs under the production Content-Security-Policy without violations", async ({ page }) => {
+  const csp = /Content-Security-Policy: (.+)/.exec(readFileSync("public/_headers", "utf8"))?.[1] ?? "";
+  expect(csp).not.toBe("");
+  // vite preview doesn't apply _headers (Cloudflare Pages does), so add the policy to each page here.
+  await page.route(
+    (url) =>
+      !url.pathname.startsWith("/data") && !url.pathname.startsWith("/api") && !/\.[a-z0-9]+$/i.test(url.pathname),
+    async (route) => {
+      const res = await route.fetch();
+      await route.fulfill({ response: res, headers: { ...res.headers(), "content-security-policy": csp } });
+    },
+  );
+  const violations: string[] = [];
+  page.on("console", (m) => {
+    if (/Content Security Policy|Refused to/i.test(m.text())) violations.push(m.text());
+  });
+  for (const path of [
+    "/r/testland/species/testus-primus?week=20&place=test-cove",
+    "/r/testland/places/test-cove?week=20",
+    "/r/testland",
+  ]) {
+    await page.goto(path);
+    await expect(page.locator("main h1")).toBeVisible();
+    await page.waitForLoadState("networkidle");
+  }
+  await expect(page.locator(".map canvas").first())
+    .toBeVisible()
+    .catch(() => undefined);
+  expect(violations).toEqual([]);
+});
+
+test("publishes the formats it reads at /compat.json", async ({ request }) => {
+  const res = await request.get("/compat.json");
+  expect(res.ok()).toBe(true);
+  const body = (await res.json()) as { formats: number[]; current: number };
+  expect(body.formats).toContain(body.current);
+});

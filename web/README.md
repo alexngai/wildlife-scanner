@@ -145,11 +145,15 @@ species and numbers. It covers:
 Build-time defaults are also available: `VITE_STATIC_BASE`, `VITE_API_BASE`,
 `VITE_REGIONS`, `VITE_BASEMAP_STYLE`, `VITE_BASEMAP_STYLE_DARK` and `VITE_SOURCE_URL`.
 
-**Cloudflare Pages** (for the hosting track, which sets this up later; nothing is created
-here):
-- build command: `cd web && npm ci && npm run build`;
-- output directory: `web/dist`;
-- `public/_redirects` gives SPA routing, and `public/_headers` sets security and cache headers.
+**Hosting:** the step-by-step setup for wildlifescanner.com (Cloudflare Pages, the R2 data bucket,
+fly.io API and worker, DNS) is in [DEPLOY.md](DEPLOY.md). Pages runs `npm ci && npm run build:production`
+in `web/`, which also writes `deploy/config.production.json` as the site's `/config.json`.
+`public/_redirects` gives SPA routing, and `public/_headers` sets security headers (a
+Content-Security-Policy) and caching.
+
+**Data formats:** the app reads the formats in `src/products/formats.ts`, each through an adapter, and
+publishes the list at `/compat.json` so the publisher can check it before a format change (see
+DEPLOY.md).
 
 ## Layout
 

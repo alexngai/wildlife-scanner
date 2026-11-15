@@ -1,11 +1,21 @@
+# Cloudflare Pages headers. The Content-Security-Policy lists every host the app may load from:
+# the data bucket and API (deploy/config.production.json), the default map layers and base map
+# (src/config.ts), and iNaturalist's open-data photos. Change it together with those
+# (tests/headers.test.ts checks they agree).
 /*
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: geolocation=(self), camera=(), microphone=()
   X-Frame-Options: DENY
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  Content-Security-Policy: default-src 'self'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://data.wildlifescanner.com https://inaturalist-open-data.s3.amazonaws.com https://tiles.openfreemap.org https://tiles.maps.eox.at https://s3.amazonaws.com https://wms.gebco.net; connect-src 'self' https://data.wildlifescanner.com https://api.wildlifescanner.com https://tiles.openfreemap.org https://tiles.maps.eox.at https://s3.amazonaws.com https://wms.gebco.net; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
 
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
 
 /config.json
   Cache-Control: no-cache
+
+/compat.json
+  Cache-Control: no-cache
+  Access-Control-Allow-Origin: *
