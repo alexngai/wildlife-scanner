@@ -1,183 +1,172 @@
-# wildlife-scanner
+# Wildlife Scanner
 
-An online resource to help people find wildlife. It fuses several data sources into predictions of when and where a species is likely to be:
+**When and where are you likely to see a species?** Wildlife Scanner combines millions of
+community and survey observations with environmental conditions, and answers that for every
+species with enough data: a map by week of the year, the best places and times, what to
+expect at a place this week, and how today compares with usual.
 
-- species observations (iNaturalist, GBIF, eBird, survey programs, fishing reports)
-- environmental conditions (water temperature, tides, moon, swell, clarity, weather)
-- prey and behavioral signals (for example, market squid spawning)
+It is free, non-commercial and open source (AGPL-3.0). Sensitive species are protected by
+design: their locations are generalized, coarsened or withheld, and nothing finer than the
+policy allows ever leaves the pipeline.
 
-**Flagship use case:** white seabass in Southern California for underwater photographers and freedivers.
+The first regions are **Monterey Bay** and **San Diego**, built from one shared California data
+area (about 180 million GBIF and iNaturalist records).
 
-**Second vertical:** birding.
+![A species page: the week's map with chance per outing by area, and the calendar](docs/images/species-map.png)
 
-## Status
+## What it does
 
-**Phases 0–2 are done**: the skeleton, a policy-enforced baseline for every species with method-specific effort models, and the profile-generation pipeline (identity crosswalk, trait import, occurrence-derived priors, evidence-checked LLM extraction, reconciliation and review). Phase 3, conditions and live signals, is next. Picking up the work? Read [`docs/handoff.md`](docs/handoff.md) first: current state, open threads, and how to rebuild the data. For the research and design, start with [`docs/research/00-synthesis.md`](docs/research/00-synthesis.md). It summarizes the data landscape, the evidence behind the candidate signals, a proposed model architecture, ethics guardrails and next steps. It links to seven detailed research reports.
+| | |
+|---|---|
+| ![Search with a season ribbon per species](docs/images/search-seasons.png) | ![A place's most likely species this week](docs/images/place-lists.png) |
+| **Search** about 5,000 species per region by common or scientific name. Each result shows a 52-week ribbon of when it is around. | **Places** list, week by week, the species you are most likely to record, those special to the place, and those peaking now, per survey method. |
+| ![Today's forecast compared with the usual chance](docs/images/today-vs-usual.png) | ![The species page on a phone, in dark mode](docs/images/mobile-dark.png) |
+| **Today vs usual** colours each area by the day's forecast against its usual chance, where a condition model (tides, water temperature, moon, recent sightings) has passed its backtest. | Works on phones, in light and dark mode. Every map and list carries its data licence, and photos carry their credit. |
 
-The framework design (draft) is in [`docs/design/framework.md`](docs/design/framework.md). It covers the species-agnostic architecture: core concepts, species profiles generated from metadata, how signals are combined, rare and cryptic species, species-first and place-first queries, the policy layer and the roadmap.
+Screenshots: the web app running on real Monterey Bay data (November 2026). Map data © OpenFreeMap,
+OpenMapTiles and OpenStreetMap contributors. Species photos are from iNaturalist under Creative
+Commons licences; see [`docs/images/CREDITS.md`](docs/images/CREDITS.md).
 
-## Development
+Also:
 
-**Phase 0 (skeleton) and Phase 1 (a baseline for every species) are done.**
+- **Calendars** for any place or map cell, with the best weeks.
+- **Time of day**: when in the day (and on which tide) a species is recorded, and an hourly forecast
+  for species whose timing model passed its test.
+- **Recent activity** near a place: what has been reported in the last two weeks, and what that
+  makes more likely today. Records are published with a delay (at least 24 hours).
+- **An HTTP API** for everything above, plus static files that a CDN can serve.
 
-Phase 1 adds:
-- GBIF snapshot ingestion into a DuckDB observation store
-- a Level-0 baseline for every species with enough records. It is corrected for where observers go (target-group background) and smoothed over seasons and space.
-- backtest gates against a range-only map
-- fail-closed sensitivity tiers
-- a policy-enforced query layer and HTTP API, for both species-first and place-first questions
+## How it works
 
-Requires Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/).
+```mermaid
+flowchart LR
+    subgraph Sources
+        GBIF[GBIF monthly snapshot<br/>incl. eBird, surveys]
+        INAT[iNaturalist API<br/>live updates]
+        NOAA[NOAA tides and<br/>water temperature]
+        STAT[Conservation statuses<br/>IUCN, CITES, state lists]
+    end
+    subgraph Lake["Lake (shared by all regions)"]
+        TILES[Coverage-area tiles<br/>one pass per month]
+        LIVE[Live log<br/>one stream per area]
+        REF[Reference store<br/>names, taxon records]
+    end
+    subgraph Region["Per region (job graph)"]
+        STORE[(Work store)]
+        BASE[Seasonal baseline<br/>effort-corrected]
+        TIERS[Sensitivity tiers<br/>fail closed]
+        MODELS[Condition, nowcast<br/>and hourly models]
+        GATE{Backtests and<br/>tier audit}
+    end
+    GBIF --> TILES --> STORE
+    INAT --> LIVE --> STORE
+    NOAA --> MODELS
+    STAT --> TIERS
+    REF --> TIERS
+    STORE --> BASE --> MODELS
+    BASE --> GATE
+    TIERS --> GATE
+    MODELS --> GATE
+    GATE -->|passes| PUB[Published version<br/>bundle + static files]
+    PUB --> API[HTTP API]
+    PUB --> WEB[Web app via CDN]
+```
+
+1. **Ingest once per area.** Each month GBIF's snapshot (which includes eBird, survey programs and
+   research-grade iNaturalist records) is read once for the whole coverage area, California here,
+   and stored as 1° Parquet tiles. iNaturalist's API feeds a live log every 25 minutes, again once
+   for the area. A region inside the area loads its tiles and the new log entries without
+   downloading anything itself. Records deleted at the source disappear: monthly through the
+   snapshot, daily through a check of recent iNaturalist observations.
+2. **Model what observers would see.** The **baseline** estimates, per map cell and week, the chance
+   that an outing records the species. It is corrected for where and how people look (checklists,
+   casual sightings and surveys are modelled separately), smoothed over space and season, and kept
+   only where it beats a range-only map on held-out years. **Condition models** (tides, water
+   temperature, moon), **nowcasts** (recent sightings) and **hourly timing models** each have to
+   beat the level below them on held-out data, or they are not used.
+3. **Protect sensitive species.** Each species gets a tier from authoritative status sources:
+   - **open**: weekly maps at the model's resolution (3.7 km cells in the current regions; never
+     finer than 1.4 km);
+   - **generalized**: weekly, at about 10 km;
+   - **coarse**: monthly, at about 70 km, shown as presence only;
+   - **withheld**: absent everywhere.
+
+   Missing or failed lookups fail closed, so the species stays protected. Language models never set
+   or lower a status. Recent records are published with a delay: 24 hours for open species, 7 days
+   for generalized and 30 days for coarse ones.
+4. **Publish only what passed.** A region is published only if the tier audit finds no
+   high-severity problems. A published version is a read-only bundle for the API plus
+   content-addressed static files (maps, place lists and a search index), uploaded before the
+   `CURRENT` pointer moves. Unchanged files are reused, so a routine update uploads a few kilobytes.
+
+The design notes go deeper: [`docs/design/framework.md`](docs/design/framework.md) (concepts and
+policy), [`docs/design/data-platform.md`](docs/design/data-platform.md) (jobs and storage),
+[`docs/design/ingestion.md`](docs/design/ingestion.md) (coverage areas, the live log, deletions),
+[`docs/design/factors.md`](docs/design/factors.md) (conditions and time of day), and
+[`docs/design/static-products.md`](docs/design/static-products.md) (the file formats the app reads).
+The research behind them starts at [`docs/research/00-synthesis.md`](docs/research/00-synthesis.md).
+
+## Try it
+
+Requires Python 3.11 or later and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync
-```
-
-```bash
 uv run pytest
 ```
 
-```bash
-uv run ruff check . && uv run ruff format --check .
-```
-
-### Try it offline
-
-This builds a synthetic demo database and serves it:
+Build a small synthetic database and serve it, offline:
 
 ```bash
 uv run wildlife-scanner demo
-```
-
-```bash
-uv run wildlife-scanner query place --db data/demo.duckdb --lat 32.85 --lon -117.27 --date 2026-05-15
-```
-
-```bash
 uv run wildlife-scanner serve --db data/demo.duckdb
 ```
 
-Then open `http://127.0.0.1:8000/docs`.
+Then open `http://127.0.0.1:8000/docs` for the API.
 
-### Real data for Southern California
-
-Data goes in `data/`, which git ignores:
-
-1. Ingest the GBIF monthly snapshot (AWS open data, needs DuckDB's `httpfs` extension), keeping only records inside the region:
-
-   ```bash
-   uv run wildlife-scanner ingest-snapshot --region socal --snapshot-date 2026-11-01
-   ```
-
-2. Build the Level-0 baseline and backtest it against a range-only map:
-
-   ```bash
-   uv run wildlife-scanner build-baseline --region socal
-   ```
-
-   ```bash
-   uv run wildlife-scanner evaluate-baseline --region socal --split 2025-01-01
-   ```
-
-3. Look up conservation statuses and assign sensitivity tiers. Without a completed lookup, taxa fail closed to awareness-only:
-
-   ```bash
-   uv run wildlife-scanner build-tiers --region socal
-   ```
-
-4. Query or serve:
-
-   ```bash
-   uv run wildlife-scanner query taxa
-   ```
-
-   ```bash
-   uv run wildlife-scanner serve
-   ```
-
-5. Generate draft species profiles (written to `data/profiles/generated/`). Download [TetrapodTraits](https://zenodo.org/records/11303604) into `data/` first if you want trait values:
-
-   ```bash
-   uv run wildlife-scanner profilegen generate "Puma concolor" "Limosa fedoa" --traits data/traits/TetrapodTraits_1.0.0.csv --db data/wildlife-scanner.duckdb --region socal
-   ```
-
-   To resolve every baseline taxon (verified iNaturalist ids make `build-tiers` faster and robust to renamed taxa), run this before step 3:
-
-   ```bash
-   uv run wildlife-scanner profilegen crosswalk --db data/wildlife-scanner.duckdb --region-id socal
-   ```
-
-   LLM extraction from Wikipedia (`--extract`) needs the `llm` extra (`uv sync --extra llm`), an Anthropic API key, an extraction model (`--model` or `WILDLIFE_SCANNER_EXTRACTION_MODEL`), and a User-Agent with your contact details (Wikimedia policy). See [`profiles/README.md`](profiles/README.md) for review and promotion.
-
-6. Phase 3, conditions and live signals. Download daily station signals (NOAA CO-OPS water/air temperature, wind, tides), then fit Level 1 (conditions) and Level 2 (recent sightings) for species profiles. Each level must beat the one below in a backtest:
-
-   ```bash
-   uv run wildlife-scanner fetch-signals --region socal --start 2010-01-01
-   ```
-
-   ```bash
-   uv run wildlife-scanner fit-conditions --region socal --split 2023-01-01 --since-year 2010
-   ```
-
-   ```bash
-   uv run wildlife-scanner scorecard --region socal
-   ```
-
-   The scorecard reports, for each condition term, whether it improves held-out predictions (supported, contradicted or inconclusive). `serve` then answers `/species/{id}/forecast?place_id=…&date=…` at the highest level that passed its gate, with each term's contribution.
-
-   The `nowcast` job (part of `run publish`) fits recent-sightings forecasts for the best-sampled openly mapped species, with no profile needed. `/places/{id}/recent` and `/nearby/recent` list what has been reported nearby in the last two weeks, and which species those reports make more likely today. They use live sources only (iNaturalist) and respect the publication delays.
-
-7. Before publishing, check the tiers against every status signal in the store. The command exits non-zero on high-severity findings:
-
-   ```bash
-   uv run wildlife-scanner audit-tiers --region socal
-   ```
-
-Data repairs: `repair-dates` re-dates records a dataset stamped with a placeholder date, using the date in their event ids (see `regions/california/datasets.yaml`).
-
-### Running it as a pipeline
-
-After the first snapshot ingest, the steps above form a job graph ([`docs/design/data-platform.md`](docs/design/data-platform.md)). `run` brings a target up to date and skips every job whose inputs haven't changed. Each job records a manifest under `data/lake/manifests/`:
+**Real data** for a region (needs network access to GBIF, iNaturalist and NOAA; the first run
+takes 1–2 hours and about 20 GB of disk):
 
 ```bash
-uv run wildlife-scanner run list
+uv run wildlife-scanner run publish --region montereybay --db data/mb.duckdb --lake data/lake \
+    --ingest-snapshots
+uv run wildlife-scanner serve --region montereybay --bundle-dir data/lake/publish
 ```
 
-```bash
-uv run wildlife-scanner run publish --region socal
-```
+[`docs/running.md`](docs/running.md) walks through each step. [`docs/deploy.md`](docs/deploy.md)
+covers scheduled updates, object storage and hosting. The web app lives in `web/`; see its README.
 
-`publish` writes a policy-filtered, read-only serving bundle per region, and only if the tier audit has no high-severity findings. The API serves the current bundle and switches to new ones as they are published, so rebuilds never block it:
+## Repository layout
 
-```bash
-uv run wildlife-scanner serve --region socal --bundle-dir data/lake/publish
-```
+| Path | What |
+|---|---|
+| `src/wildlife_scanner/` | the package: connectors, storage, baseline, conditions, policy, pipeline, serving, API |
+| `regions/` | region packs: bounding box, places, status scopes, curated statuses, dataset registry |
+| `profiles/` | species profiles and guild templates (drafts); see [`profiles/README.md`](profiles/README.md) |
+| `web/` | the web app (React, MapLibre, H3) |
+| `docs/` | design notes, research, running and deployment |
+| `deploy/` | container image and fly.io configs |
+| [`DATA_SOURCES.md`](DATA_SOURCES.md) | every data source, its licence and terms |
 
-Scheduled every 30 minutes, `run publish` refreshes recent iNaturalist records (the `live` job) and republishes. Signals refresh daily, and baselines, tiers and condition models monthly.
+## Contributing
 
-Other commands work without a database:
+Contributions are welcome: code, region packs, species knowledge, and reports of anything that
+looks wrong. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-```bash
-uv run wildlife-scanner astro --lat 32.8505 --lon -117.272 --date 2026-11-15 --utc-offset -8
-```
-
-```bash
-uv run wildlife-scanner profiles tier atractoscion-nobilis --region socal --date 2026-05-01
-```
-
-```bash
-uv run wildlife-scanner tides --station 9410230 --start 2026-11-15 --days 2
-```
-
-Where things live:
-- `src/wildlife_scanner/`: the package. Its layout is in [`docs/design/framework.md`](docs/design/framework.md) §11.
-- `profiles/`: species profiles and guild templates (drafts). See [`profiles/README.md`](profiles/README.md).
-- `regions/socal/`: the first region pack (places, status scopes, curated statuses).
-- [`DATA_SOURCES.md`](DATA_SOURCES.md): the sources each connector uses and their terms.
+- **Found a bug or a wrong prediction?** [Open an issue](../../issues/new/choose); the templates
+  ask for what we need.
+- **Found a sensitive species exposed, or a security problem?** Please don't open a public issue.
+  Report it privately as described in [`SECURITY.md`](SECURITY.md).
 
 ## License
 
-wildlife-scanner is an exclusively **non-commercial**, free, educational project.
+Wildlife Scanner is an exclusively **non-commercial**, free, educational project.
 
-- **Code:** [GNU AGPL-3.0](LICENSE). If you run a modified version as a network service, you must offer its source to your users.
-- **Third-party data:** not included in this repository. Each source keeps its own license and terms; many are non-commercial. Anyone running this code is responsible for complying with them. See [`docs/design/licensing.md`](docs/design/licensing.md).
+- **Code:** [GNU AGPL-3.0](LICENSE). If you run a modified version as a network service, you must
+  offer its source to your users.
+- **Data:** no third-party data is included in this repository. Each source keeps its own licence
+  and terms, and many are non-commercial. Anyone running this code is responsible for complying with
+  them. See [`docs/design/licensing.md`](docs/design/licensing.md) and [`DATA_SOURCES.md`](DATA_SOURCES.md).
+
+Built on data from GBIF and its publishers, iNaturalist and its observers, eBird (via GBIF), and
+NOAA, and on the work of the many people who record wildlife.
