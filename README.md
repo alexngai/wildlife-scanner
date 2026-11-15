@@ -23,9 +23,10 @@ area (about 180 million GBIF and iNaturalist records).
 | ![Today's forecast compared with the usual chance](docs/images/today-vs-usual.png) | ![The species page on a phone, in dark mode](docs/images/mobile-dark.png) |
 | **Today vs usual** colours each area by the day's forecast against its usual chance, where a condition model (tides, water temperature, moon, recent sightings) has passed its backtest. | Works on phones, in light and dark mode. Every map and list carries its data licence, and photos carry their credit. |
 
-Screenshots: the web app running on real Monterey Bay data (November 2026). Map data © OpenFreeMap,
-OpenMapTiles and OpenStreetMap contributors. Species photos are from iNaturalist under Creative
-Commons licences; see [`docs/images/CREDITS.md`](docs/images/CREDITS.md).
+Screenshots: the web app running on real Monterey Bay and San Diego data (November 2026). In the
+app, species have openly licensed iNaturalist photos with their credits; the screenshots show
+placeholders instead. Map data © OpenFreeMap, OpenMapTiles and OpenStreetMap contributors; see
+[`docs/images/CREDITS.md`](docs/images/CREDITS.md).
 
 Also:
 
