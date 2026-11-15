@@ -11,8 +11,10 @@ any coding session.
 | `https://api.wildlifescanner.com` | the API (forecasts, recent sightings) | fly.io, auto-stopping |
 | (private) | the worker that rebuilds and publishes the data | fly.io, with a volume |
 
-The worker and API steps are the data pipeline's ([`docs/deploy.md`](../docs/deploy.md)). This
-guide says when to do them.
+The worker and API steps are the data pipeline's ([`docs/deploy.md`](../docs/deploy.md),
+*Bringing it up*). This guide is the overall checklist and says when to do them. **Order matters:**
+the app goes live before the first data, because the worker only publishes a format the live app
+says it reads.
 
 ## 1. Put the domain on Cloudflare
 
@@ -25,6 +27,9 @@ R2 custom domains and Pages custom domains need the domain's DNS on Cloudflare.
 4. **SSL/TLS → Overview:** set the mode to **Full (strict)**.
 
 ## 2. The data bucket (R2)
+
+The private lake bucket, `wildlife-scanner-lake`, already exists. This step creates the public
+one.
 
 1. **R2 Object Storage → Create bucket**: name `wildlife-scanner-publish`, location *Automatic*.
    R2 needs a payment method on the account, even within the free tier.
@@ -50,43 +55,16 @@ R2 custom domains and Pages custom domains need the domain's DNS on Cloudflare.
    The app reads the data from this other address, so without this rule browsers refuse it.
    `localhost:5173` lets a developer point a local copy of the app at the live data. Remove it
    if you'd rather not allow that.
-4. **API tokens** for the worker (read and write) and the API (read only), scoped to this
-   bucket: follow [`docs/deploy.md`](../docs/deploy.md) ("Bringing it up", step 1). Paste them
-   only into fly.io secrets, never into the repository or a chat.
+4. **API tokens** for the worker (read and write) and the API (read only): follow
+   [`docs/deploy.md`](../docs/deploy.md) → *Bringing it up* → **1. Buckets and R2 tokens**. Paste
+   them only into fly.io secrets, never into the repository or a chat.
 
-## 3. The worker: first data
+## 3. The web app (Pages): goes live first
 
-Follow [`docs/deploy.md`](../docs/deploy.md), step 2, with
-`WILDLIFE_SCANNER_PUBLISH_URL=s3://wildlife-scanner-publish`. The first run builds every
-region from scratch and pushes it to the bucket: about 1.5 hours per region.
-
-When it finishes, check in a browser:
-
-- `https://data.wildlifescanner.com/region=montereybay/CURRENT` shows a version, e.g.
-  `20261116T…`;
-- `https://data.wildlifescanner.com/region=montereybay/version=<that version>/static/index.json`
-  shows `"format": 4`.
-
-## 4. The API
-
-Follow [`docs/deploy.md`](../docs/deploy.md), step 3, with these settings:
-
-| Setting | Value |
-|---|---|
-| `WILDLIFE_SCANNER_PUBLISH_URL` | `s3://wildlife-scanner-publish` |
-| `WILDLIFE_SCANNER_CORS_ORIGINS` | `https://wildlifescanner.com,https://www.wildlifescanner.com` |
-| `WILDLIFE_SCANNER_SOURCE_URL` | `https://github.com/alexngai/wildlife-scanner` |
-
-Then give it its address:
-
-1. `fly certs add api.wildlifescanner.com -a <api app>`. It prints the DNS records it needs.
-2. Cloudflare → **DNS → Records → Add record**: **CNAME** `api` → `<api app>.fly.dev`, with
-   **Proxy status: DNS only** (grey cloud), so fly.io can issue the certificate. If it asks for
-   an `_acme-challenge` CNAME too, add that one as well.
-3. `fly certs show api.wildlifescanner.com -a <api app>` until it says the certificate is
-   issued. Then `https://api.wildlifescanner.com/health` names the version it serves.
-
-## 5. The web app (Pages)
+The worker only publishes a data format that the live app lists at
+`https://wildlifescanner.com/compat.json`, and it refuses to publish if it can't reach that
+address. So the app goes up **before** the first data. Until then it shows the region as "not
+available".
 
 1. **Workers & Pages → Create → Pages → Connect to Git**, and pick `alexngai/wildlife-scanner`.
 2. Build settings:
@@ -110,18 +88,36 @@ Then give it its address:
    - when *Hostname equals* `www.wildlifescanner.com`;
    - redirect *Dynamic* to `concat("https://wildlifescanner.com", http.request.uri.path)`;
    - status **301**, with *Preserve query string* on.
+6. Check that `https://wildlifescanner.com/compat.json` shows `{"formats":[4],"current":4}`.
 
 Preview deployments (one per branch or pull request, at `*.pages.dev`) use the same production
 data and API. Those reject the preview addresses (CORS), so previews show the app but no data.
 That's expected; production is unaffected.
 
-## 6. Check it
+## 4. The worker, the API and the first data
+
+Follow [`docs/deploy.md`](../docs/deploy.md) → *Bringing it up*:
+
+- **2. Worker** (`wildlife-scanner-worker`): its first run builds San Diego, then Monterey Bay
+  (1–2 hours each), and publishes each one once the app lists the format.
+- **3. API** (`wildlife-scanner-api`): its settings (the allowed origins and the source link)
+  are already in `deploy/fly.api.toml`. For `api.wildlifescanner.com`, add the CNAME record that
+  `fly certs add` prints in Cloudflare → **DNS → Records**, with **Proxy status: DNS only** (grey
+  cloud), so fly.io can issue the certificate.
+- **4. First data** (optional): seed the bucket with versions that are already built, so the
+  site has data before the worker's first run ends.
+
+Until the first publish, the API answers 503 for each region and the app says the region isn't
+available yet.
+
+## 5. Check it
 
 | Check | Expect |
 |---|---|
 | `https://wildlifescanner.com` | the region list, then search, maps, places |
 | `https://wildlifescanner.com/compat.json` | `{"formats":[4],"current":4}` |
-| `https://api.wildlifescanner.com/health` | status ok, and the version it serves |
+| `https://api.wildlifescanner.com/health` | each region's version and data freshness |
+| `https://data.wildlifescanner.com/region=sandiego/CURRENT` | the same version as `/health` |
 | A species page → **Today vs usual** | a coloured map, or "no daily factors are modelled yet" |
 | About page | sources and licences listed (from the API) |
 
@@ -134,7 +130,7 @@ curl -sI -H 'Origin: https://wildlifescanner.com' -H 'Accept-Encoding: br, gzip'
 curl -sI https://wildlifescanner.com | grep -i content-security-policy
 ```
 
-## 7. After launch
+## 6. After launch
 
 - **Rate limiting on the API.** Once it works, switch the `api` record to **Proxied** (orange
   cloud). If the certificate then fails to renew, use fly's DNS validation record.
@@ -152,8 +148,8 @@ The app reads the formats listed in `src/products/formats.ts` and publishes them
 
 1. **App first.** Add an adapter so the app reads N and N+1, make N+1 current, and deploy (merge
    to `main`). Check `https://wildlifescanner.com/compat.json` lists N+1.
-2. **Then the data.** Publish format N+1. The publisher can fetch `/compat.json` and refuse a
-   format the live app doesn't list.
+2. **Then the data.** Publish format N+1. The worker and `push-publish` fetch `/compat.json`
+   first and refuse a format the live app doesn't list.
 3. **Clean up later.** Once no published version is format N any more, drop N's adapter.
 
 If data ever arrives in a format the open app doesn't read (e.g. a tab left open across a
