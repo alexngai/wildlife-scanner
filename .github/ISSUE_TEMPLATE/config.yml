@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: A sensitive species is shown too precisely, or a security problem
+    url: https://github.com/alexngai/wildlife-scanner/security/advisories/new
+    about: Report it privately, not in a public issue (see SECURITY.md).

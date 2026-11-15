@@ -7,7 +7,7 @@ the California curated statuses and dataset registry (`regions/california`).
 
 ## 1. The run
 
-One command, `wildlife-radar run publish --region montereybay --ingest-snapshots` (plus the
+One command, `wildlife-scanner run publish --region montereybay --ingest-snapshots` (plus the
 reruns below):
 
 | Step | Result |

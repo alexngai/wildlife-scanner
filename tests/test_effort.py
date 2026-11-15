@@ -3,7 +3,7 @@ from datetime import UTC, date, datetime
 import h3
 import pytest
 
-from wildlife_radar.baseline import (
+from wildlife_scanner.baseline import (
     DatasetEntry,
     DatasetRegistry,
     backtest_baseline,
@@ -12,12 +12,12 @@ from wildlife_radar.baseline import (
     label_for,
     method_for,
 )
-from wildlife_radar.baseline.effort import EBIRD_EOD_DATASET, create_dataset_classes
-from wildlife_radar.policy.statuses import StaticStatusProvider, TierService, build_tier_table
-from wildlife_radar.regions import load_region
-from wildlife_radar.serving import BaselineQueries
-from wildlife_radar.storage import ObservationStore
-from wildlife_radar.synthetic import DEFAULT_SPECIES, SyntheticSpecies, SyntheticWorld
+from wildlife_scanner.baseline.effort import EBIRD_EOD_DATASET, create_dataset_classes
+from wildlife_scanner.policy.statuses import StaticStatusProvider, TierService, build_tier_table
+from wildlife_scanner.regions import load_region
+from wildlife_scanner.serving import BaselineQueries
+from wildlife_scanner.storage import ObservationStore
+from wildlife_scanner.synthetic import DEFAULT_SPECIES, SyntheticSpecies, SyntheticWorld
 
 KELP_FISH = SyntheticSpecies(
     name="Piscis kelpensis",
@@ -181,7 +181,7 @@ def test_labels_and_methods():
 
 
 def test_bundled_registry_is_valid():
-    from wildlife_radar.regions import region_dir
+    from wildlife_scanner.regions import region_dir
 
     registry = DatasetRegistry.load(region_dir("california") / "datasets.yaml")
     registry.check()
@@ -237,9 +237,9 @@ def test_survey_groups_have_flat_seasonality(world_store):
 def test_placeholder_dates_are_dropped_and_detected():
     from datetime import timedelta
 
-    from wildlife_radar.baseline.builder import BaselineConfig, create_training_view
-    from wildlife_radar.baseline.effort import date_spikes
-    from wildlife_radar.core.time import Precision, TimeWindow
+    from wildlife_scanner.baseline.builder import BaselineConfig, create_training_view
+    from wildlife_scanner.baseline.effort import date_spikes
+    from wildlife_scanner.core.time import Precision, TimeWindow
 
     world = SyntheticWorld(
         observers=5,
@@ -280,7 +280,7 @@ def test_placeholder_dates_are_dropped_and_detected():
 def test_survey_taxa_without_absences_use_casual_effort(world_store):
     # A program that records absences for fishes but only presences for a snail: the snail's
     # records can't support a detections/trials estimate.
-    from wildlife_radar.baseline.builder import BaselineConfig, create_training_view
+    from wildlife_scanner.baseline.builder import BaselineConfig, create_training_view
 
     world, store, _ = world_store
     store.conn.execute(
@@ -312,10 +312,10 @@ def test_redate_from_event_ids_and_fetch_partitions():
 
     import httpx
 
-    from wildlife_radar.connectors.base import RateLimiter, make_client
-    from wildlife_radar.connectors.gbif_events import fetch_event_ids
-    from wildlife_radar.core.time import Precision, TimeWindow
-    from wildlife_radar.storage.repair import (
+    from wildlife_scanner.connectors.base import RateLimiter, make_client
+    from wildlife_scanner.connectors.gbif_events import fetch_event_ids
+    from wildlife_scanner.core.time import Precision, TimeWindow
+    from wildlife_scanner.storage.repair import (
         missing_event_ids,
         redate_from_event_ids,
         set_event_ids,

@@ -8,11 +8,11 @@ from datetime import UTC, datetime
 import h3
 from test_publish import NOW, store  # noqa: F401  (fixture)
 
-from wildlife_radar.pipeline.publish import publish_bundle
-from wildlife_radar.pipeline.static import before_swap, in_use, referenced
-from wildlife_radar.pipeline.sync import prune_local, push_publish
-from wildlife_radar.policy.tiers import rule_for
-from wildlife_radar.storage.objects import LocalStore
+from wildlife_scanner.pipeline.publish import publish_bundle
+from wildlife_scanner.pipeline.static import before_swap, in_use, referenced
+from wildlife_scanner.pipeline.sync import prune_local, push_publish
+from wildlife_scanner.policy.tiers import rule_for
+from wildlife_scanner.storage.objects import LocalStore
 
 
 def _publish(st, region, root, now=NOW):
@@ -48,7 +48,7 @@ def _photo(pid, license_code):
 
 
 def test_static_products_follow_policy(store, tmp_path):  # noqa: F811
-    from wildlife_radar.connectors.inaturalist_taxa import RECORDS_SCHEMA
+    from wildlife_scanner.connectors.inaturalist_taxa import RECORDS_SCHEMA
 
     st, region = store
     st.conn.execute(RECORDS_SCHEMA)
@@ -69,19 +69,19 @@ def test_static_products_follow_policy(store, tmp_path):  # noqa: F811
     taxa = _taxa(result)
     by_id = {t["id"]: t for t in taxa}
     assert "vernalis-litoralis" in by_id and "secretus-maximus" not in by_id
-    assert index["format"] == 3 and "maps" not in index  # map paths moved to taxa.json
+    assert index["format"] == 4 and "maps" not in index  # map paths are in taxa.json
     maps = {t["id"]: t["map"] for t in taxa if "map" in t}
     assert "secretus-maximus" not in maps
-    # Photos: the first openly licensed one, hotlinked, credit kept.
+    # Photos: the first openly licensed one, by id; URLs from the index's templates.
     photo = by_id["vernalis-litoralis"]["photo"]
-    assert photo == {
-        "url": "https://inaturalist-open-data.s3.amazonaws.com/photos/12/square.jpg",
-        "url_medium": "https://inaturalist-open-data.s3.amazonaws.com/photos/12/small.jpg",
-        "license": "cc-by",
-        "attribution": "(c) someone 12",
-        "source": "iNaturalist",
-        "source_url": "https://www.inaturalist.org/photos/12",
-    }
+    assert photo == {"id": 12, "ext": "jpg", "license": "cc-by", "attribution": "(c) someone 12"}
+    urls = index["photos"]
+    fill = {"id": photo["id"], "ext": photo["ext"]}
+    assert urls["image"].format(size=urls["sizes"]["thumb"], **fill) == (
+        "https://inaturalist-open-data.s3.amazonaws.com/photos/12/square.jpg"
+    )
+    assert urls["image"].format(size=urls["sizes"]["medium"], **fill).endswith("/12/small.jpg")
+    assert urls["page"].format(**fill) == "https://www.inaturalist.org/photos/12"
     assert "photo" not in by_id["raritas-orientalis"]
     # Season summary: OPEN taxa only (from the published regional values), 0–9 per week.
     seas = by_id["vernalis-litoralis"]["season"]
@@ -95,7 +95,7 @@ def test_static_products_follow_policy(store, tmp_path):  # noqa: F811
         assert "secretus" not in path.read_text(encoding="utf-8").lower(), path
     # COARSE (IUCN EN): monthly maps at the landscape resolution only.
     coarse = json.loads((region_dir / maps["raritas-orientalis"]).read_text())
-    assert coarse["format"] == 3 and len(coarse["segments"]) == 1
+    assert coarse["format"] == 4 and len(coarse["segments"]) == 1
     seg = coarse["segments"][0]
     assert (
         seg["tier"] == 2 and seg["granularity"] == "month" and seg["periods"] == list(range(1, 13))
@@ -118,7 +118,7 @@ def test_static_products_follow_policy(store, tmp_path):  # noqa: F811
     doc = json.loads((region_dir / place["file"]).read_text())
     assert len(doc["weeks"]) == 52 and doc["weeks"][0].endswith("/w01.json")
     weeks = [json.loads((region_dir / path).read_text()) for path in doc["weeks"]]
-    assert [w["week"] for w in weeks] == list(range(1, 53)) and weeks[0]["format"] == 3
+    assert [w["week"] for w in weeks] == list(range(1, 53)) and weeks[0]["format"] == 4
     items = [
         row
         for w in weeks
@@ -164,7 +164,7 @@ def test_unchanged_inputs_reuse_files_and_push_only_new_ones(store, tmp_path):  
 
 
 def test_display_common_names():
-    from wildlife_radar.core.names import display_common_name as d
+    from wildlife_scanner.core.names import display_common_name as d
 
     assert d("coyote brush") == "Coyote Brush"
     assert d("bird's-foot trefoil") == "Bird's-foot Trefoil"
@@ -175,8 +175,8 @@ def test_display_common_names():
 
 
 def test_batched_maps_equal_single_maps(store):  # noqa: F811
-    from wildlife_radar.policy.statuses import TierService
-    from wildlife_radar.serving.queries import BaselineQueries
+    from wildlife_scanner.policy.statuses import TierService
+    from wildlife_scanner.serving.queries import BaselineQueries
 
     st, region = store
     q = BaselineQueries(st.conn, region, TierService(st.conn, "socal"))
@@ -191,8 +191,8 @@ def test_batched_maps_equal_single_maps(store):  # noqa: F811
 
 def test_matrix_maps_equal_the_policy_filtered_maps(store):  # noqa: F811
     """The vectorized matrices carry exactly what species_maps (EgressFilter) returns."""
-    from wildlife_radar.policy.statuses import TierService
-    from wildlife_radar.serving.queries import BaselineQueries
+    from wildlife_scanner.policy.statuses import TierService
+    from wildlife_scanner.serving.queries import BaselineQueries
 
     st, region = store
     q = BaselineQueries(st.conn, region, TierService(st.conn, "socal"))
@@ -218,3 +218,20 @@ def test_matrix_maps_equal_the_policy_filtered_maps(store):  # noqa: F811
                 assert abs(got[c][0] - p) < 2e-6 and got[c][1] == conf
             assert all(h3.get_resolution(c) == seg.resolution for c in seg.cells)
     assert q.species_matrix("secretus-maximus", 2026) == []  # withheld: nothing at all
+
+
+def test_compact_photo_needs_a_url_that_fits_the_template():
+    from wildlife_scanner.pipeline.static import compact_photo
+
+    base = "https://inaturalist-open-data.s3.amazonaws.com/photos/41"
+    full = {
+        "license": "cc0",
+        "attribution": "x",
+        "source_url": "https://www.inaturalist.org/photos/41",
+    }
+    assert compact_photo({**full, "url": f"{base}/square.JPG"})["ext"] == "JPG"
+    assert compact_photo({**full, "url": f"{base}/square."})["ext"] == ""  # old uploads
+    assert compact_photo({**full, "url": f"{base}/medium.jpg"}) is None
+    assert compact_photo({**full, "url": "https://elsewhere.example/41/square.jpg"}) is None
+    other = {**full, "source_url": "https://www.inaturalist.org/photos/42"}
+    assert compact_photo({**other, "url": f"{base}/square.jpg"}) is None

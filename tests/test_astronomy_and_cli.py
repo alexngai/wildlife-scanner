@@ -2,14 +2,14 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from wildlife_radar.cli import main
-from wildlife_radar.connectors.astronomy import (
+from wildlife_scanner.cli import main
+from wildlife_scanner.connectors.astronomy import (
     astro_state,
     astronomy_signals,
     daily_events,
     hours_since_sunset,
 )
-from wildlife_radar.core.time import DETERMINISTIC_ISSUE_TIME
+from wildlife_scanner.core.time import DETERMINISTIC_ISSUE_TIME
 
 LA_JOLLA = (32.8505, -117.272)
 

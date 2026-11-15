@@ -3,7 +3,7 @@
     uv run python tools/list_parts.py 2026-11-01 data/parts.json
 
 Writes ``[[key, size], ...]`` for ``tools/extract_region.py``. The ``snapshot`` job does all
-three steps itself with ``wildlife-radar run ... --ingest-snapshots``.
+three steps itself with ``wildlife-scanner run ... --ingest-snapshots``.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import sys
 
-from wildlife_radar.connectors.gbif_snapshot_remote import list_parts
+from wildlife_scanner.connectors.gbif_snapshot_remote import list_parts
 
 
 def main(date: str, out: str) -> None:

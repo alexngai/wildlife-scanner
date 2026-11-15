@@ -3,9 +3,9 @@ from datetime import UTC, datetime
 import h3
 import pytest
 
-from wildlife_radar.baseline import BaselineConfig, backtest_baseline, build_baseline, estimate
-from wildlife_radar.storage import ObservationStore
-from wildlife_radar.synthetic import SyntheticWorld
+from wildlife_scanner.baseline import BaselineConfig, backtest_baseline, build_baseline, estimate
+from wildlife_scanner.storage import ObservationStore
+from wildlife_scanner.synthetic import SyntheticWorld
 
 
 def spearman(a, b):
@@ -114,6 +114,16 @@ def test_backtest_gates(world_store):
         "SELECT count(*) FROM prior_effort WHERE region_id LIKE '%backtest%'"
     ).fetchone()[0]
     assert leftovers == 0
+    # Per-group cap: a group's taxa × sampled visits stays within the budget.
+    capped = backtest_baseline(
+        store.conn,
+        region_id="test",
+        bbox=world.bbox,
+        split=datetime(2025, 1, 1, tzinfo=UTC),
+        max_group_trials=2_000,
+    )
+    assert capped and sum(s.n_test for s in capped) <= 2_000
+    assert sum(s.n_test for s in capped) < sum(s.n_test for s in scores.values())
 
 
 def test_cutoff_and_min_visits():
@@ -147,8 +157,8 @@ def test_config_validation():
 def test_specimens_and_captives_are_excluded():
     from datetime import timedelta
 
-    from wildlife_radar.core import Observation, Outcome, TaxonRef, TaxonScheme, TimeWindow
-    from wildlife_radar.core.licenses import CC_BY
+    from wildlife_scanner.core import Observation, Outcome, TaxonRef, TaxonScheme, TimeWindow
+    from wildlife_scanner.core.licenses import CC_BY
 
     world = SyntheticWorld(seed=9, observers=10, visits_per_observer=20)
     obs = world.generate()
@@ -184,7 +194,7 @@ def test_specimens_and_captives_are_excluded():
 
 
 def test_restricted_licenses_are_excluded():
-    from wildlife_radar.core.licenses import ALL_RIGHTS_RESERVED
+    from wildlife_scanner.core.licenses import ALL_RIGHTS_RESERVED
 
     world = SyntheticWorld(seed=4, observers=10, visits_per_observer=20)
     obs = [o.model_copy(update={"license": ALL_RIGHTS_RESERVED}) for o in world.generate()]

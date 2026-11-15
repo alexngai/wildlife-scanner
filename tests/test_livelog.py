@@ -6,11 +6,11 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 
-from wildlife_radar.pipeline import livelog
-from wildlife_radar.pipeline.runner import JOBS, JobContext, latest, run
-from wildlife_radar.regions import load_region
-from wildlife_radar.storage import ObservationStore
-from wildlife_radar.synthetic import SyntheticWorld
+from wildlife_scanner.pipeline import livelog
+from wildlife_scanner.pipeline.runner import JOBS, JobContext, latest, run
+from wildlife_scanner.regions import load_region
+from wildlife_scanner.storage import ObservationStore
+from wildlife_scanner.synthetic import SyntheticWorld
 
 NOW = datetime.now(UTC)
 

@@ -1,4 +1,4 @@
-# Wildlife-radar: environmental covariate sources (oceanographic, astronomical, weather)
+# Wildlife Scanner: environmental covariate sources (oceanographic, astronomical, weather)
 
 **How this was checked.** I verified sources with WebSearch only, and the shared 200-search budget ran out before I finished. WebFetch could not reach `api.tidesandcurrents.noaa.gov` or `mjacox.com` because those hosts are not allowed in this session's network. I stopped trying other hosts after those two failures, so I did not run live smoke tests on any endpoint. Anything marked **UNVERIFIED** comes from memory or from a single secondary source. Check those before writing code against them.
 

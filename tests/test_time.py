@@ -2,7 +2,7 @@ from datetime import UTC, date, datetime, timedelta, timezone
 
 import pytest
 
-from wildlife_radar.core.time import (
+from wildlife_scanner.core.time import (
     Granularity,
     Precision,
     TimeWindow,

@@ -7,14 +7,14 @@ from datetime import UTC, date, datetime, timedelta
 
 from test_publish import NOW, store  # noqa: F401  (fixture)
 
-from wildlife_radar.pipeline.freshness import report
-from wildlife_radar.pipeline.publish import publish_bundle
+from wildlife_scanner.pipeline.freshness import report
+from wildlife_scanner.pipeline.publish import publish_bundle
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     from fastapi.testclient import TestClient
 
-from wildlife_radar.api import create_app  # noqa: E402
+from wildlife_scanner.api import create_app  # noqa: E402
 
 
 def test_report_compares_ages_with_targets():

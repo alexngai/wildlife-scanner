@@ -18,9 +18,9 @@ a mocked S3 API. Design background: [`design/data-platform.md`](design/data-plat
 
 | Part | Command | Where |
 |---|---|---|
-| Worker | `wildlife-radar worker --region R1,R2 --db '/data/{region}.duckdb' --lake /data/lake --ingest-snapshots --every 30` | fly.io app with a volume (`deploy/fly.worker.toml`) |
+| Worker | `wildlife-scanner worker --region R1,R2 --db '/data/{region}.duckdb' --lake /data/lake --ingest-snapshots --every 30` | fly.io app with a volume (`deploy/fly.worker.toml`) |
 | Publish bucket | `region=<id>/version=<v>/{serving.duckdb, manifest.json}` and `region=<id>/CURRENT` | Cloudflare R2 |
-| API | `wildlife-radar serve --region R1,R2 --cache-dir /tmp/bundles` with `WILDLIFE_RADAR_PUBLISH_URL` set | fly.io app, auto-stop (`deploy/fly.api.toml`) |
+| API | `wildlife-scanner serve --region R1,R2 --cache-dir /tmp/bundles` with `WILDLIFE_SCANNER_PUBLISH_URL` set | fly.io app, auto-stop (`deploy/fly.api.toml`) |
 | Static products | `version=<v>/static/{index,taxa}.json`, `static/maps/…`, `static/places/…` | same bucket, served by R2's public domain / CDN |
 
 - **The worker** ticks every 30 minutes. Each tick runs only stale jobs (`Job.max_age`):
@@ -45,7 +45,7 @@ a mocked S3 API. Design background: [`design/data-platform.md`](design/data-plat
 ## Static products (for the frontend)
 
 Built by `publish` from the finished bundle, through the same query layer as the API, before
-`CURRENT` moves (`src/wildlife_radar/pipeline/static.py`):
+`CURRENT` moves (`src/wildlife_scanner/pipeline/static.py`):
 
 - `version=<v>/static/index.json`: the entry point. The frontend reads `CURRENT`, then this
   index, which lists every other file's path (relative to `region=<id>/`).
@@ -57,7 +57,7 @@ Built by `publish` from the finished bundle, through the same query layer as the
 - `static/places/<place>.<key>.json` and `static/places/<place>.<key>/wNN.json`: a place's
   header (names, groups, week paths) and one file per week of lists.
 
-The formats (currently format 3) are specified in
+The formats (currently format 4) are specified in
 [`design/static-products.md`](design/static-products.md), which the web app relies on.
 
 Maps and place lists are content-addressed, so a live publish rebuilds only the index and
@@ -71,7 +71,7 @@ paths. Everything published is already policy-filtered. `--no-static` skips them
   the **reference store** (`lake/ref`: name identities and raw iNaturalist taxon records), so a
   new region reuses what the others already resolved. Status lookups are still parsed and
   cached per region, because which statuses apply depends on the region's places.
-- **Workers on several machines:** set `WILDLIFE_RADAR_LAKE_URL` (or `--lake-url`) to a
+- **Workers on several machines:** set `WILDLIFE_SCANNER_LAKE_URL` (or `--lake-url`) to a
   **private** bucket. Each tick then copies new reference parts both ways. The parts are
   immutable and uniquely named, so workers never conflict.
 - **One API, several regions:** `serve --region a,b` opens each region's bundle on first use.
@@ -87,14 +87,14 @@ paths. Everything published is already policy-filtered. `--no-static` skips them
 
 | Variable | Used by | Value |
 |---|---|---|
-| `WILDLIFE_RADAR_PUBLISH_URL` | worker, API | `s3://<bucket>[/prefix]`, or a local folder |
+| `WILDLIFE_SCANNER_PUBLISH_URL` | worker, API | `s3://<bucket>[/prefix]`, or a local folder |
 | `AWS_ENDPOINT_URL_S3` | worker, API | `https://<account id>.r2.cloudflarestorage.com` (secret) |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | worker, API | R2 API token key pair (secrets) |
 | `AWS_REGION` | worker, API | `auto` (R2) |
-| `WILDLIFE_RADAR_CORS_ORIGINS` | API | the frontend's origin(s), comma-separated; none by default |
-| `WILDLIFE_RADAR_SOURCE_URL` | API | link to the running source (AGPL §13) |
-| `WILDLIFE_RADAR_LAKE_URL` | worker | private bucket for the shared reference store (only with several worker machines) |
-| `WILDLIFE_RADAR_USER_AGENT` | worker | operator contact for outside APIs (optional; never the owner's personal details in the repo) |
+| `WILDLIFE_SCANNER_CORS_ORIGINS` | API | the frontend's origin(s), comma-separated; none by default |
+| `WILDLIFE_SCANNER_SOURCE_URL` | API | link to the running source (AGPL §13) |
+| `WILDLIFE_SCANNER_LAKE_URL` | worker | private bucket for the shared reference store (only with several worker machines) |
+| `WILDLIFE_SCANNER_USER_AGENT` | worker | operator contact for outside APIs (optional; never the owner's personal details in the repo) |
 
 Credentials only ever go in fly secrets (`fly secrets set …`), never in `fly.toml` or the
 repository. Give the API a **read-only** R2 token and the worker a read-write one, both scoped
@@ -102,7 +102,7 @@ to the publish bucket.
 
 ## Bringing it up (when ready)
 
-1. **R2:** create a bucket (e.g. `wildlife-radar-publish`) and two API tokens scoped to it:
+1. **R2:** create a bucket (e.g. `wildlife-scanner-publish`) and two API tokens scoped to it:
    Object Read for the API, Object Read & Write for the worker.
 2. **Worker:**
    ```bash
@@ -126,17 +126,17 @@ to the publish bucket.
 The same commands work with a folder in place of the bucket:
 
 ```bash
-uv run wildlife-radar worker --region sandiego --db data/sd.duckdb --lake data/lake \
+uv run wildlife-scanner worker --region sandiego --db data/sd.duckdb --lake data/lake \
     --publish-url data/bucket --once
-WILDLIFE_RADAR_PUBLISH_URL=data/bucket uv run wildlife-radar serve --region sandiego
+WILDLIFE_SCANNER_PUBLISH_URL=data/bucket uv run wildlife-scanner serve --region sandiego
 ```
 
 The image:
 
 ```bash
-docker build -f deploy/Dockerfile -t wildlife-radar .
-docker run -p 8080:8080 -v "$PWD/data/bucket:/bucket:ro" -e WILDLIFE_RADAR_PUBLISH_URL=/bucket \
-    wildlife-radar wildlife-radar serve --region sandiego --host 0.0.0.0 --port 8080
+docker build -f deploy/Dockerfile -t wildlife-scanner .
+docker run -p 8080:8080 -v "$PWD/data/bucket:/bucket:ro" -e WILDLIFE_SCANNER_PUBLISH_URL=/bucket \
+    wildlife-scanner wildlife-scanner serve --region sandiego --host 0.0.0.0 --port 8080
 ```
 
 The image starts as root only to give `/data` (a fly volume) to the `app` user, then runs the
@@ -154,7 +154,7 @@ command as `app`.
 
 ## Not done yet
 
-- **Static products on real data** (format 3, Monterey Bay, 4,866 species):
+- **Static products on real data** (format 4, Monterey Bay, 4,866 species):
   - maps total 256 MB (50 MB gzipped), at most 166 KB per species;
   - a place page loads a 162 KB header (34 KB gzipped) and a 38 KB week (10 KB gzipped);
   - a full rebuild runs in parallel processes, and publishes between baseline rebuilds reuse
@@ -175,7 +175,7 @@ command as `app`.
 The lake's shared layers (`lake/ref`, `lake/norm`) live in a private R2 bucket, so a new
 machine restores them instead of re-downloading from GBIF.
 
-- **Address:** `r2://<account id>/<bucket>/lake` (`--lake-url` or `WILDLIFE_RADAR_LAKE_URL`).
+- **Address:** `r2://<account id>/<bucket>/lake` (`--lake-url` or `WILDLIFE_SCANNER_LAKE_URL`).
 - **Token:** a Cloudflare API token with *Account → Workers R2 Storage → Edit*, sent as a
   bearer header to `api.cloudflare.com`. In a cloud session it is a saved network secret that
   the proxy injects; elsewhere set `CLOUDFLARE_API_TOKEN`. A token limited to one bucket's
@@ -184,13 +184,13 @@ machine restores them instead of re-downloading from GBIF.
   200 MB, and `lake-sync --push` splits older, larger tiles first.
 
 ```sh
-wildlife-radar lake-sync --push            # upload new files (add --prune after splits)
-wildlife-radar lake-sync --pull            # restore everything (~5 GB for California)
-wildlife-radar lake-sync --pull --pull-prefix ref --pull-prefix norm/observations/source=live
+wildlife-scanner lake-sync --push            # upload new files (add --prune after splits)
+wildlife-scanner lake-sync --pull            # restore everything (~5 GB for California)
+wildlife-scanner lake-sync --pull --pull-prefix ref --pull-prefix norm/observations/source=live
 ```
 
 Region work stores are not synced: they are rebuilt from the tiles and the live log.
 
-After a new monthly snapshot is built, `wildlife-radar lake-prune` (add `--dry-run` to see the
+After a new monthly snapshot is built, `wildlife-scanner lake-prune` (add `--dry-run` to see the
 list) drops snapshots older than the previous one and live-log days the snapshot has
 absorbed, locally and in the bucket. This keeps the bucket at about 12–15 GB for California.

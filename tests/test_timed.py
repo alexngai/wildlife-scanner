@@ -9,11 +9,11 @@ from types import SimpleNamespace
 import duckdb
 from test_publish import NOW, store  # noqa: F401  (fixture)
 
-from wildlife_radar.conditions import timed
-from wildlife_radar.connectors.astronomy import daily_events
-from wildlife_radar.pipeline.runner import Job, JobContext, run
-from wildlife_radar.policy.statuses import TIERS_SCHEMA
-from wildlife_radar.regions import load_region
+from wildlife_scanner.conditions import timed
+from wildlife_scanner.connectors.astronomy import daily_events
+from wildlife_scanner.pipeline.runner import Job, JobContext, run
+from wildlife_scanner.policy.statuses import TIERS_SCHEMA
+from wildlife_scanner.regions import load_region
 
 LA_JOLLA = (32.867, -117.257)
 
@@ -119,8 +119,8 @@ class _FakeTides:
 
 
 def test_timed_job_scores_profiled_species(tmp_path):
-    from wildlife_radar.pipeline import runner
-    from wildlife_radar.storage import ObservationStore
+    from wildlife_scanner.pipeline import runner
+    from wildlife_scanner.storage import ObservationStore
 
     region = load_region("sandiego")
     db = tmp_path / "store.duckdb"
@@ -178,13 +178,13 @@ def test_timed_job_scores_profiled_species(tmp_path):
 def test_timing_is_published_for_open_and_generalized_taxa_only(store, tmp_path):  # noqa: F811
     import warnings
 
-    from wildlife_radar.pipeline.publish import current_bundle, publish_bundle
+    from wildlife_scanner.pipeline.publish import current_bundle, publish_bundle
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         from fastapi.testclient import TestClient
 
-    from wildlife_radar.api import create_app
+    from wildlife_scanner.api import create_app
 
     st, region = store
     st.conn.execute(timed.TIMED_SCHEMA)

@@ -1,4 +1,4 @@
-# wildlife-radar: building species profiles automatically (metadata, traits, ranges, status, taxonomy)
+# wildlife-scanner: building species profiles automatically (metadata, traits, ranges, status, taxonomy)
 
 Checked on 2026-11-11, mostly through WebSearch. Direct fetches were blocked for wikidata.org, iucnredlist.org, data-blog.gbif.org, esapubs.org, cran.r-project.org and arxiv.org. To check those primary pages directly, those hosts need to be allowed in the session's network settings. Only github.com could be fetched. Several license claims therefore rest on search snippets of the primary pages and are marked as such. **UNVERIFIED** means I could not see the primary terms. "(memory)" means it comes from prior knowledge and was not re-checked.
 

@@ -4,18 +4,18 @@ from datetime import UTC, datetime
 import h3
 import pytest
 
-from wildlife_radar.baseline import backtest_baseline, build_baseline
-from wildlife_radar.policy import ConservationStatus
-from wildlife_radar.policy.statuses import StaticStatusProvider, StatusLookup, build_tier_table
-from wildlife_radar.regions import load_region
-from wildlife_radar.storage import ObservationStore
-from wildlife_radar.synthetic import DEFAULT_SPECIES, SyntheticSpecies, SyntheticWorld
+from wildlife_scanner.baseline import backtest_baseline, build_baseline
+from wildlife_scanner.policy import ConservationStatus
+from wildlife_scanner.policy.statuses import StaticStatusProvider, StatusLookup, build_tier_table
+from wildlife_scanner.regions import load_region
+from wildlife_scanner.storage import ObservationStore
+from wildlife_scanner.synthetic import DEFAULT_SPECIES, SyntheticSpecies, SyntheticWorld
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     from fastapi.testclient import TestClient
 
-from wildlife_radar.api import create_app  # noqa: E402
+from wildlife_scanner.api import create_app  # noqa: E402
 
 SECRET = SyntheticSpecies(name="Secretus maximus", centers=((32.86, -117.25, 6.0),), base=0.3)
 LA_JOLLA = {"lat": 32.85, "lon": -117.27}

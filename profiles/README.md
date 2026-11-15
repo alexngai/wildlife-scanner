@@ -1,6 +1,6 @@
 # Species profiles
 
-Profiles are declarative YAML documents. The schema is `src/wildlife_radar/profiles/schema.py`; inheritance is resolved by `ProfileLibrary`.
+Profiles are declarative YAML documents. The schema is `src/wildlife_scanner/profiles/schema.py`; inheritance is resolved by `ProfileLibrary`.
 
 - `templates/` holds `base`, the guild templates and `groups/` (`kind: template`). The group templates (`group/birds`, `group/fishes`, ...) give generated drafts default methods until a reviewer assigns a guild.
 - `species/` holds species profiles (`kind: species`). They `extend` one or more templates and override only what differs.
@@ -23,7 +23,7 @@ All current profiles are hand-written `draft`s. They seed the framework's five d
 
 ## Generated drafts
 
-`wildlife-radar profilegen generate` writes drafts to `data/profiles/generated/` (git-ignored, because they are derived from third-party data). Each draft has:
+`wildlife-scanner profilegen generate` writes drafts to `data/profiles/generated/` (git-ignored, because they are derived from third-party data). Each draft has:
 
 - `crosswalk`: GBIF, iNaturalist (verified against iNaturalist, following renamed concepts), Wikidata, NCBI, ITIS, WoRMS, Catalogue of Life and IUCN ids.
 - `traits` with **per-field `provenance`**: source, method (import / computed / extracted / ...), confidence, license, and where to verify the value. Extracted values cite a Wikipedia revision and character range, never copied sentences.
@@ -33,11 +33,11 @@ All current profiles are hand-written `draft`s. They seed the framework's five d
 To review and promote:
 
 ```bash
-uv run wildlife-radar profilegen review puma-concolor
+uv run wildlife-scanner profilegen review puma-concolor
 ```
 
 ```bash
-uv run wildlife-radar profilegen promote puma-concolor --reviewer "Your Name" --lock traits.activity_pattern --reject traits.home_range_km2
+uv run wildlife-scanner profilegen promote puma-concolor --reviewer "Your Name" --lock traits.activity_pattern --reject traits.home_range_km2
 ```
 
 Promotion copies the draft into `species/`, marks it `reviewed` and adds the checked fields to `locked`. Regeneration never changes locked fields, and a rejected field stays absent. Promotion refuses to overwrite a hand-curated profile unless you pass `--replace-curated`.
@@ -52,4 +52,4 @@ Promotion copies the draft into `species/`, marks it `reviewed` and adds the che
   - a `note` explaining why,
   - a future `review_by` date.
 
-  See `wildlife_radar.policy.resolve`.
+  See `wildlife_scanner.policy.resolve`.

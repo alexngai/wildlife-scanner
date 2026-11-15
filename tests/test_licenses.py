@@ -1,6 +1,6 @@
 import pytest
 
-from wildlife_radar.core.licenses import (
+from wildlife_scanner.core.licenses import (
     ALL_RIGHTS_RESERVED,
     CC0,
     CC_BY,

@@ -66,7 +66,7 @@ file and readers never wait for writers. A job may still use a scratch DuckDB fi
 ```
 
 A job is **up to date** when its latest complete manifest records the current versions of all
-its inputs. `wildlife-radar run <target>` walks the dependency graph and runs only stale jobs.
+its inputs. `wildlife-scanner run <target>` walks the dependency graph and runs only stale jobs.
 A failed or interrupted job leaves no `complete` manifest, so it reruns. Long jobs checkpoint
 their progress, as re-dating does by event.
 
@@ -155,7 +155,7 @@ later: a tombstone list applied at publish.
 
 ## 8. Build order
 
-Status: steps 1 and 2 are implemented (`wildlife-radar run`, `publish`, `serve --bundle-dir`,
+Status: steps 1 and 2 are implemented (`wildlife-scanner run`, `publish`, `serve --bundle-dir`,
 the `live` job). Step 3 is implemented for the publish layer, not yet deployed
 ([`../deploy.md`](../deploy.md)): `worker` runs the graph on a tick and pushes audited versions
 to object storage, and `serve` mirrors `CURRENT` from it. Step 4 is implemented as JSON
@@ -166,7 +166,7 @@ kept per region.
 
 1. **Pipeline core:**
    - versioned outputs with manifests
-   - `wildlife-radar run <target>` with up-to-date checks
+   - `wildlife-scanner run <target>` with up-to-date checks
    - a `publish` job that writes a policy-filtered serving bundle per region (gated on the audit) and swaps `CURRENT`
    - the API serving from bundles
 

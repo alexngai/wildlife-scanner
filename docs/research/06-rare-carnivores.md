@@ -1,4 +1,4 @@
-# Rare and cryptic terrestrial carnivores (mountain lion, gray wolf): data sources, signals, ethics and estimands for wildlife-radar
+# Rare and cryptic terrestrial carnivores (mountain lion, gray wolf): data sources, signals, ethics and estimands for wildlife-scanner
 
 **How this was checked.** This session could not reach nps.gov, wildlife.ca.gov or api.inaturalist.org; direct fetches were blocked by the network allowlist. Every "current status" claim below therefore comes from web-search results, which include agency PDFs, news and law-firm summaries. Claims I could not confirm are marked **UNVERIFIED**. Claims from my own knowledge of the literature that I did not re-check here are marked *(lit., not re-verified)*.
 
@@ -8,7 +8,7 @@
   - the probability of detecting *sign* (tracks, scat) or getting a camera detection;
   - "awareness" risk context for safety.
 - **Sighting probability is a valid estimand only in managed viewing systems.** Examples are Lamar Valley, Torres del Paine, Porto Jofre and Sierra de la Culebra. These all have high density, long sightlines, low persecution (habituation), a network of human spotters, and some form of governance.
-- **Agencies publish carnivore locations coarsened and/or delayed, for conflict awareness only.** No agency publishes them to help people find the animals. Wildlife-radar needs its own species × region sensitivity policy. It should not rely on upstream obscuring: iNaturalist status for *Puma* in CA is UNVERIFIED, and Wildlife Insights fuzzes only IUCN CR/EN/VU species, which excludes both of these LC species.
+- **Agencies publish carnivore locations coarsened and/or delayed, for conflict awareness only.** No agency publishes them to help people find the animals. Wildlife Scanner needs its own species × region sensitivity policy. It should not rely on upstream obscuring: iNaturalist status for *Puma* in CA is UNVERIFIED, and Wildlife Insights fuzzes only IUCN CR/EN/VU species, which excludes both of these LC species.
 
 ## Summary table of data sources
 
@@ -68,7 +68,7 @@
 - **CDFW publishing practice.**
   - The territory map shows "approximate boundaries of known resident wolf territories… dispersing wolves are not included," updated quarterly or as warranted.
   - **Separately**, since May 15, 2025 the Wolf Tracker shows each collared wolf's last fix in a hexagon of about 4.5 mi², updated **daily**. It launched with 14 collared wolves and is meant for livestock producers ([CBD](https://biologicaldiversity.org/w/news/press-releases/new-california-wolf-map-aims-to-prevent-conflict-2025-05-15/), [WLJ](https://www.wlj.net/cdfw-releases-new-wolf-tracking-system/)).
-  - That is far finer than any responsible consumer output. Wildlife-radar should not ingest it for redistribution.
+  - That is far finer than any responsible consumer output. Wildlife Scanner should not ingest it for redistribution.
 - **Federal status.**
   - Wolves outside the Northern Rockies DPS have been endangered since the 2022 vacatur. The Northern Rockies (MT, ID, WY, eastern OR/WA) remain state-managed.
   - A House delisting bill passed in Dec 2025; I found no Senate action. An executive order on **Sept 4, 2026** directed Interior to make a final listing determination ([TWS](https://wildlife.org/gray-wolf-listing-reinstated-under-endangered-species-act/), [Bloomberg Gov](https://news.bgov.com/environment-and-energy/trumps-removal-of-wolf-protections-seen-as-ripe-for-challenges)).

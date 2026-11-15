@@ -3,8 +3,8 @@ from datetime import UTC, datetime
 import duckdb
 import h3
 
-from wildlife_radar.connectors.gbif_snapshot import SnapshotReport, snapshot_observations
-from wildlife_radar.core import (
+from wildlife_scanner.connectors.gbif_snapshot import SnapshotReport, snapshot_observations
+from wildlife_scanner.core import (
     Observation,
     Outcome,
     TaxonRef,
@@ -12,11 +12,11 @@ from wildlife_radar.core import (
     TimeWindow,
     parse_license,
 )
-from wildlife_radar.core.ids import hash_identifier
-from wildlife_radar.core.taxa import species_id_from_name, target_group
-from wildlife_radar.core.time import Precision
-from wildlife_radar.storage import ObservationStore, observation_row
-from wildlife_radar.storage.observations import COLUMNS, dedupe_key
+from wildlife_scanner.core.ids import hash_identifier
+from wildlife_scanner.core.taxa import species_id_from_name, target_group
+from wildlife_scanner.core.time import Precision
+from wildlife_scanner.storage import ObservationStore, observation_row
+from wildlife_scanner.storage.observations import COLUMNS, dedupe_key
 
 
 def make_obs(obs_id="src:1", lat=32.85, lon=-117.27, uncertainty=20.0, **kw):
@@ -102,7 +102,7 @@ def test_hash_identifier(monkeypatch):
     a = hash_identifier(["Jane Doe", "John Roe"])
     assert a == hash_identifier(["John Roe", "Jane Doe"])  # order independent
     assert hash_identifier("") is None and hash_identifier([]) is None
-    monkeypatch.setenv("WILDLIFE_RADAR_HASH_SALT", "deployment-2")
+    monkeypatch.setenv("WILDLIFE_SCANNER_HASH_SALT", "deployment-2")
     assert hash_identifier(["Jane Doe", "John Roe"]) != a
 
 
