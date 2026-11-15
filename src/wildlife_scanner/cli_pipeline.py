@@ -17,7 +17,8 @@ from wildlife_scanner.regions import load_region
 PUBLISH_URL_ENV = "WILDLIFE_SCANNER_PUBLISH_URL"
 """Object storage for published versions, e.g. ``s3://wildlife-scanner-publish``."""
 LAKE_URL_ENV = "WILDLIFE_SCANNER_LAKE_URL"
-"""Private object storage for shared lake layers (``ref``), e.g. ``r2://<account id>/<private bucket>/lake``."""
+"""Private object storage for the shared lake layers (``ref``, ``norm``), e.g.
+``r2://<account id>/<bucket>/lake``."""
 
 DEFAULT_DB = "data/wildlife-scanner.duckdb"
 
