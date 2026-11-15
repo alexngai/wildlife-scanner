@@ -1,5 +1,5 @@
 /**
- * Typed client for the wildlife-radar API. Types are generated from the API's OpenAPI schema
+ * Typed client for the Wildlife Scanner API. Types are generated from the API's OpenAPI schema
  * (`npm run gen:api`, from web/api/openapi.json). A 404 always means "not available": unknown
  * and withheld species are indistinguishable by design.
  */

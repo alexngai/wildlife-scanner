@@ -116,7 +116,7 @@ export const DEFAULT_CONFIG: AppConfig = {
           dark: env.VITE_BASEMAP_STYLE_DARK ?? env.VITE_BASEMAP_STYLE ?? DEFAULT_BASEMAP.dark,
         },
   layers: DEFAULT_LAYERS,
-  sourceUrl: env.VITE_SOURCE_URL ?? "https://github.com/alexngai/wildlife-radar",
+  sourceUrl: env.VITE_SOURCE_URL ?? "https://github.com/alexngai/wildlife-scanner",
 };
 
 function validLayer(v: unknown): v is MapLayerConfig {

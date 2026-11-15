@@ -17,6 +17,6 @@ export default defineConfig({
     command: `npx vite preview --port ${PORT} --strictPort --host 127.0.0.1`,
     url: `http://127.0.0.1:${PORT}`,
     reuseExistingServer: !process.env.CI,
-    env: { WR_BUCKET_DIR: "tests/fixtures/bucket", WR_API_URL: "http://127.0.0.1:9" },
+    env: { WS_BUCKET_DIR: "tests/fixtures/bucket", WS_API_URL: "http://127.0.0.1:9" },
   },
 });

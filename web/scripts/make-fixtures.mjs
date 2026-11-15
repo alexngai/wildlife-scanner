@@ -1,4 +1,4 @@
-// Writes a small, entirely synthetic folder bucket (format 3) and API responses for tests.
+// Writes a small, entirely synthetic folder bucket (format 4) and API responses for tests.
 // No third-party data: names, places and numbers are invented and deterministic.
 // Usage: node scripts/make-fixtures.mjs  (writes tests/fixtures/)
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
@@ -80,13 +80,11 @@ function monthSegment({ tier, months }) {
 
 // Synthetic "photos" (simple drawings, no real images) to exercise thumbnails, credits and the
 // placeholder fallback: one good, one whose file is missing, one with a licence we can't show.
-const photo = (id, license, url = `static/photos/${id}.svg`) => ({
-  url,
-  url_medium: url,
+const photo = (id, license) => ({
+  id,
+  ext: "svg",
   license,
   attribution: `(c) Synthetic Fixture, some rights reserved (${String(license).toUpperCase().replace("CC-", "CC ")})`,
-  source: "Synthetic",
-  source_url: "https://example.org/photos/" + id,
 });
 const PHOTO_SVG = (hue) =>
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="hsl(${hue} 45% 82%)"/><circle cx="32" cy="34" r="16" fill="hsl(${hue} 45% 40%)"/><circle cx="38" cy="29" r="3" fill="#fff"/></svg>`;
@@ -101,7 +99,7 @@ const species = [
     tier: 0,
     mode: "forecast",
     records: 5000,
-    photo: photo("testus-primus", "cc-by"),
+    photo: photo(1, "cc-by"),
     segments: [weekSegment({ periods: weeks, peak: 20, width: 6, max: 0.7, insufficientEvery: 9 })],
   },
   {
@@ -115,7 +113,7 @@ const species = [
     tier: 0,
     mode: "forecast",
     records: 800,
-    photo: photo("testus-secundus", "cc-by-nc", "static/photos/gone.svg"),
+    photo: photo(2, "cc-by-nc"), // its image file is missing: the fallback is tested
     segments: [
       weekSegment({ periods: weeks.filter((w) => w >= 5 && (w < 23 || w > 35)), peak: 40, width: 5, max: 0.3 }),
       monthSegment({ tier: 2, months: [6, 7, 8] }),
@@ -130,7 +128,7 @@ const species = [
     tier: 2,
     mode: "awareness",
     records: 120,
-    photo: photo("rarus-tertius", null),
+    photo: photo(3, null), // no licence we can show
     segments: [monthSegment({ tier: 2, months: weeks.slice(0, 12) })],
   },
 ];
@@ -153,7 +151,7 @@ for (const s of species) {
   const path = `static/maps/${s.id}.fixture.json`;
   maps[s.id] = path;
   write(path, {
-    format: 3,
+    format: 4,
     taxon: {
       taxon_id: s.id,
       scientific_name: s.scientific_name,
@@ -177,7 +175,7 @@ const taxaInfo = Object.fromEntries(
 );
 function placeWeek(w) {
   return {
-    format: 3,
+    format: 4,
     week: w,
     groups: {
       "birds:casual": {
@@ -202,7 +200,7 @@ for (const [id, p] of Object.entries(places)) {
   const weekPath = (w) => `static/places/${id}.fixture/w${String(w).padStart(2, "0")}.json`;
   for (const w of weeks) write(weekPath(w), placeWeek(w));
   write(file, {
-    format: 3,
+    format: 4,
     place: { place_id: id, name: p.name, kind: p.kind, notes: "A synthetic place for tests." },
     year_basis: 2026,
     p_scale: P_SCALE,
@@ -230,8 +228,10 @@ for (const [id, p] of Object.entries(places)) {
   });
 }
 
-write("static/photos/testus-primus.svg", PHOTO_SVG(140));
-write("static/photos/rarus-tertius.svg", PHOTO_SVG(30));
+for (const size of ["square", "small"]) {
+  write(`static/photos/1-${size}.svg`, PHOTO_SVG(140));
+  write(`static/photos/3-${size}.svg`, PHOTO_SVG(30));
+}
 
 // The regional season as published: 0-9 per ISO week relative to the species' peak, from the
 // weekly segments' region_p; null for weeks in no weekly segment (withheld or monthly).
@@ -247,7 +247,7 @@ function season(sp) {
 
 write("CURRENT", `${VERSION}\n`);
 write(`version=${VERSION}/static/index.json`, {
-  format: 3,
+  format: 4,
   region: { id: REGION, name: "Testland", bbox: [-122.2, 36.3, -121.6, 36.9] },
   version: VERSION,
   baseline: { model_version: "baseline-test", built_at: "2026-01-01T00:00:00+00:00" },
@@ -256,6 +256,13 @@ write(`version=${VERSION}/static/index.json`, {
   p_scale: P_SCALE,
   paths_relative_to: `region=${REGION}/`,
   taxa: `version=${VERSION}/static/taxa.json`,
+  // Photo URL templates (format 4); a bucket-relative image path here, iNaturalist's open data in real builds.
+  photos: {
+    image: "static/photos/{id}-{size}.{ext}",
+    page: "https://example.org/photos/{id}",
+    sizes: { thumb: "square", medium: "small" },
+    source: "Synthetic",
+  },
   places: placeFiles,
 });
 write(

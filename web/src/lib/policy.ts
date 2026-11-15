@@ -20,7 +20,7 @@ export function isAwareness(mode: TaxonMode | undefined, tier: number | undefine
 
 /**
  * Minimum delay before recent sightings are published, per policy tier (mirrors
- * src/wildlife_radar/policy/tiers.py; see web/NEEDS.md about publishing these in index.json).
+ * src/wildlife_scanner/policy/tiers.py; see web/NEEDS.md about publishing these in index.json).
  */
 export const TIER_DELAY: Record<number, string> = {
   0: "24 hours",

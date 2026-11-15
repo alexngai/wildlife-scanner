@@ -4,7 +4,7 @@ import { useServices } from "./context";
 import { useAsync } from "./lib/useAsync";
 import type { RegionInfo, StaticIndex } from "./products/types";
 
-const LAST_REGION = "wildlife-radar:region";
+const LAST_REGION = "wildlife-scanner:region";
 
 export function rememberRegion(id: string): void {
   try {
@@ -66,17 +66,19 @@ export function useTaxa(region: string) {
   return useAsync(() => products.taxa(region), [products, region]);
 }
 
-/** Usable photos by taxon id, from the region's taxa.json (empty until it loads). */
+/** Usable photos by taxon id, from taxa.json and the index's URL templates (empty until both load). */
 export function usePhotos(region: string): Map<string, ShownPhoto> {
   const { products } = useServices();
   const taxa = useTaxa(region);
+  const index = useRegionIndex(region);
   return useMemo(() => {
     const out = new Map<string, ShownPhoto>();
-    if (taxa?.status !== "ok") return out;
+    if (taxa?.status !== "ok" || index?.status !== "ok") return out;
+    const templates = index.data.photos;
     for (const t of taxa.data) {
-      const p = usablePhoto(t.photo, (path) => products.assetUrl(region, path));
+      const p = usablePhoto(t.photo, templates, (path) => products.assetUrl(region, path));
       if (p) out.set(t.id, p);
     }
     return out;
-  }, [taxa, products, region]);
+  }, [taxa, index, products, region]);
 }

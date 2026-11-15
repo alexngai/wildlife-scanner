@@ -3,7 +3,7 @@
  * format; these types mirror it. Everything here is already policy-filtered upstream.
  */
 
-export const SUPPORTED_FORMAT = 3;
+export const SUPPORTED_FORMAT = 4;
 
 /** h(igh), m(edium), l(ow), i(nsufficient), - (none). */
 export type ConfidenceCode = "h" | "m" | "l" | "i" | "-";
@@ -42,26 +42,33 @@ export interface StaticIndex {
   paths_relative_to?: string;
   taxa: string;
   places: Record<string, PlaceRef>;
+  /** How to build photo URLs; absent when the region publishes no photos. */
+  photos?: PhotoTemplates | null;
 }
 
 export type TaxonMode = "forecast" | "awareness";
 
 /**
- * A representative photo for a taxon, chosen when the data is published (NEEDS.md §15).
- * Only openly licensed photos are published; the credit must be shown with the image.
+ * A representative photo for a taxon (format 4): an openly licensed iNaturalist photo, by id.
+ * Its URLs are built from the index's `photos` templates; the credit must be shown with it.
  */
 export interface TaxonPhoto {
-  /** Small square thumbnail: an absolute https URL, or a path relative to the region root. */
-  url: string;
-  /** A larger version (about 500 px), same rules as `url`. */
-  url_medium?: string | null;
+  id: number;
+  /** As the source stores it ("jpg", "jpeg", "JPG", "png", …); empty for some old uploads. */
+  ext: string;
   /** Licence code, e.g. "cc0", "cc-by", "cc-by-sa", "cc-by-nc", "cc-by-nc-sa". */
   license: string;
   /** Credit as the source gives it, e.g. "(c) Jane Doe, some rights reserved (CC BY)". */
   attribution: string;
-  /** The photo's page at its source (e.g. iNaturalist). */
-  source_url?: string | null;
-  /** Where it comes from, e.g. "iNaturalist". */
+}
+
+/** URL templates for photos, in index.json: `{id}`, `{size}` and `{ext}` are filled in. */
+export interface PhotoTemplates {
+  /** e.g. "https://inaturalist-open-data.s3.amazonaws.com/photos/{id}/{size}.{ext}" */
+  image: string;
+  /** The photo's page at its source, e.g. "https://www.inaturalist.org/photos/{id}". */
+  page?: string | null;
+  sizes: { thumb: string; medium: string };
   source?: string | null;
 }
 

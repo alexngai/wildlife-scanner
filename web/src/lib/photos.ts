@@ -1,8 +1,9 @@
 /**
  * Species photos: only openly licensed ones are shown, always with their credit. Photos are
- * chosen when the data is published (NEEDS.md §15); the app re-checks the licence and URL.
+ * chosen when the data is published; taxa.json carries each one's id, extension, licence and
+ * credit, and index.json the URL templates (static format 4). The app re-checks every part.
  */
-import type { TaxonPhoto } from "../products/types";
+import type { PhotoTemplates, TaxonPhoto } from "../products/types";
 
 /** Licences we can show here (a non-commercial site). No "all rights reserved", no ND. */
 const LICENSES: Record<string, { label: string; url: string | null }> = {
@@ -23,26 +24,44 @@ export interface ShownPhoto {
   source: string | null;
 }
 
-/** The photo as it can be shown, or null when its licence or URL isn't acceptable. */
+/** Only these go into a URL: a numeric id, a short alphanumeric extension (possibly empty), a size word. */
+const ID = /^\d{1,15}$/;
+const EXT = /^[A-Za-z0-9]{0,8}$/;
+const SIZE = /^[A-Za-z0-9_-]{1,20}$/;
+
+function fill(template: string, values: Record<string, string>): string {
+  return template.replace(/\{(id|size|ext)\}/g, (_, k: string) => values[k] ?? "");
+}
+
+/**
+ * The photo as it can be shown, or null when its licence, id or templates aren't acceptable.
+ * `resolve` turns a filled template into a URL (https as is, or a bucket-relative path).
+ */
 export function usablePhoto(
   photo: TaxonPhoto | null | undefined,
+  templates: PhotoTemplates | null | undefined,
   resolve: (path: string) => string | null,
 ): ShownPhoto | null {
-  if (!photo || typeof photo.url !== "string" || typeof photo.attribution !== "string") return null;
+  if (!photo || !templates || typeof templates.image !== "string") return null;
   const lic = LICENSES[String(photo.license).toLowerCase()];
-  if (!lic || !photo.attribution.trim()) return null;
-  const thumb = resolve(photo.url);
+  if (!lic || typeof photo.attribution !== "string" || !photo.attribution.trim()) return null;
+  const id = String(photo.id);
+  const ext = typeof photo.ext === "string" ? photo.ext : "";
+  const { thumb: thumbSize, medium: mediumSize } = templates.sizes ?? {};
+  if (!ID.test(id) || !EXT.test(ext) || !SIZE.test(String(thumbSize)) || !SIZE.test(String(mediumSize))) return null;
+  // `ext` is used exactly as published: some old uploads have none (their URL ends in "square.").
+  const thumb = resolve(fill(templates.image, { id, size: String(thumbSize), ext }));
   if (!thumb) return null;
-  const large = (photo.url_medium && resolve(photo.url_medium)) || thumb;
-  const sourceUrl = photo.source_url && /^https:\/\//i.test(photo.source_url) ? photo.source_url : null;
+  const large = resolve(fill(templates.image, { id, size: String(mediumSize), ext })) ?? thumb;
+  const page = templates.page ? fill(templates.page, { id, size: "", ext }) : null;
   return {
     thumb,
     large,
     attribution: photo.attribution.trim(),
     license: lic.label,
     licenseUrl: lic.url,
-    sourceUrl,
-    source: photo.source ?? null,
+    sourceUrl: page && /^https:\/\//i.test(page) ? page : null,
+    source: templates.source ?? null,
   };
 }
 

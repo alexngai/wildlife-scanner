@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 
 export type ThemeChoice = "system" | "light" | "dark";
-const KEY = "wildlife-radar:theme";
+const KEY = "wildlife-scanner:theme";
 
 export function storedTheme(): ThemeChoice {
   try {

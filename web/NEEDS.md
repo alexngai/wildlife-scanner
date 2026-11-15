@@ -5,7 +5,8 @@ app would like, each with the reason. Newest at the bottom; the data session dec
 
 **Status (2026-11-14):** §9–15 are done in static format 3 and the API (data branch 92e394f,
 contract in `docs/design/static-products.md`), and the app uses them. §14's failure is fixed
-there (f3e15a2).
+there (f3e15a2). Format 4 (24f8aff) then moved photos to an id plus URL templates in the
+index, to shrink `taxa.json`; the app reads that.
 
 ## 1. Awareness-mode species: numbers are still published (policy)
 
@@ -45,7 +46,7 @@ are public, so anyone can read them.
 
 ## 4. Bug: `push-publish` with a relative `--publish-url`
 
-`wildlife-radar push-publish --publish-url data/bucket` uploads the files, then fails when
+`wildlife-scanner push-publish --publish-url data/bucket` uploads the files, then fails when
 pruning:
 
 ```
@@ -65,7 +66,7 @@ cover them. They're hand-typed in `web/src/api/client.ts` for now.
 
 ## 6. A richer demo for local development
 
-**What:** have `wildlife-radar demo` (or a `demo --full`) also produce:
+**What:** have `wildlife-scanner demo` (or a `demo --full`) also produce:
 - a gated Level-1 condition model with drivers;
 - a timed index (hourly forecast and `/timing`);
 - some live-source recent records (`/nearby/recent`, `picking_up`);

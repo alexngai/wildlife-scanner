@@ -4,7 +4,7 @@
  */
 import { useCallback, useSyncExternalStore } from "react";
 
-const KEY = "wildlife-radar:life-list:v1";
+const KEY = "wildlife-scanner:life-list:v1";
 const listeners = new Set<() => void>();
 let snapshot: ReadonlySet<string> | null = null;
 

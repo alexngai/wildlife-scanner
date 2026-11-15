@@ -7,11 +7,11 @@ import react from "@vitejs/plugin-react";
 
 /**
  * Serve a local "folder bucket" (see docs/deploy.md) at /data, the way the CDN will serve it.
- * WR_BUCKET_DIR picks the folder: the repo's data/bucket by default, or the synthetic test
+ * WS_BUCKET_DIR picks the folder: the repo's data/bucket by default, or the synthetic test
  * fixtures (tests/fixtures/bucket) for e2e runs.
  */
 function folderBucket(): Plugin {
-  const root = resolve(process.env.WR_BUCKET_DIR ?? resolve(import.meta.dirname, "../data/bucket"));
+  const root = resolve(process.env.WS_BUCKET_DIR ?? resolve(import.meta.dirname, "../data/bucket"));
   const handler: Connect.NextHandleFunction = (req, res, next) => {
     const url = decodeURIComponent((req.url ?? "/").split("?")[0] ?? "/");
     const file = normalize(resolve(root, "." + url));
@@ -35,7 +35,7 @@ function folderBucket(): Plugin {
     void next;
   };
   return {
-    name: "wildlife-radar-folder-bucket",
+    name: "wildlife-scanner-folder-bucket",
     configureServer(server) {
       server.middlewares.use("/data", handler);
     },
@@ -45,7 +45,7 @@ function folderBucket(): Plugin {
   };
 }
 
-const apiTarget = process.env.WR_API_URL ?? "http://127.0.0.1:8000";
+const apiTarget = process.env.WS_API_URL ?? "http://127.0.0.1:8000";
 const proxy = {
   "/api": { target: apiTarget, changeOrigin: true, rewrite: (p: string) => p.replace(/^\/api/, "") },
 };

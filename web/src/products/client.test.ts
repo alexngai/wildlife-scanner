@@ -28,7 +28,7 @@ describe("StaticClient", () => {
   });
 
   it("refuses formats it doesn't know (older or newer)", async () => {
-    for (const format of [2, 4]) {
+    for (const format of [3, 5]) {
       const fetcher = (async (u: string) =>
         u.endsWith("CURRENT")
           ? new Response("v1")

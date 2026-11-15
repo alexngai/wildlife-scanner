@@ -15,7 +15,7 @@ export interface LayerChoice {
   dataOpacity: number;
 }
 
-const KEY = "wildlife-radar:map-layers:v1";
+const KEY = "wildlife-scanner:map-layers:v1";
 export const DEFAULT_CHOICE: LayerChoice = { base: "map", overlays: [], dataOpacity: 1 };
 
 const listeners = new Set<() => void>();

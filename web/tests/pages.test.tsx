@@ -37,7 +37,7 @@ describe("species page", () => {
     expect(screen.getByRole("img", { name: /Seasonal calendar/ })).toBeInTheDocument();
     expect(screen.getByText(/Non-commercial use only/)).toBeInTheDocument();
     expect(screen.getByText(/published after at least 24 hours/)).toBeInTheDocument();
-    expect(document.title).toBe("Common Testbird · wildlife-radar");
+    expect(document.title).toBe("Common Testbird · Wildlife Scanner");
   });
 
   it("shows awareness species without any numbers or calendar", async () => {
@@ -120,6 +120,19 @@ describe("species page", () => {
     expect(calls[0]).toContain("/forecast/map?region=testland");
   });
 
+  it("shows the species photo with its credit, and a placeholder when the image fails", async () => {
+    renderApp("/r/testland/species/testus-primus?week=20");
+    const img = await screen.findByRole("img", { name: "Common Testbird" });
+    expect(img).toHaveAttribute("src", "/data/region=testland/static/photos/1-small.svg");
+    expect(img).toHaveAttribute("referrerpolicy", "no-referrer");
+    expect(screen.getByText(/Synthetic Fixture/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "CC BY" })).toHaveAttribute("rel", "license noreferrer");
+    expect(screen.getByRole("link", { name: "Synthetic" })).toHaveAttribute("href", "https://example.org/photos/1");
+    fireEvent.error(img);
+    expect(screen.queryByRole("img", { name: "Common Testbird" })).toBeNull();
+    expect(screen.queryByText(/Synthetic Fixture/)).toBeNull();
+  });
+
   it("explains when the API isn't configured", async () => {
     renderApp("/r/testland/species/testus-primus?place=test-cove", { config: { apiBase: "" } });
     expect(await screen.findByText(/Daily forecasts come from the live service/)).toBeInTheDocument();
@@ -154,7 +167,7 @@ describe("place page", () => {
     const list = document.querySelector(".item-list") as HTMLElement;
     expect(within(list).getByRole("link", { name: "Common Testbird" })).toBeInTheDocument();
     await user.click(within(list).getByRole("button", { name: "Seen Common Testbird", pressed: false }));
-    expect(JSON.parse(localStorage.getItem("wildlife-radar:life-list:v1")!)).toEqual(["testus-primus"]);
+    expect(JSON.parse(localStorage.getItem("wildlife-scanner:life-list:v1")!)).toEqual(["testus-primus"]);
     expect(screen.getByText(/You've seen everything on these lists/)).toBeInTheDocument();
     expect(requested.join()).not.toContain("testus-primus,"); // life list never sent
   });
