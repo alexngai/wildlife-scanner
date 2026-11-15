@@ -94,6 +94,7 @@ paths. Everything published is already policy-filtered. `--no-static` skips them
 | `WILDLIFE_SCANNER_CORS_ORIGINS` | API | the frontend's origin(s), comma-separated; none by default |
 | `WILDLIFE_SCANNER_SOURCE_URL` | API | link to the running source (AGPL §13) |
 | `WILDLIFE_SCANNER_LAKE_URL` | worker | private bucket for the shared reference store (only with several worker machines) |
+| `WILDLIFE_SCANNER_APP_COMPAT_URL` | worker, `push-publish` | the live app's `compat.json`; a version whose static format the app doesn't list isn't published |
 | `WILDLIFE_SCANNER_USER_AGENT` | worker | operator contact for outside APIs (optional; never the owner's personal details in the repo) |
 
 Credentials only ever go in fly secrets (`fly secrets set …`), never in `fly.toml` or the
@@ -102,24 +103,98 @@ to the publish bucket.
 
 ## Bringing it up (when ready)
 
-1. **R2:** create a bucket (e.g. `wildlife-scanner-publish`) and two API tokens scoped to it:
-   Object Read for the API, Object Read & Write for the worker.
-2. **Worker:**
-   ```bash
-   fly apps create <worker app>
-   fly volumes create worker_data --app <worker app> --region lax --size 40
-   fly secrets set --app <worker app> AWS_ACCESS_KEY_ID=… AWS_SECRET_ACCESS_KEY=… AWS_ENDPOINT_URL_S3=…
-   fly deploy --config deploy/fly.worker.toml --dockerfile deploy/Dockerfile --app <worker app>
-   ```
-   The first tick ingests the newest GBIF snapshot and builds everything: about 1.5 h for San
-   Diego. Later ticks take minutes.
-3. **API:**
-   ```bash
-   fly apps create <api app>
-   fly secrets set --app <api app> AWS_ACCESS_KEY_ID=… AWS_SECRET_ACCESS_KEY=… AWS_ENDPOINT_URL_S3=…
-   fly deploy --config deploy/fly.api.toml --dockerfile deploy/Dockerfile --app <api app>
-   ```
-4. Check `https://<api app>.fly.dev/health`: it names the bundle version it serves.
+Addresses: the app at `https://wildlifescanner.com` (Cloudflare Pages), the static products at
+`https://data.wildlifescanner.com` (the publish bucket's custom domain) and the API at
+`https://api.wildlifescanner.com` (fly.io). The Cloudflare zone, the publish bucket's public
+domain and CORS, and Pages are in the web app's guide, [`web/DEPLOY.md`](../web/DEPLOY.md),
+which is the overall checklist and links back here. This section covers the R2 tokens, the
+worker, the API and the first data.
+
+Deploy the app (with its `compat.json`) before the worker's first publish: the worker only
+publishes a static format the live app lists, so until the app is up, its pushes wait and
+retry each tick.
+
+### 1. Buckets and R2 tokens
+
+Two buckets:
+
+| Bucket | Access | Holds |
+|---|---|---|
+| `wildlife-scanner-publish` | public read through `data.wildlifescanner.com` | published versions and static files |
+| `wildlife-scanner-lake` | private | coverage tiles, live log, reference store (already filled) |
+
+Create two tokens in the Cloudflare dashboard under **R2 → Manage API tokens → Create API
+token**. Each gives an Access Key ID and a Secret Access Key, shown once:
+
+- **worker:** permission *Object Read & Write*, applied to both buckets;
+- **api:** permission *Object Read*, applied to `wildlife-scanner-publish` only.
+
+The S3 endpoint for both is `https://<account id>.r2.cloudflarestorage.com` (on the R2 overview
+page). Keep the values for the fly secrets below; they never go in a file or the repository.
+
+### 2. Worker
+
+```bash
+fly apps create wildlife-scanner-worker
+fly volumes create worker_data --app wildlife-scanner-worker --region lax --size 50
+fly secrets set --app wildlife-scanner-worker \
+    AWS_ACCESS_KEY_ID=<worker key id> AWS_SECRET_ACCESS_KEY=<worker secret> \
+    AWS_ENDPOINT_URL_S3=https://<account id>.r2.cloudflarestorage.com
+fly deploy --config deploy/fly.worker.toml --dockerfile deploy/Dockerfile
+fly logs --app wildlife-scanner-worker
+```
+
+The first tick:
+
+1. pulls the reference store, the live log and the California tiles (about 5 GB) from the lake
+   bucket, instead of a 180 GB pass over GBIF;
+2. builds San Diego, then Monterey Bay (1–2 hours each);
+3. publishes each, if the tier audit passes and the app lists the format.
+
+Later ticks take minutes. The last tick's summary is in
+`/data/lake/worker/region=<id>.json` (`fly ssh console`). The worker also prunes old snapshots
+and live-log days after each tick.
+
+If a push fails with "the app … reads [...]", the app hasn't been deployed with that format
+yet: deploy the app first; the next tick retries.
+
+### 3. API
+
+```bash
+fly apps create wildlife-scanner-api
+fly secrets set --app wildlife-scanner-api \
+    AWS_ACCESS_KEY_ID=<api key id> AWS_SECRET_ACCESS_KEY=<api secret> \
+    AWS_ENDPOINT_URL_S3=https://<account id>.r2.cloudflarestorage.com
+fly deploy --config deploy/fly.api.toml --dockerfile deploy/Dockerfile
+fly certs add api.wildlifescanner.com --app wildlife-scanner-api
+```
+
+`fly certs add` prints the DNS records to create in Cloudflare (a CNAME to
+`wildlife-scanner-api.fly.dev`, set to **DNS only**, not proxied, so fly can issue the
+certificate). `fly certs show api.wildlifescanner.com` reports when it's ready.
+
+Until the worker's first publish, the API answers 503 for each region; the app shows that as
+"no data yet".
+
+### 4. First data
+
+Either wait for the worker's first tick (above), or seed the bucket with versions that are
+already built and audited:
+
+```bash
+wildlife-scanner push-publish --region montereybay --lake data/lake --publish-url s3://wildlife-scanner-publish
+wildlife-scanner push-publish --region sandiego --lake data/lake --publish-url s3://wildlife-scanner-publish
+```
+
+The worker takes over from there: its own versions replace the seeded ones at its first
+publish.
+
+### 5. Checks
+
+- `https://api.wildlifescanner.com/health` names each region's bundle version and data
+  freshness.
+- `https://data.wildlifescanner.com/region=sandiego/CURRENT` names the same version.
+- The app's species and place pages load, with no CORS errors in the browser console.
 
 ## Running it locally
 

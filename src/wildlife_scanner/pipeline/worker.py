@@ -12,19 +12,34 @@ The worker owns the region's work store (one DuckDB writer); the API never touch
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
 
 from wildlife_scanner.core.time import utcnow
+from wildlife_scanner.pipeline import retention
 from wildlife_scanner.pipeline.runner import Job, JobContext, run
-from wildlife_scanner.pipeline.sync import KEEP_VERSIONS, prune_local, push_publish, sync_lake
+from wildlife_scanner.pipeline.sync import (
+    APP_COMPAT_ENV,
+    KEEP_VERSIONS,
+    prune_local,
+    push_publish,
+    sync_lake,
+)
 from wildlife_scanner.storage.objects import ObjectStore
 
 LAKE_PULL = ("ref", "norm/observations/source=live")
 """What a tick pulls before running: the reference store and the live log (small). Snapshot
 tiles are pulled on demand with ``lake-sync --pull`` (gigabytes)."""
+
+
+def _has_snapshot(lake: Path, coverage_id: str) -> bool:
+    from wildlife_scanner.pipeline import coverage
+
+    root = lake / "norm" / "observations" / "source=gbif"
+    return any(root.glob(f"snapshot=*/coverage={coverage_id}/{coverage.SUCCESS}"))
 
 
 def failed(results: list[dict]) -> list[str]:
@@ -49,8 +64,12 @@ def tick(
     ref_sync: dict = {}
     if lake_store is not None:
         try:  # identities, raw records and live-log parts other workers wrote
+            prefixes = LAKE_PULL
+            if ctx.region.coverage and not _has_snapshot(ctx.lake, ctx.region.coverage):
+                # A fresh machine: the coverage tiles (GBs) instead of a 180 GB GBIF pass.
+                prefixes = (*LAKE_PULL, "norm/observations/source=gbif")
             ref_sync["before"] = sync_lake(
-                lake_store, ctx.lake, push=False, pull=True, pull_prefixes=LAKE_PULL
+                lake_store, ctx.lake, push=False, pull=True, pull_prefixes=prefixes
             )
         except Exception as exc:
             ref_sync["error"] = f"{type(exc).__name__}: {exc}"
@@ -58,6 +77,10 @@ def tick(
     if lake_store is not None:
         try:
             ref_sync["after"] = sync_lake(lake_store, ctx.lake, push=True)
+            # Old snapshots and absorbed live-log days, here and in the bucket (usually none).
+            pruned = retention.prune(ctx.lake, utcnow(), store=lake_store)
+            if pruned["snapshots"] or pruned["live_days"]:
+                ref_sync["pruned"] = pruned
         except Exception as exc:
             ref_sync["error"] = f"{type(exc).__name__}: {exc}"
     out: dict = {
@@ -69,7 +92,9 @@ def tick(
     publish_root = ctx.lake / "publish"
     if store is not None and (publish_root / f"region={ctx.region.id}").exists():
         try:
-            out["push"] = push_publish(publish_root, store, ctx.region.id, keep)
+            out["push"] = push_publish(
+                publish_root, store, ctx.region.id, keep, compat_url=os.environ.get(APP_COMPAT_ENV)
+            )
         except Exception as exc:  # network errors: retry next tick
             out["push_error"] = f"{type(exc).__name__}: {exc}"
     out["pruned_local"] = prune_local(publish_root, ctx.region.id, keep)

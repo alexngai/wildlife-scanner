@@ -23,6 +23,16 @@ What the frontend reads from the CDN. Everything here is already policy-filtered
 are absent, sensitive taxa appear only at their tier's resolution and time granularity, and
 there are no individual records. Built by `publish` (`src/wildlife_scanner/pipeline/static.py`).
 
+## Changing the format
+
+The live app says which formats it reads at `https://wildlifescanner.com/compat.json`
+(`{"formats": [4]}`). A publish never moves `CURRENT` to a version whose format isn't listed
+(`WILDLIFE_SCANNER_APP_COMPAT_URL`; the check fails closed). A breaking change therefore goes:
+
+1. ship an app that reads both N and N+1;
+2. publish N+1;
+3. later, drop N from the app.
+
 ## Finding the files
 
 ```
