@@ -81,7 +81,7 @@ Cloudflare; hook them up later), with the housekeeping quick fixes; then a secon
 
    The owner has fly.io and Cloudflare accounts. **Hosting is deferred** until the app is more
    mature: no fly.io or Cloudflare resources and no credential requests.
-   - **Done locally** ([`deploy.md`](deploy.md)): an object-store layer (folder or S3/R2),
+   - **Done locally** ([`deploy.md`](../../docs/deploy.md)): an object-store layer (folder or S3/R2),
      `worker` (scheduled ticks, audit-gated push, pruning), `push-publish`,
      `serve --bundle-url` (mirrors `CURRENT`), opt-in CORS, `deploy/Dockerfile` (builds and
      serves a bundle from a folder bucket, checked end to end), fly configs for the API and
