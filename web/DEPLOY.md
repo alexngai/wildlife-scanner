@@ -6,7 +6,7 @@ any coding session.
 
 | Address | What | Where |
 |---|---|---|
-| `https://wildlifescanner.com` | the web app (`www.` redirects here) | Cloudflare Pages |
+| `https://wildlifescanner.com` | the web app (`www.` redirects here) | Cloudflare Workers (static assets) |
 | `https://data.wildlifescanner.com` | the published data (static products) | Cloudflare R2, public custom domain |
 | `https://api.wildlifescanner.com` | the API (forecasts, recent sightings) | fly.io, auto-stopping |
 | (private) | the worker that rebuilds and publishes the data | fly.io, with a volume |
@@ -18,7 +18,7 @@ says it reads.
 
 ## 1. Put the domain on Cloudflare
 
-R2 custom domains and Pages custom domains need the domain's DNS on Cloudflare.
+R2 and Worker custom domains need the domain's DNS on Cloudflare.
 
 1. Cloudflare dashboard → **Add a domain** → `wildlifescanner.com` → the **Free** plan.
 2. If the domain is registered elsewhere, change its nameservers at your registrar to the two
@@ -59,40 +59,49 @@ one.
    [`docs/deploy.md`](../docs/deploy.md) → *Bringing it up* → **1. Buckets and R2 tokens**. Paste
    them only into fly.io secrets, never into the repository or a chat.
 
-## 3. The web app (Pages): goes live first
+## 3. The web app (a Worker with static assets): goes live first
 
 The worker only publishes a data format that the live app lists at
 `https://wildlifescanner.com/compat.json`, and it refuses to publish if it can't reach that
 address. So the app goes up **before** the first data. Until then it shows the region as "not
 available".
 
-1. **Workers & Pages → Create → Pages → Connect to Git**, and pick `alexngai/wildlife-scanner`.
-2. Build settings:
+Cloudflare serves the app as a **Worker with static assets**, set up in
+[`wrangler.jsonc`](wrangler.jsonc). The Worker is called `wildlife-scanner`, and deep links get
+the app's `index.html`. Cloudflare now offers Workers for this instead of Pages.
+
+1. **Workers & Pages → Create application → Import a repository** (Workers Builds), and pick
+   `alexngai/wildlife-scanner`.
+2. Name the Worker **`wildlife-scanner`**: it must match `name` in `wrangler.jsonc`.
+3. Build settings:
 
    | Setting | Value |
    |---|---|
    | Production branch | `main` |
-   | Framework preset | *None* |
-   | Root directory | `web` |
+   | Root directory (path) | `web` |
    | Build command | `npm ci && npm run build:production` |
-   | Build output directory | `dist` |
-   | Environment variable | `NODE_VERSION` = `22` |
+   | Deploy command | `npx wrangler deploy` |
+   | Non-production branch deploy command | `npx wrangler versions upload` |
+   | Build variable | `NODE_VERSION` = `22` |
 
    `build:production` builds the app and writes
    [`deploy/config.production.json`](deploy/config.production.json) as the site's
-   `/config.json`. That file points at the three addresses above.
-3. **Save and Deploy.** The first build takes a few minutes.
-4. Project → **Custom domains → Set up a custom domain**: `wildlifescanner.com`, then again
-   for `www.wildlifescanner.com`.
-5. Send `www` to the main address: **Rules → Redirect Rules → Create rule**:
+   `/config.json`, which points at the three addresses above. `wrangler` is a pinned dev
+   dependency, so `npx wrangler` uses that version.
+4. **Save and Deploy.** The first build takes a few minutes. The app is then live at
+   `wildlife-scanner.<your subdomain>.workers.dev`.
+5. Worker → **Settings → Domains & Routes → Add → Custom domain**: `wildlifescanner.com`, then
+   again for `www.wildlifescanner.com`. Cloudflare creates the DNS records and certificates.
+6. Send `www` to the main address: **Rules → Redirect Rules → Create rule**:
    - when *Hostname equals* `www.wildlifescanner.com`;
    - redirect *Dynamic* to `concat("https://wildlifescanner.com", http.request.uri.path)`;
    - status **301**, with *Preserve query string* on.
-6. Check that `https://wildlifescanner.com/compat.json` shows `{"formats":[4],"current":4}`.
+7. Check that `https://wildlifescanner.com/compat.json` shows `{"formats":[4],"current":4}`.
 
-Preview deployments (one per branch or pull request, at `*.pages.dev`) use the same production
-data and API. Those reject the preview addresses (CORS), so previews show the app but no data.
-That's expected; production is unaffected.
+`public/_headers` (the security headers and caching) applies to Workers static assets as it
+did to Pages; I checked it with `wrangler dev`. Non-production branches upload preview
+versions. Those use the production data and API, which reject the preview addresses (CORS), so
+previews show the app but no data. That's expected; production is unaffected.
 
 ## 4. The worker, the API and the first data
 

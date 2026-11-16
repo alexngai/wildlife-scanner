@@ -1,0 +1,13 @@
+// Cloudflare Workers (static assets): how wildlifescanner.com is served.
+// Workers Builds runs `npm ci && npm run build:production` in web/, then `npx wrangler deploy`.
+// The Worker name must match the one created in the Cloudflare dashboard.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "wildlife-scanner",
+  "compatibility_date": "2026-10-15",
+  "assets": {
+    "directory": "./dist",
+    // Deep links (/r/montereybay/species/…) get index.html; the app routes them.
+    "not_found_handling": "single-page-application"
+  }
+}
