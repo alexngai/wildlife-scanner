@@ -4,7 +4,7 @@ The browser front end: React + Vite + TypeScript (strict), MapLibre GL for maps,
 drawn with `h3-js`. It reads the **static products** (format 4,
 [`docs/design/static-products.md`](../docs/design/static-products.md)) and, when configured,
 the **API** (daily forecasts, hourly timing, recent activity). It builds to a static site for
-Cloudflare Pages. AGPL-3.0, like the rest of the repository.
+Cloudflare (a Worker with static assets). AGPL-3.0, like the rest of the repository.
 
 ## Pages
 
@@ -145,11 +145,11 @@ species and numbers. It covers:
 Build-time defaults are also available: `VITE_STATIC_BASE`, `VITE_API_BASE`,
 `VITE_REGIONS`, `VITE_BASEMAP_STYLE`, `VITE_BASEMAP_STYLE_DARK` and `VITE_SOURCE_URL`.
 
-**Hosting:** the step-by-step setup for wildlifescanner.com (Cloudflare Pages, the R2 data bucket,
-fly.io API and worker, DNS) is in [DEPLOY.md](DEPLOY.md). Pages runs `npm ci && npm run build:production`
-in `web/`, which also writes `deploy/config.production.json` as the site's `/config.json`.
-`public/_redirects` gives SPA routing, and `public/_headers` sets security headers (a
-Content-Security-Policy) and caching.
+**Hosting:** the step-by-step setup for wildlifescanner.com (a Cloudflare Worker with static assets, the R2
+data bucket, fly.io API and worker, DNS) is in [DEPLOY.md](DEPLOY.md). Workers Builds runs
+`npm ci && npm run build:production` in `web/`, which also writes `deploy/config.production.json` as the
+site's `/config.json`, then `npx wrangler deploy` ([wrangler.jsonc](wrangler.jsonc): single-page-application
+routing for deep links). `public/_headers` sets the security headers (a Content-Security-Policy) and caching.
 
 **Data formats:** the app reads the formats in `src/products/formats.ts`, each through an adapter, and
 publishes the list at `/compat.json` so the publisher can check it before a format change (see
